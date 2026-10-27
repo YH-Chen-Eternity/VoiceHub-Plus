@@ -1,7 +1,7 @@
 import { getRouterParam, readBody } from 'h3'
 import { and, eq } from 'drizzle-orm'
 import { db } from '~/drizzle/db'
-import { communityComments, communityPosts, notifications } from '~/drizzle/schema'
+import { communityComments, communityPosts, notifications, users } from '~/drizzle/schema'
 import {
   applyCommunityViolation,
   assertCommunityBoardAccess,
@@ -11,6 +11,7 @@ import {
 } from '~~/server/utils/community'
 import { dispatchCommunityCommentMentionNotifications } from '~~/server/utils/communityCommentMentions'
 import { createApiError } from '~~/server/utils/apiError'
+import { writeAdminAudit } from '~~/server/utils/adminAudit'
 
 export default defineEventHandler(async (event) => {
   const user = requireCommunityReviewer(event)
@@ -32,6 +33,8 @@ export default defineEventHandler(async (event) => {
       status: communityComments.status,
       content: communityComments.content,
       authorId: communityComments.authorId,
+      authorName: users.name,
+      authorUsername: users.username,
       postId: communityComments.postId,
       postAuthorId: communityPosts.authorId,
       postStatus: communityPosts.status,
@@ -40,6 +43,7 @@ export default defineEventHandler(async (event) => {
     })
     .from(communityComments)
     .innerJoin(communityPosts, eq(communityPosts.id, communityComments.postId))
+    .innerJoin(users, eq(users.id, communityComments.authorId))
     .where(eq(communityComments.id, commentId))
     .limit(1)
   if (!row) throw createApiError(404, 'COMMUNITY_COMMENT_NOT_FOUND', '评论不存在')
@@ -49,6 +53,19 @@ export default defineEventHandler(async (event) => {
   }
 
   await assertCommunityBoardAccess(user, row.boardId)
+
+  const authorLabel = row.authorName || row.authorUsername || `用户 #${row.authorId}`
+
+  /** 审核落库：记录「谁审核了谁的评论、结果是什么」 */
+  const auditReview = async () => {
+    await writeAdminAudit(event, {
+      action: action === 'approve' ? 'COMMUNITY_COMMENT_APPROVE' : 'COMMUNITY_COMMENT_REJECT',
+      target: `评论 #${commentId}（作者 ${authorLabel}）`,
+      detail: `结果：${action === 'approve' ? '通过' : '驳回'}${
+        note ? `；说明：${note}` : ''
+      }${row.content ? `；内容：${row.content.replace(/\s+/g, ' ').slice(0, 30)}` : ''}`
+    })
+  }
 
   if (!isCommunityAdmin(user) && row.status !== 'PENDING') {
     throw createApiError(409, 'COMMUNITY_REVIEW_ALREADY_HANDLED', '该评论已审核')
@@ -94,6 +111,8 @@ export default defineEventHandler(async (event) => {
       console.error('评论回复/@ 提醒通知写入失败:', err)
     }
 
+    await auditReview()
+
     return { success: true, status: 'APPROVED' }
   }
 
@@ -125,6 +144,8 @@ export default defineEventHandler(async (event) => {
       note ? `审核说明：${note}。` : ''
     }${formatCommunityMuteNotice(result.violationCount)}`
   })
+
+  await auditReview()
 
   return {
     success: true,

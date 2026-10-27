@@ -108,8 +108,10 @@ export default defineEventHandler(async (event) => {
       author: {
         id: row.authorId,
         ...buildCommunityIdentity(
-          { name: row.authorName, grade: row.authorGrade, class: row.authorClass },
-          row.titleName
+          { id: row.authorId, name: row.authorName, grade: row.authorGrade, class: row.authorClass },
+          row.titleName,
+          user,
+          { allowReviewer: true }
         )
       },
       post: {

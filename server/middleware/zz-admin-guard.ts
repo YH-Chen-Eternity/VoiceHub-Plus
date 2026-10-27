@@ -67,19 +67,35 @@ export default defineEventHandler(async (event) => {
   if (!['ADMIN', 'SUPER_ADMIN', 'SONG_ADMIN', 'BROADCASTER'].includes(role) && !reviewerCommunityPath) {
     throw createApiError(403, 'AUTH_FORBIDDEN', '无权访问管理接口')
   }
-  if (reviewerCommunityPath) return
+  // 审帖员：原先在此直接 return 会导致其社区管理动作完全不进审计日志。
+  // 这里不再提前返回，让其继续走到下方的写入/审计流程；越权访问由各 community 子接口自行校验。
 
   const method = getMethod(event).toUpperCase()
   if (role === 'SONG_ADMIN' && !SONG_ADMIN_ALLOWED_PATTERNS.some((pattern) => pattern.test(lower))) {
     throw createApiError(403, 'AUTH_FORBIDDEN', '该接口仅系统管理员可访问')
   }
   if (role === 'BROADCASTER') {
-    if (method !== 'GET' || !BROADCASTER_ALLOWED_PATTERNS.some((pattern) => pattern.test(lower))) {
-      throw createApiError(403, 'AUTH_FORBIDDEN', '放歌员仅可查看排期相关信息')
+    // 放歌员唯一被允许的写操作：标记歌曲已播放（接口内部另有「今天及以前」限制）
+    const isMarkPlayed = method === 'POST' && lower === '/api/admin/songs/mark-played'
+    if (!isMarkPlayed) {
+      if (method !== 'GET' || !BROADCASTER_ALLOWED_PATTERNS.some((pattern) => pattern.test(lower))) {
+        throw createApiError(403, 'AUTH_FORBIDDEN', '放歌员仅可查看排期相关信息')
+      }
     }
   }
 
   const mutating = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)
+
+  // 这些社区接口自己写更详细的审计（含作者与结果），守卫不再重复记一笔
+  const SELF_AUDITED_PATTERNS = [
+    /^\/api\/admin\/community\/reports\/\d+\/handle$/,
+    /^\/api\/admin\/community\/appeals\/\d+\/handle$/,
+    /^\/api\/admin\/community\/posts\/\d+\/pin$/,
+    /^\/api\/admin\/community\/review\/batch$/,
+    /^\/api\/admin\/community\/archive\/\w+\/\d+\/restore$/
+  ]
+  if (mutating && SELF_AUDITED_PATTERNS.some((pattern) => pattern.test(lower))) return
+
   if (!mutating && !isAuditedGetPath(method, lower)) return
 
   const body = mutating ? await readAuditBody(event) : null

@@ -19,7 +19,20 @@ export interface AdminAuditDescriptor {
 const LEGACY_ACTIONS: Record<string, string> = {
   SONG_MARK_PLAYED_BULK: '批量标记歌曲已播放',
   USER_RESET_PASSWORD: '重置用户密码',
-  USER_EXPORT: '导出用户数据'
+  USER_EXPORT: '导出用户数据',
+  COMMUNITY_POST_APPROVE: '通过社区帖子',
+  COMMUNITY_POST_REJECT: '驳回社区帖子',
+  COMMUNITY_COMMENT_APPROVE: '通过社区评论',
+  COMMUNITY_COMMENT_REJECT: '驳回社区评论',
+  COMMUNITY_POST_PIN: '置顶社区帖子',
+  COMMUNITY_POST_UNPIN: '取消置顶社区帖子',
+  COMMUNITY_BATCH_REVIEW: '批量审核社区内容',
+  COMMUNITY_REPORT_ACCEPT_HIDE: '通过举报并隐藏内容',
+  COMMUNITY_REPORT_ACCEPT_DELETE: '通过举报并删除内容',
+  COMMUNITY_REPORT_REJECT: '驳回社区举报',
+  COMMUNITY_APPEAL_ACCEPT: '通过社区申诉',
+  COMMUNITY_APPEAL_REJECT: '驳回社区申诉',
+  COMMUNITY_ARCHIVE_RESTORE: '恢复归档内容'
 }
 
 const AUDITED_GET_PATHS = new Set([
@@ -139,6 +152,24 @@ function actionLabelForPath(method: string, pathname: string): string | null {
   if (p === '/api/admin/card-codes/delete' && m === 'POST') return '删除点歌券'
   if (/^\/api\/admin\/card-codes\/\d+$/.test(p) && m === 'PUT') return '修改点歌券'
   if (p === '/api/admin/card-codes/export' && m === 'GET') return '导出点歌券'
+
+  // 回声社区管理动作（管理员/审帖员共用，便于审计可读）
+  if (/^\/api\/admin\/community\/reports\/\d+\/handle$/.test(p) && m === 'POST') return '处理社区举报'
+  if (/^\/api\/admin\/community\/appeals\/\d+\/handle$/.test(p) && m === 'POST') return '处理社区申诉'
+  if (/^\/api\/admin\/community\/posts\/\d+\/pin$/.test(p) && m === 'POST') return '置顶/取消置顶社区帖子'
+  if (/^\/api\/admin\/community\/posts\/\d+$/.test(p) && m === 'DELETE') return '删除社区帖子'
+  if (/^\/api\/admin\/community\/archive\/\w+\/\d+\/restore$/.test(p) && m === 'POST') return '恢复归档内容'
+  if (p === '/api/admin/community/review/batch' && m === 'POST') return '批量审核社区内容'
+  if (p === '/api/admin/community/boards' && m === 'POST') return '新建社区板块'
+  if (/^\/api\/admin\/community\/boards\/\d+$/.test(p) && m === 'PUT') return '修改社区板块'
+  if (/^\/api\/admin\/community\/boards\/\d+$/.test(p) && m === 'DELETE') return '删除社区板块'
+  if (/^\/api\/admin\/community\/boards\/\d+\/reviewers$/.test(p) && m === 'PUT') return '调整板块审帖员'
+  if (p === '/api/admin/community/titles' && m === 'POST') return '新建社区称号'
+  if (/^\/api\/admin\/community\/titles\/\d+$/.test(p) && m === 'PUT') return '修改社区称号'
+  if (/^\/api\/admin\/community\/titles\/\d+$/.test(p) && m === 'DELETE') return '删除社区称号'
+  if (/^\/api\/admin\/community\/users\/\d+\/action$/.test(p) && m === 'POST') return '处置社区用户'
+  if (/^\/api\/admin\/community\/users\/\d+\/titles$/.test(p) && m === 'POST') return '调整用户社区称号'
+  if (p === '/api/admin/community/settings' && m === 'PUT') return '修改社区配置'
 
   if (/^\/api\/admin\/play-times\/\d+$/.test(p) && ['PUT', 'DELETE'].includes(m)) {
     return m === 'PUT' ? '修改播放时段' : '删除播放时段'

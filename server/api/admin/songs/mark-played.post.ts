@@ -27,14 +27,6 @@ export default defineEventHandler(async (event) => {
     })
   }
 
-  // 检查是否是管理员
-  if (!['ADMIN', 'SUPER_ADMIN', 'SONG_ADMIN'].includes(user.role)) {
-    throw createError({
-      statusCode: 403,
-      message: '只有管理员可以标记歌曲为已播放'
-    })
-  }
-
   const body = await readBody(event)
   const validatedDataResult = markPlayedSchema.safeParse(body)
 
@@ -46,6 +38,22 @@ export default defineEventHandler(async (event) => {
   }
 
   const validatedData = validatedDataResult.data
+
+  // 撤回已播放
+  const isUnmark = validatedData.unmark === true
+
+  // 权限校验：放歌员（BROADCASTER）可以标记歌曲已播放，但不能「取消已播放」；
+  // 其余变更排期状态的角色维持原有权限。
+  if (isUnmark
+    ? !['ADMIN', 'SUPER_ADMIN', 'SONG_ADMIN'].includes(user.role)
+    : !['ADMIN', 'SUPER_ADMIN', 'SONG_ADMIN', 'BROADCASTER'].includes(user.role)) {
+    throw createError({
+      statusCode: 403,
+      message: isUnmark
+        ? '只有管理员可以取消歌曲的已播放状态'
+        : '只有管理员或放歌员可以标记歌曲为已播放'
+    })
+  }
 
   const songIds = Array.from(
     new Set([
@@ -61,15 +69,12 @@ export default defineEventHandler(async (event) => {
     })
   }
 
-  // 撤回已播放
-  const isUnmark = validatedData.unmark === true
-
-  // 广播站（SONG_ADMIN）只能标记「今天及以前」排期的歌曲：
+  // 广播站（SONG_ADMIN）与放歌员（BROADCASTER）只能标记「今天及以前」排期的歌曲：
   // 排期在明天及以后的歌曲须等到当天才能标播放，避免提前把未播出场次标成已播。
   // ADMIN / SUPER_ADMIN 不受此限制（可修正误排期）。
   let allowedSongIds = songIds
   let skippedBySchedule = 0
-  if (!isUnmark && user.role === 'SONG_ADMIN') {
+  if (!isUnmark && (user.role === 'SONG_ADMIN' || user.role === 'BROADCASTER')) {
     const earliestSchedules = await db
       .select({
         songId: schedules.songId,

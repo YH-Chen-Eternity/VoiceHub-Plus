@@ -1,7 +1,7 @@
 import { getRouterParam, readBody } from 'h3'
 import { and, eq } from 'drizzle-orm'
 import { db } from '~/drizzle/db'
-import { communityPosts, notifications } from '~/drizzle/schema'
+import { communityPosts, notifications, users } from '~/drizzle/schema'
 import {
   applyCommunityViolation,
   formatCommunityMuteNotice,
@@ -10,6 +10,7 @@ import {
   requireCommunityReviewer
 } from '~~/server/utils/community'
 import { createApiError } from '~~/server/utils/apiError'
+import { writeAdminAudit } from '~~/server/utils/adminAudit'
 
 export default defineEventHandler(async (event) => {
   const user = requireCommunityReviewer(event)
@@ -30,13 +31,30 @@ export default defineEventHandler(async (event) => {
       id: communityPosts.id,
       boardId: communityPosts.boardId,
       authorId: communityPosts.authorId,
-      status: communityPosts.status
+      status: communityPosts.status,
+      content: communityPosts.content,
+      authorName: users.name,
+      authorUsername: users.username
     })
     .from(communityPosts)
+    .innerJoin(users, eq(users.id, communityPosts.authorId))
     .where(eq(communityPosts.id, postId))
     .limit(1)
   const post = postRows[0]
   if (!post) throw createApiError(404, 'COMMUNITY_POST_NOT_FOUND', '帖子不存在')
+
+  const authorLabel = post.authorName || post.authorUsername || `用户 #${post.authorId}`
+
+  /** 审核落库：记录「谁审核了谁的帖子、结果是什么」，与 AdminAuditLog 其他记录同口径 */
+  const auditReview = async () => {
+    await writeAdminAudit(event, {
+      action: action === 'approve' ? 'COMMUNITY_POST_APPROVE' : 'COMMUNITY_POST_REJECT',
+      target: `帖子 #${postId}（作者 ${authorLabel}）`,
+      detail: `结果：${action === 'approve' ? '通过' : '驳回'}${
+        note ? `；说明：${note}` : ''
+      }${post.content ? `；内容：${post.content.replace(/\s+/g, ' ').slice(0, 30)}` : ''}`
+    })
+  }
 
   const scopedBoardIds = await getReviewableBoardIds(user)
   if (scopedBoardIds && !scopedBoardIds.includes(post.boardId)) {
@@ -69,6 +87,8 @@ export default defineEventHandler(async (event) => {
       title: '回声社区：帖子已通过审核',
       message: '你发布的帖子已通过审核，现在可以在回声社区看到了。'
     })
+
+    await auditReview()
 
     return { success: true, status: 'APPROVED' }
   }
@@ -104,6 +124,8 @@ export default defineEventHandler(async (event) => {
       note ? `审核说明：${note}。` : ''
     }${muteText}`
   })
+
+  await auditReview()
 
   return {
     success: true,

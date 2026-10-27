@@ -35,6 +35,8 @@ export default defineEventHandler(async (event) => {
 
   const posts = await loadCommunityPosts({
     viewerId: user.id,
+    viewerRole: user.role,
+    moderationView: true,
     status,
     boardId: requestedBoardId,
     boardIds: requestedBoardId ? undefined : scopedBoardIds || undefined,

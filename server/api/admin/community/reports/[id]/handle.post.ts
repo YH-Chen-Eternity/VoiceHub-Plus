@@ -260,9 +260,13 @@ export default defineEventHandler(async (event) => {
     }))
   )
 
+  // 审计带上被举报内容的作者，让日志能看出「处理了谁的内容」
+  const contentAuthor = summary?.author
+  const authorLabel = contentAuthor ? contentAuthor.name || contentAuthor.username || `用户 #${contentAuthor.id}` : ''
+
   await writeAdminAudit(event, {
     action: `COMMUNITY_REPORT_${action}`,
-    target: `社区举报 #${reportId}`,
+    target: `社区举报 #${reportId}${authorLabel ? `（作者 ${authorLabel}）` : ''}`,
     detail: `目标：${report.targetType} #${targetId}；处理：${ACTION_LABELS[action] || action}；内容动作：${contentAction}${
       noteText ? `；备注：${noteText}` : ''
     }`

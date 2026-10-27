@@ -1,7 +1,7 @@
 import { readBody } from 'h3'
 import { and, eq, inArray, isNull, ne } from 'drizzle-orm'
 import { db } from '~/drizzle/db'
-import { communityComments, communityPosts, notifications } from '~/drizzle/schema'
+import { communityComments, communityPosts, notifications, users } from '~/drizzle/schema'
 import {
   applyCommunityViolation,
   formatCommunityMuteNotice,
@@ -323,9 +323,33 @@ export default defineEventHandler(async (event) => {
 
   const processed = approvedRows.length + rejectedRows.length
   const updatedIds = [...approvedRows, ...rejectedRows].map((row) => row.id)
+
+  // 审计要能看出「审核了谁」：把本批涉及的作者姓名一起查出来
+  const auditAuthorIds = [
+    ...new Set(
+      updatedIds
+        .map((id) => targetMap.get(id)?.authorId)
+        .filter((id): id is number => Number.isInteger(id) && Number(id) > 0)
+    )
+  ].slice(0, 20)
+  const auditAuthorRows = auditAuthorIds.length
+    ? await db
+        .select({ id: users.id, name: users.name, username: users.username })
+        .from(users)
+        .where(inArray(users.id, auditAuthorIds))
+    : []
+  const authorNameById = new Map(
+    auditAuthorRows.map((row) => [row.id, row.name || row.username || `用户 #${row.id}`])
+  )
+  const auditAuthors = [
+    ...new Set(updatedIds.map((id) => authorNameById.get(Number(targetMap.get(id)?.authorId ?? 0)) || null))
+  ].filter(Boolean) as string[]
+
   await writeAdminAudit(event, {
     action: 'COMMUNITY_BATCH_REVIEW',
-    target: `社区${contentTypeLabel} #${ids.join(',')}`,
+    target: `社区${contentTypeLabel} #${ids.join(',')}${
+      auditAuthors.length ? `（作者 ${auditAuthors.slice(0, 5).join('、')}${auditAuthors.length > 5 ? ' 等' : ''}）` : ''
+    }`,
     detail: `批量${action === 'approve' ? '通过' : '驳回'} ${processed} 条${
       note ? `；审核说明：${note}` : ''
     }`
