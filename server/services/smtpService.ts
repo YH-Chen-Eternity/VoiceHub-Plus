@@ -98,6 +98,13 @@ export class SmtpService {
     generic: `
       <div style="white-space: pre-wrap;">{{message}}</div>
     `,
+    reviewBacklog: `
+      <p>后台待审核内容已超过阈值，请及时处理：</p>
+      {{#if postCount}}<p>· 待审核帖子：<strong>{{postCount}}</strong> 条</p>{{/if}}
+      {{#if commentCount}}<p>· 待审核评论：<strong>{{commentCount}}</strong> 条</p>{{/if}}
+      {{#if userCount}}<p>· 待审核注册用户：<strong>{{userCount}}</strong> 人</p>{{/if}}
+      <p style="color:#888">积压的内容在审核通过前不会对同学展示。</p>
+    `,
     songSelected: `
       <p>您投稿的歌曲《{{songTitle}}》已被安排播放。</p>
       <p>播放日期：<strong>{{playDate}}</strong></p>
@@ -226,6 +233,14 @@ export class SmtpService {
       contentType: 'verification',
       headerSubtitle: '注销账号验证',
       variables: ['name', 'email', 'code', 'expiresInMinutes']
+    },
+    'community-review-backlog': {
+      name: '社区审核积压提醒',
+      subject: '{{title}} | {{siteTitle}}通知推送',
+      contentType: 'reviewBacklog',
+      headerSubtitle: '内容审核提醒',
+      actionText: '前往处理',
+      variables: ['title', 'postCount', 'commentCount', 'userCount', 'actionUrl']
     },
     'register': {
       name: '注册通知',
