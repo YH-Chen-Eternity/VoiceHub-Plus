@@ -10,10 +10,15 @@ import {
   users
 } from '~/drizzle/schema'
 import { buildCommunityIdentity } from './community'
-import { getActiveSemesterName, resolveCommunitySongVoteState } from './communitySongVote'
+import { getActiveSemesterName, resolveCommunitySongLikeState } from './communitySongVote'
+import { matchSongBlacklistCheap } from './songBlacklistMatch'
 
 type LoadOptions = {
   viewerId?: number | null
+  /** 查看者角色，用于社区身份展示分级（仅管理员/超级管理员可见班级+全名） */
+  viewerRole?: string | null
+  /** 审核队列视图：审帖员在其中也需要看到真实身份 */
+  moderationView?: boolean
   postId?: number
   status?: string
   boardId?: number
@@ -30,16 +35,22 @@ type LoadOptions = {
   viewerIsAdmin?: boolean
 }
 
-export function serializeSong(song: any, viewerId = 0, activeSemester: string | null = null) {
+export function serializeSong(
+  song: any,
+  viewerId = 0,
+  activeSemester: string | null = null,
+  blacklistedSongIds: ReadonlySet<number> = new Set()
+) {
   if (!song?.songId || !song.songTitle) return null
   const likedByMe = !!song.likedByMe
-  const voteState = resolveCommunitySongVoteState(
+  const likeState = resolveCommunitySongLikeState(
     {
       requesterId: song.songRequesterId ?? null,
       semester: song.songSemester ?? null,
       played: !!song.songPlayed,
       scheduled: !!song.songScheduled,
-      likedByMe
+      likedByMe,
+      blacklisted: blacklistedSongIds.has(Number(song.songId))
     },
     viewerId,
     activeSemester
@@ -49,17 +60,25 @@ export function serializeSong(song: any, viewerId = 0, activeSemester: string | 
     title: song.songTitle,
     artist: song.songArtist,
     cover: song.songCover ?? null,
+    musicPlatform: song.songMusicPlatform ?? null,
+    musicId: song.songMusicId ?? null,
+    playUrl: song.songPlayUrl ?? null,
+    durationSeconds: song.songDurationSeconds ?? null,
     played: !!song.songPlayed,
     scheduled: !!song.songScheduled,
     voteCount: Number(song.voteCount || 0),
+    likeCount: Number(song.songLikeCount || 0),
     likedByMe,
-    ...voteState
+    ...likeState
   }
 }
 
 /** 统一装配帖子（身份脱敏、歌曲、点赞数、评论数、配图） */
 export async function loadCommunityPosts(options: LoadOptions) {
   const viewerId = options.viewerId ?? 0
+  const viewerRole = options.viewerRole ?? null
+  const viewer = { id: viewerId, role: viewerRole }
+  const identityOptions = options.moderationView ? { allowReviewer: true } : undefined
   const conditions: any[] = []
   if (options.postId) conditions.push(eq(communityPosts.id, options.postId))
   if (options.status) conditions.push(eq(communityPosts.status, options.status))
@@ -133,8 +152,13 @@ export async function loadCommunityPosts(options: LoadOptions) {
       songSemester: songs.semester,
       songRequesterId: songs.requesterId,
       songScheduled: sql<boolean>`exists(select 1 from "Schedule" s where s."songId" = ${communityPosts.songId} and s."isDraft" = false)`,
+      songMusicPlatform: songs.musicPlatform,
+      songMusicId: songs.musicId,
+      songPlayUrl: songs.playUrl,
+      songDurationSeconds: songs.durationSeconds,
       voteCount: sql<number>`(select count(*)::int from "Vote" v where v."songId" = ${communityPosts.songId})`,
-      likedByMe: sql<boolean>`exists(select 1 from "Vote" v2 where v2."songId" = ${communityPosts.songId} and v2."userId" = ${viewerId})`,
+      songLikeCount: sql<number>`(select count(*)::int from "CommunitySongLike" csl where csl."songId" = ${communityPosts.songId})`,
+      likedByMe: sql<boolean>`exists(select 1 from "CommunitySongLike" csl2 where csl2."songId" = ${communityPosts.songId} and csl2."userId" = ${viewerId})`,
       commentCount: sql<number>`(select count(*)::int from "CommunityComment" c where c."postId" = ${communityPosts.id} and c."status" = 'APPROVED' and c."deletedAt" is null)`
     })
     .from(communityPosts)
@@ -172,6 +196,18 @@ export async function loadCommunityPosts(options: LoadOptions) {
   }
 
   const activeSemester = rows.some((row) => row.songId) ? await getActiveSemesterName() : null
+  // 黑名单命中判定批量做一次（黑名单列表本身有缓存，这里只是字符串比较，避免逐条重复开销）
+  const blacklistedSongIds = new Set<number>()
+  const songKeys = new Map<number, { title: string; artist: string }>()
+  for (const row of rows) {
+    if (row.songId) songKeys.set(Number(row.songId), { title: row.songTitle, artist: row.songArtist })
+  }
+  await Promise.all(
+    [...songKeys.entries()].map(async ([songKey, meta]) => {
+      const matched = await matchSongBlacklistCheap(meta.title, meta.artist)
+      if (matched.hit) blacklistedSongIds.add(songKey)
+    })
+  )
 
   return rows.map((row) => {
     const song = row.songId
@@ -184,7 +220,12 @@ export async function loadCommunityPosts(options: LoadOptions) {
           songSemester: row.songSemester,
           songRequesterId: row.songRequesterId,
           songScheduled: row.songScheduled,
+          songMusicPlatform: row.songMusicPlatform,
+          songMusicId: row.songMusicId,
+          songPlayUrl: row.songPlayUrl,
+          songDurationSeconds: row.songDurationSeconds,
           voteCount: row.voteCount,
+          songLikeCount: row.songLikeCount,
           likedByMe: row.likedByMe
         }
       : null
@@ -198,11 +239,13 @@ export async function loadCommunityPosts(options: LoadOptions) {
       author: {
         id: row.authorId,
         ...buildCommunityIdentity(
-          { name: row.authorName, grade: row.authorGrade, class: row.authorClass },
-          row.titleName
+          { id: row.authorId, name: row.authorName, grade: row.authorGrade, class: row.authorClass },
+          row.titleName,
+          viewer,
+          identityOptions
         )
       },
-      song: serializeSong(song, viewerId, activeSemester),
+      song: serializeSong(song, viewerId, activeSemester, blacklistedSongIds),
       images: imagesByPost.get(row.id) || [],
       commentCount: Number(row.commentCount || 0),
       viewCount: Number(row.viewCount || 0),
@@ -217,7 +260,11 @@ export async function loadCommunityPosts(options: LoadOptions) {
   })
 }
 
-export async function getCommunityPostById(postId: number, viewerId?: number | null) {
-  const rows = await loadCommunityPosts({ postId, viewerId, limit: 1 })
+export async function getCommunityPostById(
+  postId: number,
+  viewerId?: number | null,
+  viewerRole?: string | null
+) {
+  const rows = await loadCommunityPosts({ postId, viewerId, viewerRole, limit: 1 })
   return rows[0] || null
 }
