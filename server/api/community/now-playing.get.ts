@@ -1,7 +1,11 @@
 import { and, asc, eq, gte, lte } from 'drizzle-orm'
 import { db } from '~/drizzle/db'
 import { playTimes, schedules, songs, users } from '~/drizzle/schema'
-import { buildCommunityIdentity, requireCommunityUser } from '~~/server/utils/community'
+import {
+  buildCommunityIdentity,
+  requireCommunityUser,
+  type CommunityViewer
+} from '~~/server/utils/community'
 import { getLiveNowPlaying } from '~~/server/utils/nowPlayingLive'
 import { getServerDate, getServerTimestamp } from '~~/server/utils/serverTime'
 import { formatDateTime, parseToBeijingTime } from '~/utils/timeUtils'
@@ -32,25 +36,34 @@ type ScheduleSongRow = {
   playTimeEnabled: boolean | null
 }
 
-function buildSong(row: {
-  songId: number
-  title: string
-  artist: string
-  cover: string | null
-  durationSeconds: number | null
-  submissionAnonymous: boolean
-  requesterName: string | null
-  requesterGrade: string | null
-  requesterClass: string | null
-}) {
+function buildSong(
+  row: {
+    songId: number
+    title: string
+    artist: string
+    cover: string | null
+    durationSeconds: number | null
+    submissionAnonymous: boolean
+    requesterId: number | null
+    requesterName: string | null
+    requesterGrade: string | null
+    requesterClass: string | null
+  },
+  viewer?: CommunityViewer
+) {
   const requesterName = row.submissionAnonymous
     ? ANONYMOUS_REQUESTER
     : row.requesterName
-      ? buildCommunityIdentity({
-          name: row.requesterName,
-          grade: row.requesterGrade,
-          class: row.requesterClass
-        }).displayName
+      ? buildCommunityIdentity(
+          {
+            id: row.requesterId,
+            name: row.requesterName,
+            grade: row.requesterGrade,
+            class: row.requesterClass
+          },
+          null,
+          viewer
+        ).displayName
       : null
   return {
     id: row.songId,
@@ -91,7 +104,7 @@ function isUnplayed(row: ScheduleSongRow) {
  * 数据源异常一律返回 playing:false，不向前端抛错。
  */
 export default defineEventHandler(async (event) => {
-  requireCommunityUser(event)
+  const viewer = requireCommunityUser(event)
 
   try {
     // 1. 实时上报
@@ -105,6 +118,7 @@ export default defineEventHandler(async (event) => {
           cover: songs.cover,
           durationSeconds: songs.durationSeconds,
           submissionAnonymous: songs.submissionAnonymous,
+          requesterId: songs.requesterId,
           requesterName: users.name,
           requesterGrade: users.grade,
           requesterClass: users.class
@@ -119,7 +133,7 @@ export default defineEventHandler(async (event) => {
           success: true,
           playing: true,
           source: 'live',
-          song: buildSong({ ...songRow, songId: songRow.id }),
+          song: buildSong({ ...songRow, songId: songRow.id }, viewer),
           scheduleId: null,
           startedAt: new Date(
             live.updatedAt - Math.max(0, Number(live.position) || 0) * 1000
@@ -152,6 +166,7 @@ export default defineEventHandler(async (event) => {
         durationSeconds: songs.durationSeconds,
         submissionAnonymous: songs.submissionAnonymous,
         songPlayed: songs.played,
+        requesterId: songs.requesterId,
         requesterName: users.name,
         requesterGrade: users.grade,
         requesterClass: users.class,
@@ -213,7 +228,7 @@ export default defineEventHandler(async (event) => {
         success: true,
         playing: true,
         source: 'schedule',
-        song: buildSong(current),
+        song: buildSong(current, viewer),
         scheduleId: current.scheduleId,
         startedAt,
         positionSeconds: null,
@@ -236,7 +251,7 @@ export default defineEventHandler(async (event) => {
       .filter(isUnplayed)[0]
     const next = nextRow
       ? {
-          song: buildSong(nextRow),
+          song: buildSong(nextRow, viewer),
           scheduleId: nextRow.scheduleId,
           date: formatDateTime(nextRow.playDate, 'YYYY-MM-DD'),
           playTimeName: nextRow.playTimeName || '',

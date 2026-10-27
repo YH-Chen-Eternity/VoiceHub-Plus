@@ -18,7 +18,7 @@ export default defineEventHandler(async (event) => {
     throw createApiError(400, 'COMMUNITY_POST_INVALID', '帖子参数不正确')
   }
 
-  const post = await getCommunityPostById(postId, user.id)
+  const post = await getCommunityPostById(postId, user.id, user.role)
   if (!post) throw createApiError(404, 'COMMUNITY_POST_NOT_FOUND', '帖子不存在')
 
   // 审帖员只能读取自己负责板块的未公开帖子

@@ -327,7 +327,10 @@ export async function evaluateCommunityResonance(userId: number): Promise<void> 
 }
 
 /** 当前用户可见的共鸣记录（仅本人） */
-export async function listUserResonance(userId: number) {
+export async function listUserResonance(
+  userId: number,
+  viewer?: { id?: number | null; role?: string | null } | null
+) {
   const rows = await db
     .select({
       id: communityResonance.id,
@@ -379,8 +382,9 @@ export async function listUserResonance(userId: number) {
       partner: {
         id: row.partnerId,
         ...buildCommunityIdentity(
-          { name: row.partnerName, grade: row.partnerGrade, class: row.partnerClass },
-          null
+          { id: row.partnerId, name: row.partnerName, grade: row.partnerGrade, class: row.partnerClass },
+          null,
+          viewer
         )
       },
       songsSent: sent,

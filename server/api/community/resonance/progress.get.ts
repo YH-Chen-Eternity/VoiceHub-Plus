@@ -70,8 +70,9 @@ export default defineEventHandler(async (event) => {
         partner: {
           id: partner.id,
           ...buildCommunityIdentity(
-            { name: partner.name, grade: partner.grade, class: partner.class },
-            null
+            { id: partner.id, name: partner.name, grade: partner.grade, class: partner.class },
+            null,
+            user
           )
         },
         sentCount: entry.sent,
@@ -93,7 +94,7 @@ export default defineEventHandler(async (event) => {
       name: level.name,
       description: level.description
     })),
-    achievements: await listUserResonance(user.id),
+    achievements: await listUserResonance(user.id, user),
     partners
   }
 })

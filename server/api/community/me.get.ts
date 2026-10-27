@@ -87,12 +87,12 @@ export default defineEventHandler(async (event) => {
       )
     )
 
-  const resonance = await listUserResonance(user.id)
+  const resonance = await listUserResonance(user.id, user)
 
   return {
     success: true,
     settings: toPublicCommunitySettings(settings),
-    user: me ? { id: me.id, ...buildCommunityIdentity(me) } : null,
+    user: me ? { id: me.id, ...buildCommunityIdentity(me, null, user) } : null,
     profile: {
       favoriteSongId: profile.favoriteSongId,
       showFavorite: profile.showFavorite,

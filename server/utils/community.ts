@@ -125,16 +125,43 @@ export function formatCommunityClass(grade: string | null | undefined, klass: st
   return `${g}${c}班`
 }
 
+/** 查看者上下文：用于决定社区内能看到的身份粒度 */
+export type CommunityViewer = { id?: number | null; role?: string | null } | null | undefined
+
+/**
+ * 社区身份展示，按查看者权限分级：
+ * - 管理员 / 超级管理员：班级 + 全名（如「高一1班陈奕翰」）
+ * - 本人：全名（如「陈奕翰」）
+ * - 其他所有人：脱敏名且不带班级（如「陈*翰」）
+ * 未传查看者时按最严格的脱敏处理，避免漏传导致真实姓名泄露。
+ */
 export function buildCommunityIdentity(
-  user: { name?: string | null; grade?: string | null; class?: string | null },
-  titleName?: string | null
+  user: { id?: number | null; name?: string | null; grade?: string | null; class?: string | null },
+  titleName?: string | null,
+  viewer?: CommunityViewer,
+  options?: { allowReviewer?: boolean }
 ) {
   const className = formatCommunityClass(user.grade, user.class)
+  const maskedName = maskCommunityName(user.name)
+  const fullName = String(user.name || '').trim()
+  // 审核队列里审帖员需要看到真实身份才能判断，故该场景下将 REVIEWER 视为可见全名者
+  const staffRoles = options?.allowReviewer
+    ? ['ADMIN', 'SUPER_ADMIN', 'REVIEWER']
+    : ['ADMIN', 'SUPER_ADMIN']
+  const viewerRole = String(viewer?.role || '')
+  const isStaff = staffRoles.includes(viewerRole)
+  const isSelf = !!viewer?.id && !!user.id && Number(viewer.id) === Number(user.id)
+
+  let displayName: string
+  if (isStaff) displayName = `${className}${fullName}`.trim()
+  else if (isSelf) displayName = fullName
+  else displayName = maskedName
+
   return {
-    className,
-    maskedName: maskCommunityName(user.name),
+    className: isStaff ? className : '',
+    maskedName,
     title: titleName || null,
-    displayName: `${className}${maskCommunityName(user.name)}`
+    displayName: displayName || maskedName
   }
 }
 

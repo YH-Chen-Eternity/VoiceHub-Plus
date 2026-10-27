@@ -75,7 +75,8 @@ export function extractCommunityMentionTokens(content: string): string[] {
  * username 精确匹配优先，其次按 users.name 精确匹配；未匹配到的 token 直接忽略。
  */
 export async function resolveCommunityMentionUsers(
-  tokens: string[]
+  tokens: string[],
+  viewer?: { id?: number | null; role?: string | null } | null
 ): Promise<Map<string, CommunityMentionUser>> {
   const resolved = new Map<string, CommunityMentionUser>()
   const uniqueTokens = [...new Set(tokens.filter((token) => Boolean(token)))].slice(
@@ -111,7 +112,7 @@ export async function resolveCommunityMentionUsers(
     if (!row) continue
     resolved.set(token, {
       id: row.id,
-      displayName: buildCommunityIdentity(row, row.titleName).displayName
+      displayName: buildCommunityIdentity(row, row.titleName, viewer).displayName
     })
   }
   return resolved

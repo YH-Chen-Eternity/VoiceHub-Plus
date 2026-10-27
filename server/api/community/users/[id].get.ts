@@ -181,7 +181,7 @@ export default defineEventHandler(async (event) => {
     success: true,
     user: {
       id: target.id,
-      ...buildCommunityIdentity(target, equippedTitle?.name),
+      ...buildCommunityIdentity(target, equippedTitle?.name, viewer),
       joinedAt: target.createdAt
     },
     isSelf,

@@ -25,6 +25,7 @@ export default defineEventHandler(async (event) => {
 
   const posts = await loadCommunityPosts({
     viewerId: user.id,
+    viewerRole: user.role,
     boardId,
     // 最热排序不支持游标翻页，只返回第一页（前端在热门模式隐藏“加载更多”）
     beforeId: sort === 'hot' ? undefined : beforeId,

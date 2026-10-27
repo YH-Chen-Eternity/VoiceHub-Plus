@@ -21,7 +21,6 @@ export default defineEventHandler(async (event) => {
     .select({
       id: users.id,
       name: users.name,
-      username: users.username,
       grade: users.grade,
       class: users.class,
       createdAt: communityBlocks.createdAt
@@ -34,13 +33,12 @@ export default defineEventHandler(async (event) => {
   return {
     success: true,
     blocks: rows.map((row) => {
-      const identity = buildCommunityIdentity(row)
+      const identity = buildCommunityIdentity(row, null, user)
       return {
         id: row.id,
         displayName: identity.displayName,
         maskedName: identity.maskedName,
         className: identity.className,
-        username: row.username || null,
         blockedAtText: row.createdAt ? formatDateTime(row.createdAt) : null
       }
     })
