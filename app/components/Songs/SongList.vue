@@ -566,6 +566,7 @@
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useAuth } from '~/composables/useAuth'
 import { useAudioPlayer } from '~/composables/useAudioPlayer'
+import { useSongPlayback } from '~/composables/useSongPlayback'
 import { useSemesters } from '~/composables/useSemesters'
 import { useSongs } from '~/composables/useSongs'
 import Icon from '~/components/UI/Icon.vue'
@@ -1187,75 +1188,15 @@ const getFirstChar = (title) => {
   return title.trim().charAt(0)
 }
 
-// 播放歌曲的辅助函数，处理 URL 获取和播放列表构建
-const playSongWithUrlFetching = async (song) => {
-  let url = null
-  try {
-    url = await getMusicUrl(song)
-  } catch (error) {
-    if (!isBilibiliSong(song)) {
-      if (window.$showNotification) {
-        window.$showNotification(locale.value.musicUrlFailed, 'error')
-      }
+// 播放逻辑共用社区与投稿列表：这里额外传入列表构建器，播完自动接下一首
+const { togglePlaySong } = useSongPlayback({
+  buildPlaylist: (song) => buildPlayablePlaylist(song),
+  onUrlError: () => {
+    if (window.$showNotification) {
+      window.$showNotification(locale.value.musicUrlFailed, 'error')
     }
   }
-
-  const playableSong = { ...song, musicUrl: url || null }
-  const playlist = await buildPlayablePlaylist(song)
-  const currentIndex = playlist.findIndex((item) => item.id === song.id)
-  audioPlayer.playSong(playableSong, playlist, currentIndex)
-
-  if (!url && !isBilibiliSong(song)) return
-
-  // 后台预取后续歌曲的播放链接（不阻塞当前播放）
-  ;(async () => {
-    for (let i = currentIndex + 1; i < playlist.length; i++) {
-      const s = playlist[i]
-      if (!s.musicUrl && ((s.musicPlatform && s.musicId) || s.playUrl)) {
-        try {
-          s.musicUrl = await getMusicUrl(s)
-        } catch (error) {
-          console.warn(`后台预取失败: ${s.title}`, error)
-          s.musicUrl = null
-        }
-      }
-    }
-  })()
-}
-
-// 切换歌曲播放/暂停
-const togglePlaySong = async (song) => {
-  // 检查是否为当前歌曲且正在播放
-  if (audioPlayer.isCurrentSong(song.id) && audioPlayer.getPlayingStatus().value) {
-    // 如果正在播放，则暂停
-    audioPlayer.pauseSong()
-    return
-  }
-
-  // 如果是当前歌曲但已暂停，则恢复播放
-  if (audioPlayer.isCurrentSong(song.id) && !audioPlayer.getPlayingStatus().value) {
-    // 检查当前全局歌曲是否有URL
-    const currentGlobalSong = audioPlayer.getCurrentSong().value
-    if (
-      currentGlobalSong &&
-      (currentGlobalSong.musicUrl || isBilibiliSong(currentGlobalSong))
-    ) {
-      // 如果有URL或者是哔哩哔哩视频，直接恢复播放
-      audioPlayer.playSong(currentGlobalSong)
-    } else {
-      // 如果没有URL，重新获取
-      if ((song.musicPlatform && song.musicId) || song.playUrl) {
-        await playSongWithUrlFetching(song)
-      }
-    }
-    return
-  }
-
-  // 如果有平台和ID信息或playUrl，动态获取URL
-  if ((song.musicPlatform && song.musicId) || song.playUrl) {
-    await playSongWithUrlFetching(song)
-  }
-}
+})
 
 // 构建可播放的播放列表
 const buildPlayablePlaylist = async (currentSong) => {

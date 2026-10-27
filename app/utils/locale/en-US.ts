@@ -1011,6 +1011,8 @@ export const pages = {
     likeBlockedPlayed: 'This song has already been played',
     likeBlockedScheduled: 'This song has already been scheduled',
     likeBlockedSelf: 'You cannot like your own submission',
+    likeBlockedBlacklist: 'This song is blacklisted and cannot be liked',
+    musicUrlFailed: 'Failed to get the music playback URL',
     comments: 'Comments',
     commentPlaceholder: 'Be kind and warm',
     sendComment: 'Send',

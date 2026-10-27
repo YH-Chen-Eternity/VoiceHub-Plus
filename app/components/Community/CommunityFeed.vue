@@ -178,14 +178,22 @@
               </div>
 
               <div v-if="post.song" class="song-row">
-                <div class="song-cover">
+                <div
+                  class="song-cover"
+                  :class="{ 'is-playable': canPlaySong(post.song) }"
+                  @click.stop="playPostSong(post)"
+                >
                   <img v-if="post.song.cover" :alt="post.song.title" :src="post.song.cover">
                   <Music v-else :size="18" />
+                  <div v-if="canPlaySong(post.song)" class="play-button-overlay">
+                    <Pause v-if="isPlayingSong(post.song)" :size="14" />
+                    <Play v-else :size="14" />
+                  </div>
                 </div>
                 <div class="song-info">
                   <span class="song-title">{{ post.song.title }}</span>
                   <span class="song-artist">{{ post.song.artist }}</span>
-                  <span v-if="likeBlockedText(post)" class="song-note">{{ likeBlockedText(post) }}</span>
+                  <span v-if="songNoteText(post)" class="song-note">{{ songNoteText(post) }}</span>
                 </div>
                 <button
                   :class="{ liked: post.song.likedByMe }"
@@ -196,7 +204,7 @@
                   @click="toggleLike(post)"
                 >
                   <Heart :fill="post.song.likedByMe ? 'currentColor' : 'none'" :size="16" />
-                  <span>{{ post.song.voteCount }}</span>
+                  <span>{{ post.song.likeCount }}</span>
                 </button>
               </div>
 
@@ -531,19 +539,27 @@
               </div>
 
               <div v-if="selectedPost.song" class="song-row">
-                <div class="song-cover">
+                <div
+                  class="song-cover"
+                  :class="{ 'is-playable': canPlaySong(selectedPost.song) }"
+                  @click.stop="playPostSong(selectedPost)"
+                >
                   <img
                     v-if="selectedPost.song.cover"
                     :alt="selectedPost.song.title"
                     :src="selectedPost.song.cover"
                   >
                   <Music v-else :size="18" />
+                  <div v-if="canPlaySong(selectedPost.song)" class="play-button-overlay">
+                    <Pause v-if="isPlayingSong(selectedPost.song)" :size="14" />
+                    <Play v-else :size="14" />
+                  </div>
                 </div>
                 <div class="song-info">
                   <span class="song-title">{{ selectedPost.song.title }}</span>
                   <span class="song-artist">{{ selectedPost.song.artist }}</span>
-                  <span v-if="likeBlockedText(selectedPost)" class="song-note">
-                    {{ likeBlockedText(selectedPost) }}
+                  <span v-if="songNoteText(selectedPost)" class="song-note">
+                    {{ songNoteText(selectedPost) }}
                   </span>
                 </div>
                 <button
@@ -555,7 +571,7 @@
                   @click="toggleLike(selectedPost)"
                 >
                   <Heart :fill="selectedPost.song.likedByMe ? 'currentColor' : 'none'" :size="16" />
-                  <span>{{ selectedPost.song.voteCount }}</span>
+                  <span>{{ selectedPost.song.likeCount }}</span>
                 </button>
               </div>
 
@@ -596,93 +612,19 @@
                 </div>
                 <div v-else-if="!comments.length" class="comment-empty">{{ t.noComments }}</div>
                 <div v-else class="comment-list">
-                  <div v-for="thread in threads" :key="thread.id" class="comment-item">
-                    <div class="comment-head">
-                      <button class="identity comment-identity" type="button" @click="openProfile(thread.author.id)">
-                        <span class="identity-name">{{ thread.author.displayName }}</span>
-                        <span v-if="thread.author.title" class="identity-title">{{ thread.author.title }}</span>
-                      </button>
-                      <div class="comment-tail">
-                        <span
-                          v-if="thread.status !== 'APPROVED'"
-                          :class="['status-pill', `status-${thread.status.toLowerCase()}`]"
-                        >
-                          {{ statusText(thread.status) }}
-                        </span>
-                        <button
-                          v-if="selectedPost.status === 'APPROVED' && !ban.muted"
-                          class="comment-reply-btn"
-                          type="button"
-                          @click="startReply(thread)"
-                        >
-                          {{ t.reply || '回复' }}
-                        </button>
-                        <button
-                          v-if="!isOwnComment(thread)"
-                          class="comment-remove"
-                          :title="t.report || '举报'"
-                          type="button"
-                          @click="openReport('COMMENT', thread.id, thread.content)"
-                        >
-                          <Flag :size="13" />
-                        </button>
-                        <button
-                          v-if="canRemoveComment(thread)"
-                          class="comment-remove"
-                          :title="isOwnComment(thread) ? t.withdraw : t.deleteContent"
-                          type="button"
-                          @click="askRemoveComment(thread)"
-                        >
-                          <Trash2 :size="13" />
-                        </button>
-                      </div>
-                    </div>
-                    <p>
-                      <span v-for="name in thread.mentionNames || []" :key="name" class="mention-name">@{{ name }} </span>
-                      {{ thread.content }}
-                    </p>
-                    <p v-if="thread.reviewNote" class="comment-note">
-                      {{ t.reviewNoteLabel }}：{{ thread.reviewNote }}
-                    </p>
-                    <span class="comment-time">{{ formatTime(thread.createdAt) }}</span>
-
-                    <div v-if="thread.replies && thread.replies.length" class="comment-replies">
-                      <div v-for="reply in thread.replies" :key="reply.id" class="comment-item comment-reply-item">
-                        <div class="comment-head">
-                          <button class="identity comment-identity" type="button" @click="openProfile(reply.author.id)">
-                            <span class="identity-name">{{ reply.author.displayName }}</span>
-                            <span v-if="reply.author.title" class="identity-title">{{ reply.author.title }}</span>
-                          </button>
-                          <div class="comment-tail">
-                            <span v-if="reply.replyTo" class="reply-target">回复 {{ reply.replyTo }}</span>
-                            <button
-                              v-if="!isOwnComment(reply)"
-                              class="comment-remove"
-                              :title="t.report || '举报'"
-                              type="button"
-                              @click="openReport('COMMENT', reply.id, reply.content)"
-                            >
-                              <Flag :size="13" />
-                            </button>
-                            <button
-                              v-if="canRemoveComment(reply)"
-                              class="comment-remove"
-                              :title="isOwnComment(reply) ? t.withdraw : t.deleteContent"
-                              type="button"
-                              @click="askRemoveComment(reply)"
-                            >
-                              <Trash2 :size="13" />
-                            </button>
-                          </div>
-                        </div>
-                        <p>
-                          <span v-for="name in reply.mentionNames || []" :key="name" class="mention-name">@{{ name }} </span>
-                          {{ reply.content }}
-                        </p>
-                        <span class="comment-time">{{ formatTime(reply.createdAt) }}</span>
-                      </div>
-                    </div>
-                  </div>
+                  <CommunityCommentItem
+                    v-for="thread in threads"
+                    :key="thread.id"
+                    :comment="thread"
+                    :my-user-id="myUserId"
+                    :can-review="canReview"
+                    :can-reply="selectedPost.status === 'APPROVED' && !ban.muted"
+                    @reply="startReply"
+                    @remove="askRemoveComment"
+                    @report="reportComment"
+                    @like="toggleCommentLike"
+                    @profile="openProfile"
+                  />
                 </div>
               </div>
             </div>
@@ -858,61 +800,23 @@
     </Teleport>
 
     <!-- 点赞署名选择：匿名 or 署名 -->
-    <Teleport to="body">
-      <Transition name="community-fade">
-        <div v-if="pendingLikePost" class="modal-layer" @click.self="cancelLikeReveal">
-          <div class="modal-card" style="max-width: 24rem">
-            <header class="modal-head">
-              <div>
-                <h3>{{ uiT.voteReveal.title }}</h3>
-                <p>{{ uiT.voteReveal.desc }}</p>
-              </div>
-              <button class="icon-button" type="button" @click="cancelLikeReveal">
-                <X :size="18" />
-              </button>
-            </header>
-            <div class="modal-body">
-              <button
-                class="w-full rounded-xl border px-3 py-2.5 text-left transition-all"
-                :class="pendingRevealChoice === 'ANONYMOUS' ? 'border-primary bg-primary-10' : 'border-border-secondary hover:bg-bg-tertiary'"
-                type="button"
-                @click="pendingRevealChoice = 'ANONYMOUS'"
-              >
-                <p class="text-xs font-bold text-text-primary">{{ uiT.voteReveal.anonymous }}</p>
-                <p class="mt-0.5 text-[10px] text-text-tertiary">{{ uiT.voteReveal.anonymousHint }}</p>
-              </button>
-              <button
-                class="w-full rounded-xl border px-3 py-2.5 text-left transition-all"
-                :class="pendingRevealChoice === 'REVEAL' ? 'border-primary bg-primary-10' : 'border-border-secondary hover:bg-bg-tertiary'"
-                type="button"
-                @click="pendingRevealChoice = 'REVEAL'"
-              >
-                <p class="text-xs font-bold text-text-primary">{{ uiT.voteReveal.reveal }}</p>
-                <p class="mt-0.5 text-[10px] text-text-tertiary">{{ uiT.voteReveal.revealHint }}</p>
-              </button>
-              <label class="flex items-start gap-2 rounded-xl bg-bg-secondary-60 px-3 py-2 text-[11px] text-text-secondary">
-                <input v-model="pendingRememberChoice" class="mt-0.5 h-3.5 w-3.5 accent-[var(--primary)]" type="checkbox" >
-                <span class="min-w-0">
-                  <span class="block font-bold">{{ uiT.voteReveal.remember }}</span>
-                  <span class="mt-0.5 block text-text-tertiary">{{ uiT.voteReveal.rememberHint }}</span>
-                </span>
-              </label>
-            </div>
-            <footer class="modal-foot">
-              <span class="foot-hint">{{ uiT.voteReveal.desc }}</span>
-              <div class="foot-actions">
-                <button class="ghost-button" type="button" @click="cancelLikeReveal">
-                  {{ uiT.voteReveal.cancel }}
-                </button>
-                <button class="primary-button" type="button" @click="confirmLikeReveal">
-                  {{ uiT.voteReveal.confirm }}
-                </button>
-              </div>
-            </footer>
-          </div>
-        </div>
-      </Transition>
-    </Teleport>
+    <RevealChoiceDialog
+      :show="!!pendingLikePost"
+      @confirm="onLikeRevealConfirm"
+      @cancel="cancelLikeReveal"
+    />
+
+    <RevealChoiceDialog
+      :show="!!pendingPostLike"
+      @confirm="onPostLikeRevealConfirm"
+      @cancel="pendingPostLike = null"
+    />
+
+    <RevealChoiceDialog
+      :show="!!pendingCommentLike"
+      @confirm="onCommentLikeRevealConfirm"
+      @cancel="pendingCommentLike = null"
+    />
 
     <ReportDialog
       v-model:show="reportState.show"
@@ -953,7 +857,9 @@ import {
   Lock,
   MessageCircle,
   Music,
+  Pause,
   Pin,
+  Play,
   Plus,
   Search,
   Send,
@@ -967,10 +873,13 @@ import ReportDialog from '~/components/Community/ReportDialog.vue'
 import BlockButton from '~/components/Community/BlockButton.vue'
 import NotificationCenter from '~/components/Notifications/NotificationCenter.vue'
 import NowPlayingCard from '~/components/Community/NowPlayingCard.vue'
+import CommunityCommentItem from '~/components/Community/CommunityCommentItem.vue'
+import RevealChoiceDialog from '~/components/Community/RevealChoiceDialog.vue'
 import UserAchievement from '~/components/Community/UserAchievement.vue'
 import { useLocale } from '~/utils/locale'
 import { useNewUi } from '~/composables/useNewUi'
 import { useToast } from '~/composables/useToast'
+import { useSongPlayback } from '~/composables/useSongPlayback'
 import {
   COMMUNITY_IMAGE_MAX_UPLOAD_BYTES,
   compressCommunityImageFile,
@@ -1094,6 +1003,8 @@ const mentionHint = computed(() => Boolean(t.value.mentionHint))
 
 const voteRevealMode = ref('ASK')
 const pendingLikePost = ref<AnyRecord | null>(null)
+const pendingPostLike = ref<AnyRecord | null>(null)
+const pendingCommentLike = ref<AnyRecord | null>(null)
 const pendingRevealChoice = ref('ANONYMOUS')
 const pendingRememberChoice = ref(false)
 
@@ -1234,11 +1145,136 @@ function setSort(mode: 'latest' | 'hot') {
 }
 
 /** 帖子点赞（与歌曲点赞独立） */
+// 歌曲播放与投稿列表共用同一套逻辑：社区没有列表概念，只播放当前这一首
+const {
+  togglePlaySong: toggleSongPlayback,
+  audioPlayer: songAudioPlayer
+} = useSongPlayback({
+  onUrlError: () => showToast(t.value.musicUrlFailed || '', 'error')
+})
+
+/** 这首歌有没有音源信息，决定封面能不能点 */
+function canPlaySong(song: AnyRecord | null): boolean {
+  if (!song) return false
+  return Boolean((song.musicPlatform && song.musicId) || song.playUrl)
+}
+
+/** 这首歌是否正在播放（用于切换播放/暂停图标） */
+function isPlayingSong(song: AnyRecord | null): boolean {
+  if (!song) return false
+  return songAudioPlayer.isCurrentSong(song.id) && songAudioPlayer.getPlayingStatus().value
+}
+
+async function playPostSong(post: AnyRecord) {
+  if (!canPlaySong(post?.song)) return
+  await toggleSongPlayback(post.song)
+}
+
+/** 子组件抛出的举报事件：统一在父组件打开举报弹窗 */
+function reportComment(comment: AnyRecord) {
+  openReport('COMMENT', comment.id, comment.content)
+}
+
+/**
+ * 评论点赞（含子评论）：与歌曲/帖子点赞共用 voteRevealMode 偏好。
+ * 本地更新 + 按点赞重排，不整页刷新。
+ */
+async function toggleCommentLike(comment: AnyRecord) {
+  if (!comment?.id) return
+  // 取消点赞不需要询问署名
+  if (comment.likedByMe) {
+    await submitCommentLike(comment, false)
+    return
+  }
+  if (voteRevealMode.value === 'ANONYMOUS' || voteRevealMode.value === 'REVEAL') {
+    await submitCommentLike(comment, voteRevealMode.value === 'REVEAL')
+    return
+  }
+  pendingCommentLike.value = comment
+}
+
+async function submitCommentLike(comment: AnyRecord, reveal: boolean) {
+  if (!comment?.id) return
+  try {
+    const res = await $fetch<AnyRecord>(`/api/community/comments/${comment.id}/like`, {
+      method: 'POST',
+      body: { reveal: reveal === true }
+    })
+    applyCommentLikeState(Number(comment.id), Boolean(res.liked), Number(res.likeCount || 0))
+  } catch (error: any) {
+    showToast(apiMessage(error, t.value.likeFailed), 'error')
+  }
+}
+
+async function onCommentLikeRevealConfirm(reveal: boolean, remember: boolean) {
+  const comment = pendingCommentLike.value
+  pendingCommentLike.value = null
+  if (!comment) return
+  if (remember) {
+    try {
+      await $fetch('/api/user/vote-reveal', {
+        method: 'PUT',
+        body: { voteRevealMode: reveal ? 'REVEAL' : 'ANONYMOUS' }
+      })
+      voteRevealMode.value = reveal ? 'REVEAL' : 'ANONYMOUS'
+    } catch {
+      showToast(uiT.value.voteReveal.saveFailed, 'error')
+    }
+  }
+  await submitCommentLike(comment, reveal)
+}
+
+function applyCommentLikeState(commentId: number, liked: boolean, likeCount: number) {
+  const update = (list: AnyRecord[]) => {
+    for (const node of list) {
+      if (Number(node.id) === commentId) {
+        node.likedByMe = liked
+        node.likeCount = Math.max(0, likeCount)
+      }
+      if (Array.isArray(node.replies) && node.replies.length) {
+        update(node.replies)
+        // 点赞高的子评论排前面（同赞数按时间正序），与服务端排序口径一致
+        node.replies.sort(
+          (a: AnyRecord, b: AnyRecord) =>
+            Number(b.likeCount || 0) - Number(a.likeCount || 0) ||
+            new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime() ||
+            Number(a.id) - Number(b.id)
+        )
+      }
+    }
+  }
+  update(threads.value as AnyRecord[])
+  for (const item of comments.value as AnyRecord[]) {
+    if (Number(item.id) === commentId) {
+      item.likedByMe = liked
+      item.likeCount = Math.max(0, likeCount)
+    }
+  }
+}
+
+/** 帖子点赞与歌曲点赞共用 voteRevealMode 偏好：ASK 每次询问 / ANONYMOUS 匿名 / REVEAL 署名 */
 async function togglePostLike(post: AnyRecord) {
+  if (!post?.id || post.liking) return
+  // 取消点赞不需要询问署名
+  if (post.likedByMe) {
+    await submitPostLike(post, false)
+    return
+  }
+  if (voteRevealMode.value === 'ANONYMOUS' || voteRevealMode.value === 'REVEAL') {
+    await submitPostLike(post, voteRevealMode.value === 'REVEAL')
+    return
+  }
+  pendingPostLike.value = post
+}
+
+async function submitPostLike(post: AnyRecord, reveal: boolean) {
   if (!post?.id || post.liking) return
   post.liking = true
   try {
-    const res = await $fetch<AnyRecord>(`/api/community/posts/${post.id}/like`, { method: 'POST' })
+    const res = await $fetch<AnyRecord>(`/api/community/posts/${post.id}/like`, {
+      method: 'POST',
+      body: { reveal: reveal === true }
+    })
     post.likedByMe = Boolean(res.liked)
     post.likeCount = Number(res.likeCount || 0)
     if (selectedPost.value?.id === post.id) {
@@ -1250,6 +1286,24 @@ async function togglePostLike(post: AnyRecord) {
   } finally {
     post.liking = false
   }
+}
+
+async function onPostLikeRevealConfirm(reveal: boolean, remember: boolean) {
+  const post = pendingPostLike.value
+  pendingPostLike.value = null
+  if (!post) return
+  if (remember) {
+    try {
+      await $fetch('/api/user/vote-reveal', {
+        method: 'PUT',
+        body: { voteRevealMode: reveal ? 'REVEAL' : 'ANONYMOUS' }
+      })
+      voteRevealMode.value = reveal ? 'REVEAL' : 'ANONYMOUS'
+    } catch {
+      showToast(uiT.value.voteReveal.saveFailed, 'error')
+    }
+  }
+  await submitPostLike(post, reveal)
 }
 
 /** 管理员置顶/取消置顶 */
@@ -1274,7 +1328,8 @@ const LIKE_BLOCK_KEYS: Record<string, string> = {
   INACTIVE_SEMESTER: 'likeBlockedInactiveSemester',
   PLAYED: 'likeBlockedPlayed',
   SCHEDULED: 'likeBlockedScheduled',
-  SELF: 'likeBlockedSelf'
+  SELF: 'likeBlockedSelf',
+  BLACKLIST: 'likeBlockedBlacklist'
 }
 
 function songBlockedText(song: AnyRecord | null): string {
@@ -1289,6 +1344,11 @@ function likeBlockedText(post: AnyRecord | null): string {
   return songBlockedText(post?.song)
 }
 
+/** 帖子卡片上展示的歌曲提示：只显示点不了赞的原因（黑名单等），不再展示热度去向提示 */
+function songNoteText(post: AnyRecord | null): string {
+  return likeBlockedText(post)
+}
+
 function canToggleLike(post: AnyRecord | null): boolean {
   const song = post?.song
   if (!song) return false
@@ -1301,11 +1361,19 @@ function likeButtonTitle(post: AnyRecord | null): string {
   return likeBlockedText(post) || (post.song.likedByMe ? t.value.unlike : t.value.like)
 }
 
-function applyLikeState(songId: number, liked: boolean, voteCount: number) {
+function applyLikeState(
+  songId: number,
+  liked: boolean,
+  likeCount: number,
+  voteCount: number,
+  eligible: boolean
+) {
   const update = (post: AnyRecord | null) => {
     if (!post?.song || post.song.id !== songId) return
     post.song.likedByMe = liked
+    post.song.likeCount = Math.max(0, likeCount)
     post.song.voteCount = Math.max(0, voteCount)
+    post.song.eligible = eligible
     post.song.canLike = !liked
     post.song.canUnvote = liked
     post.song.likeBlockedCode = null
@@ -1328,16 +1396,20 @@ async function loadVoteRevealMode() {
 async function submitVote(post: AnyRecord, reveal: boolean) {
   if (!post?.song || post.liking) return
   const songId = Number(post.song.id)
-  const unvote = !!post.song.likedByMe
   post.liking = true
   try {
-    // 与 VoiceHub 点歌页共用 /api/songs/vote，热度写回同一张 Vote 表
-    const res = await $fetch<AnyRecord>('/api/songs/vote', {
+    // 社区点赞与点歌页解耦：任意非黑名单歌曲都能点，只有待排期歌曲的赞同步进点歌热度
+    const res = await $fetch<AnyRecord>(`/api/community/songs/${songId}/like`, {
       method: 'POST',
-      body: { songId, unvote, revealToRequester: unvote ? false : reveal === true }
+      body: { reveal: reveal === true }
     })
-    const count = Number(res?.song?.voteCount ?? post.song.voteCount + (unvote ? -1 : 1))
-    applyLikeState(songId, !unvote, count)
+    applyLikeState(
+      songId,
+      Boolean(res.liked),
+      Number(res.likeCount || 0),
+      Number(res.voteCount || 0),
+      Boolean(res.eligible)
+    )
   } catch (error: any) {
     showToast(apiMessage(error, t.value.likeFailed), 'error')
   } finally {
@@ -1349,12 +1421,11 @@ function cancelLikeReveal() {
   pendingLikePost.value = null
 }
 
-async function confirmLikeReveal() {
+async function onLikeRevealConfirm(reveal: boolean, remember: boolean) {
   const post = pendingLikePost.value
-  if (!post) return
-  const reveal = pendingRevealChoice.value === 'REVEAL'
   pendingLikePost.value = null
-  if (pendingRememberChoice.value) {
+  if (!post) return
+  if (remember) {
     try {
       await $fetch('/api/user/vote-reveal', {
         method: 'PUT',
@@ -1386,8 +1457,6 @@ async function toggleLike(post: AnyRecord) {
     return
   }
 
-  pendingRevealChoice.value = 'ANONYMOUS'
-  pendingRememberChoice.value = false
   pendingLikePost.value = post
 }
 
@@ -2286,6 +2355,31 @@ onUnmounted(() => {
   overflow: hidden;
   background: var(--overlay-8);
   color: var(--text-tertiary);
+}
+
+/* 有音源信息的歌曲封面可点击播放，沿用投稿列表的悬停浮层 */
+.song-cover.is-playable {
+  position: relative;
+  cursor: pointer;
+}
+
+.play-button-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--mask-40);
+  color: #fff;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.song-cover.is-playable:hover .play-button-overlay {
+  opacity: 1;
 }
 
 .song-cover img {
