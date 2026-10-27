@@ -1,6 +1,6 @@
+#!/usr/bin/env node
 /* Modified by YH-Chen-Eternity on 2026-10-23 */
 
-#!/usr/bin/env node
 
 import { config } from 'dotenv'
 import path from 'path'
