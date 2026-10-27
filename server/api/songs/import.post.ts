@@ -97,51 +97,15 @@ export default defineEventHandler(async (event) => {
       continue
     }
 
-    // 2. 检查黑名单
-    const songFullName = `${song.title} - ${song.artist || ''}`.toLowerCase()
-    let isBlocked = false
-    let blockReason = ''
-
-    // 语种/曲风懒解析：首次遇到类型项才请求音源，已被歌名/关键词拦截的歌曲不触发外部请求
-    let songTypes: Awaited<ReturnType<typeof resolveSongTypes>> = null
-    let typesResolved = false
-
-    for (const item of blacklistItems) {
-      if (item.type === 'SONG') {
-        if (songFullName.includes(item.value.toLowerCase())) {
-          isBlocked = true
-          blockReason = item.reason || '黑名单歌曲'
-          break
-        }
-      } else if (item.type === 'KEYWORD') {
-        if (songFullName.includes(item.value.toLowerCase())) {
-          isBlocked = true
-          blockReason = item.reason || '包含违规关键词'
-          break
-        }
-      } else if (item.type === 'LANGUAGE') {
-        // 解析失败或平台不支持时返回 null，类型黑名单放行
-        if (!typesResolved) {
-          songTypes = await resolveSongTypes(song.musicPlatform, song.musicId)
-          typesResolved = true
-        }
-        if (songTypes && matchBlacklistLanguage(item.value, songTypes.languages)) {
-          isBlocked = true
-          blockReason = item.reason || `语种「${item.value}」已被加入黑名单`
-          break
-        }
-      } else if (item.type === 'GENRE') {
-        if (!typesResolved) {
-          songTypes = await resolveSongTypes(song.musicPlatform, song.musicId)
-          typesResolved = true
-        }
-        if (songTypes && matchBlacklistGenre(item.value, songTypes.genres)) {
-          isBlocked = true
-          blockReason = item.reason || `曲风「${item.value}」已被加入黑名单`
-          break
-        }
-      }
-    }
+    // 2. 检查黑名单（统一走 songBlacklistMatch，规则始终读后台配置）
+    const blacklistResult = await checkSongBlacklist({
+      title: song.title,
+      artist: song.artist,
+      musicPlatform: song.musicPlatform,
+      musicId: song.musicId ? String(song.musicId) : null
+    })
+    const isBlocked = blacklistResult.isBlocked
+    const blockReason = blacklistResult.reasons[0]?.reason || ''
 
     if (isBlocked) {
       results.failed++

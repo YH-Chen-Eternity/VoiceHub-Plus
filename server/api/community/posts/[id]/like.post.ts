@@ -1,4 +1,4 @@
-import { getRouterParam } from 'h3'
+import { getRouterParam, readBody } from 'h3'
 import { and, eq, sql } from 'drizzle-orm'
 import { db } from '~/drizzle/db'
 import { communityPostLikes, communityPosts, notifications } from '~/drizzle/schema'
@@ -12,6 +12,10 @@ export default defineEventHandler(async (event) => {
   if (!settings.enabled && !isCommunityReviewer(user)) {
     throw createApiError(403, 'COMMUNITY_DISABLED', '回声社区暂未开放')
   }
+
+  // 点赞时是否让帖子作者知道是我（与歌曲点赞共用 voteRevealMode 偏好，默认匿名）
+  const body = await readBody(event).catch(() => null)
+  const reveal = body?.reveal === true
 
   const postId = Number(getRouterParam(event, 'id'))
   if (!Number.isInteger(postId) || postId <= 0) {
@@ -59,7 +63,7 @@ export default defineEventHandler(async (event) => {
       return { liked: false, likeCount: Number(updated?.likeCount || 0) }
     }
 
-    await tx.insert(communityPostLikes).values({ postId, userId: user.id })
+    await tx.insert(communityPostLikes).values({ postId, userId: user.id, revealToAuthor: reveal })
     const [updated] = await tx
       .update(communityPosts)
       .set({ likeCount: sql`${communityPosts.likeCount} + 1` })
@@ -72,7 +76,7 @@ export default defineEventHandler(async (event) => {
         type: 'COMMUNITY_POST_LIKE',
         source: 'COMMUNITY',
         title: '回声社区有新点赞',
-        message: `${user.name || '一位同学'} 点赞了你的帖子`
+        message: `${reveal ? user.name || '一位同学' : '一位同学'} 点赞了你的帖子`
       })
     }
     return { liked: true, likeCount: Number(updated?.likeCount || 0) }

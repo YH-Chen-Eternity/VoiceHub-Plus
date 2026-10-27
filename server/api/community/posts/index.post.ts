@@ -13,6 +13,7 @@ import { createApiError } from '~~/server/utils/apiError'
 import { SERVER_ERROR_CODES } from '~~/server/config/constants'
 import { checkDistributedRateLimit } from '~~/server/utils/rateLimiter'
 import { signMediaToken } from '~~/server/utils/mediaToken'
+import { checkSongBlacklist } from '~~/server/utils/songBlacklistMatch'
 import { getServerTimestamp } from '~~/server/utils/serverTime'
 import { moderateCommunityImage, moderateCommunityText } from '~~/server/utils/communityModeration'
 import {
@@ -122,13 +123,34 @@ export default defineEventHandler(async (event) => {
     if (!Number.isInteger(parsed) || parsed <= 0) {
       throw createApiError(400, 'COMMUNITY_SONG_INVALID', '歌曲参数不正确')
     }
-    // 选歌只要求「已投稿」；能否点赞由 /api/songs/vote 的资格规则单独判定
+    // 选歌只要求「已投稿」：往期、已播放、已排期的歌曲都能附到帖子。
+    // 但命中黑名单的歌曲不允许附上去（含语种/曲风，与投稿时共用同一套后台配置规则）
     const song = await db
-      .select({ id: songs.id })
+      .select({
+        id: songs.id,
+        title: songs.title,
+        artist: songs.artist,
+        musicPlatform: songs.musicPlatform,
+        musicId: songs.musicId
+      })
       .from(songs)
       .where(eq(songs.id, parsed))
       .limit(1)
     if (!song[0]) throw createApiError(404, 'SONG_NOT_FOUND', '歌曲不存在')
+
+    const blacklistResult = await checkSongBlacklist({
+      title: song[0].title,
+      artist: song[0].artist,
+      musicPlatform: song[0].musicPlatform,
+      musicId: song[0].musicId
+    })
+    if (blacklistResult.isBlocked) {
+      throw createApiError(
+        400,
+        'SONG_BLACKLISTED',
+        blacklistResult.reasons[0]?.reason || '该歌曲已被加入黑名单'
+      )
+    }
     songId = parsed
   }
 

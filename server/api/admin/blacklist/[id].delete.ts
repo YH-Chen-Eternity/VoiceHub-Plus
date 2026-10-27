@@ -2,6 +2,7 @@ import { createError, defineEventHandler, getRouterParam } from 'h3'
 import { db } from '~/drizzle/db'
 import { songBlacklists } from '~/drizzle/schema'
 import { eq } from 'drizzle-orm'
+import { invalidateSongBlacklistCache } from '~~/server/utils/songBlacklistMatch'
 
 export default defineEventHandler(async (event) => {
   // 检查认证和权限
@@ -39,6 +40,9 @@ export default defineEventHandler(async (event) => {
 
     // 删除黑名单项
     await db.delete(songBlacklists).where(eq(songBlacklists.id, id))
+
+    // 后台配置已变更：立即使黑名单缓存失效
+    invalidateSongBlacklistCache()
 
     return {
       success: true,
