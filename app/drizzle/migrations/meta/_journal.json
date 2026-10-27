@@ -540,6 +540,20 @@
       "when": 1792904247561,
       "tag": "20261025045727_perpetual_lionheart",
       "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1793029800000,
+      "tag": "20261026235000_open_nesting",
+      "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1793062200000,
+      "tag": "20261027085000_comment_like_reveal",
+      "breakpoints": true
     }
   ]
 }

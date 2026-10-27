@@ -1157,10 +1157,12 @@ export const communityComments = pgTable('CommunityComment', {
   id: serial('id').primaryKey(),
   createdAt: timestamp('createdAt').defaultNow().notNull(),
   postId: integer('postId').notNull().references(() => communityPosts.id, { onDelete: 'cascade' }),
-  // 楼中楼：回复某条评论时记录父评论（仅支持一层）
+  // 楼中楼：回复某条评论时记录父评论（支持任意深度嵌套）
   parentId: integer('parentId'),
   authorId: integer('authorId').notNull().references(() => users.id, { onDelete: 'cascade' }),
   content: text('content').notNull(),
+  // 评论点赞数（冗余计数，明细在 CommunityCommentLike）
+  likeCount: integer('likeCount').default(0).notNull(),
   // PENDING / APPROVED / REJECTED / BLOCKED，评论与帖子走同一套审核流程
   status: text('status').default('PENDING').notNull(),
   moderationLabel: text('moderationLabel'),
@@ -1175,6 +1177,8 @@ export const communityComments = pgTable('CommunityComment', {
   purgeAt: timestamp('purgeAt'),
 }, (table) => [
   index('CommunityComment_post_idx').on(table.postId, table.createdAt),
+  // 按父评论取子回复：支持任意深度嵌套后，建树时按 parentId 反查
+  index('CommunityComment_parent_idx').on(table.parentId, table.createdAt),
   index('CommunityComment_status_idx').on(table.status, table.createdAt),
   index('CommunityComment_author_idx').on(table.authorId, table.createdAt),
   index('CommunityComment_purge_idx').on(table.purgeAt)
@@ -1266,10 +1270,40 @@ export const communityViolations = pgTable('CommunityViolation', {
 export const communityPostLikes = pgTable('CommunityPostLike', {
   postId: integer('postId').notNull().references(() => communityPosts.id, { onDelete: 'cascade' }),
   userId: integer('userId').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  // 点赞时是否让帖子作者知道是我（沿用歌曲点赞的署名/匿名语义）
+  revealToAuthor: boolean('revealToAuthor').default(false).notNull(),
   createdAt: timestamp('createdAt').defaultNow().notNull(),
 }, (table) => [
   primaryKey({ columns: [table.postId, table.userId] }),
   index('CommunityPostLike_user_idx').on(table.userId, table.createdAt)
+]);
+
+/**
+ * 社区内的歌曲点赞（与投稿热度 Vote 解耦）：
+ * 任意歌曲都能点赞，只有「待排期」歌曲的赞会同步成一条 Vote 计入热度。
+ * syncedToVote 记录这条赞是否已同步，供歌曲变成待排期时补同步、取消赞时同步删除。
+ */
+export const communitySongLikes = pgTable('CommunitySongLike', {
+  songId: integer('songId').notNull().references(() => songs.id, { onDelete: 'cascade' }),
+  userId: integer('userId').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  syncedToVote: boolean('syncedToVote').default(false).notNull(),
+  createdAt: timestamp('createdAt').defaultNow().notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.songId, table.userId] }),
+  index('CommunitySongLike_user_idx').on(table.userId, table.createdAt),
+  index('CommunitySongLike_sync_idx').on(table.syncedToVote, table.songId)
+]);
+
+/** 评论点赞明细（含子评论），与帖子点赞相互独立 */
+export const communityCommentLikes = pgTable('CommunityCommentLike', {
+  commentId: integer('commentId').notNull().references(() => communityComments.id, { onDelete: 'cascade' }),
+  userId: integer('userId').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  // 点赞时是否让评论作者知道是我（与歌曲/帖子点赞共用署名偏好）
+  revealToAuthor: boolean('revealToAuthor').default(false).notNull(),
+  createdAt: timestamp('createdAt').defaultNow().notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.commentId, table.userId] }),
+  index('CommunityCommentLike_user_idx').on(table.userId, table.createdAt)
 ]);
 
 export const communitySettings = pgTable('CommunitySettings', {

@@ -32,6 +32,8 @@ interface CommunityCommentPayload {
   reviewNote: string | null
   parentId: number | null
   replyTo: string | null
+  likeCount: number
+  likedByMe: boolean
   mentionNames: string[]
   author: {
     id: number
@@ -44,7 +46,7 @@ interface CommunityCommentPayload {
 
 /** 楼中楼：顶层评论 + 其下所有回复（库表只支持一层 parentId，读取时归一化到根） */
 interface CommunityCommentThread extends CommunityCommentPayload {
-  replies: CommunityCommentPayload[]
+  replies: CommunityCommentThread[]
 }
 
 export default defineEventHandler(async (event) => {
@@ -106,6 +108,8 @@ export default defineEventHandler(async (event) => {
       reviewNote: communityComments.reviewNote,
       parentId: communityComments.parentId,
       authorId: communityComments.authorId,
+      likeCount: communityComments.likeCount,
+      likedByMe: sql<boolean>`exists(select 1 from "CommunityCommentLike" ccl where ccl."commentId" = ${communityComments.id} and ccl."userId" = ${user.id})`,
       authorName: users.name,
       authorGrade: users.grade,
       authorClass: users.class,
@@ -124,13 +128,14 @@ export default defineEventHandler(async (event) => {
   for (const row of rows) {
     mentionTokens.push(...extractCommunityMentionTokens(row.content))
   }
-  const mentionUserByToken = await resolveCommunityMentionUsers(mentionTokens)
+  const mentionUserByToken = await resolveCommunityMentionUsers(mentionTokens, user)
 
   const rowById = new Map(rows.map((row) => [row.id, row]))
   const identityOf = (row: (typeof rows)[number]) =>
     buildCommunityIdentity(
-      { name: row.authorName, grade: row.authorGrade, class: row.authorClass },
-      row.titleName
+      { id: row.authorId, name: row.authorName, grade: row.authorGrade, class: row.authorClass },
+      row.titleName,
+      user
     )
 
   const comments: CommunityCommentPayload[] = rows.map((row) => {
@@ -146,11 +151,25 @@ export default defineEventHandler(async (event) => {
       if (mentioned.length >= COMMUNITY_MENTION_LIMIT) break
     }
 
+    // 正文里的 @提及按查看者权限重写：非管理员看「@陈*翰」，管理员/本人看「@陈奕翰」。
+    // 先替换更长的 token，避免「@陈」抢先把「@陈奕翰」替换坏。
+    let displayContent = row.content
+    const resolvableTokens = extractCommunityMentionTokens(row.content)
+      .filter((token) => mentionUserByToken.has(token))
+      .sort((a, b) => b.length - a.length)
+    for (const token of resolvableTokens) {
+      const mentionedUser = mentionUserByToken.get(token)
+      if (!mentionedUser?.displayName) continue
+      displayContent = displayContent.split(`@${token}`).join(`@${mentionedUser.displayName}`)
+    }
+
     return {
       id: row.id,
       createdAt: row.createdAt,
-      content: row.content,
+      content: displayContent,
       status: row.status,
+      likeCount: Number(row.likeCount || 0),
+      likedByMe: !!row.likedByMe,
       reviewNote: row.reviewNote,
       parentId: row.parentId ?? null,
       replyTo: parent ? identityOf(parent).displayName : null,
@@ -162,38 +181,49 @@ export default defineEventHandler(async (event) => {
     }
   })
 
-  // 组装楼中楼：父评论不可见的回复提升为顶层，深层回复统一挂到根评论下
-  const commentById = new Map(comments.map((comment) => [comment.id, comment]))
-  const findRoot = (comment: CommunityCommentPayload): CommunityCommentPayload => {
-    let current = comment
-    for (let guard = 0; guard < 20; guard += 1) {
-      const parent = current.parentId ? commentById.get(current.parentId) : undefined
-      if (!parent) return current
-      current = parent
-    }
-    // 理论上不存在环（parentId 只会指向已存在的评论），兜底避免脏数据导致死循环
-    return current
+  // 组装评论树：支持任意深度嵌套，父评论不可见（被删除/未过审）的回复提升为顶层
+  const nodeById = new Map<number, CommunityCommentThread>()
+  for (const comment of comments) {
+    nodeById.set(comment.id, { ...comment, replies: [] })
   }
 
-  const threadByRootId = new Map<number, CommunityCommentThread>()
-  const threads: CommunityCommentThread[] = []
+  const roots: CommunityCommentThread[] = []
   for (const comment of comments) {
-    const root = findRoot(comment)
-    if (root.id !== comment.id) continue
-    const thread: CommunityCommentThread = { ...comment, replies: [] }
-    threadByRootId.set(comment.id, thread)
-    threads.push(thread)
+    const node = nodeById.get(comment.id)
+    if (!node) continue
+    // 父评论在当前可见集合里就挂到它下面；父评论不可见则提升为顶层
+    const parent = comment.parentId != null ? nodeById.get(comment.parentId) : undefined
+    if (parent && parent !== node) {
+      // 脏数据兜底：父链成环时不挂载，直接提升为顶层
+      let cyclic = false
+      let cursor: CommunityCommentThread | undefined = parent
+      for (let guard = 0; cursor && guard < 50; guard += 1) {
+        if (cursor === node) {
+          cyclic = true
+          break
+        }
+        cursor = cursor.parentId != null ? nodeById.get(cursor.parentId) : undefined
+      }
+      if (cyclic) roots.push(node)
+      else parent.replies.push(node)
+    } else {
+      roots.push(node)
+    }
   }
-  for (const comment of comments) {
-    if (threadByRootId.has(comment.id)) continue
-    const thread = threadByRootId.get(findRoot(comment).id)
-    if (thread) thread.replies.push(comment)
-  }
+  const threads = roots
 
   const byCreatedAtAsc = (a: { createdAt: Date; id: number }, b: { createdAt: Date; id: number }) =>
     new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime() || a.id - b.id
-  threads.sort(byCreatedAtAsc)
-  for (const thread of threads) thread.replies.sort(byCreatedAtAsc)
+  // 子评论点赞高的排前面（同赞数按时间正序）；顶层评论保持时间正序
+  const byLikeDesc = (
+    a: { likeCount: number; createdAt: Date; id: number },
+    b: { likeCount: number; createdAt: Date; id: number }
+  ) => Number(b.likeCount || 0) - Number(a.likeCount || 0) || byCreatedAtAsc(a, b)
+  const sortReplies = (list: CommunityCommentThread[]): void => {
+    list.sort(byLikeDesc)
+    for (const item of list) sortReplies(item.replies)
+  }
+  sortReplies(threads)
 
   // 评论总数只统计已通过审核且未删除的评论（与帖子列表 commentCount 口径一致）
   const totalCountRows = await db
