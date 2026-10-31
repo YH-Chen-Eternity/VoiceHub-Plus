@@ -5,6 +5,7 @@ import { createApiError } from '~~/server/utils/apiError'
 import { getClientIP } from '~~/server/utils/ip-utils'
 import { checkDistributedRateLimit } from '~~/server/utils/rateLimiter'
 import { getTxSongPlayableInfo, upgradeTxAudioUrl } from '~~/server/utils/native_tx'
+import { buildRedisKey, getRedisClient, isRedisConfigured } from '~~/server/utils/redis'
 import {
   getQqCookieDiagnostic,
   normalizeQqCookie,
@@ -114,6 +115,63 @@ const resolveTxWithHelloWorld = async (name: string) => {
   return upgradeTxAudioUrl(playUrl)
 }
 
+// ---------------------------------------------------------------------------
+// 解析结果缓存（跨实例共享，2026-10-31 优化）
+// 背景：同一首歌在高峰期会被反复解析，每次都真实打上游接口；上游偶发 500 时
+// 直接以 502 抛给前端，表现为「歌放不出来」。这里做三件事：
+//   1. 结果缓存：匿名链路的解析结果按歌缓存，命中就不再打上游
+//   2. 并发合并：同一首歌的并发请求合并成一个上游调用
+//   3. 多源降级：单源失败时自动尝试其它源，而不是直接 502
+// 安全约束：带用户登录态的结果（含 cookie / 私有 VIP 直链）一律不进共享缓存
+// ---------------------------------------------------------------------------
+const RESOLVE_CACHE_TTL_SECONDS = 45 * 60
+
+type MusicResolveResult = {
+  success: boolean
+  url: string
+  source: string
+  normalizedMusicId: string
+  idType: string
+  authUsed: boolean
+  authDiagnostic: unknown
+  cached?: boolean
+  cookie?: string
+}
+
+// 进程内 in-flight 去重：同一首歌的并发解析共用一个上游请求
+const inFlightResolves = new Map<string, Promise<MusicResolveResult>>()
+
+const readResolveCache = async (key: string): Promise<MusicResolveResult | null> => {
+  try {
+    if (!isRedisConfigured()) return null
+    const client = await getRedisClient()
+    if (!client) return null
+    const raw = await client.get(key)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (!parsed || typeof parsed.url !== 'string' || !parsed.url) return null
+    // 缓存只存匿名链路结果，读出时再剔除一次登录态字段，双保险
+    const { cookie: _omit, ...safe } = parsed
+    return { ...safe, cached: true } as MusicResolveResult
+  } catch {
+    return null
+  }
+}
+
+const writeResolveCache = async (key: string, value: MusicResolveResult) => {
+  try {
+    if (!isRedisConfigured()) return
+    const client = await getRedisClient()
+    if (!client) return
+    // 登录态结果不进共享缓存
+    if (value.cookie) return
+    const { cached: _omit, ...payload } = value
+    await client.set(key, JSON.stringify(payload), { EX: RESOLVE_CACHE_TTL_SECONDS })
+  } catch {
+    // 缓存写入失败不影响主流程
+  }
+}
+
 export default defineEventHandler(async (event) => {
   const rateLimit = await checkDistributedRateLimit(
     `music_resolve_url:${getClientIP(event)}`,
@@ -160,144 +218,196 @@ export default defineEventHandler(async (event) => {
   }
 
   const normalizedMusicId = String(musicId || '').trim()
+  const songName = String(body?.name || '').trim()
 
-  // 官方与第三方取链均要求字母 songmid；历史数字 songId 先解析为 MID，避免原样透传导致取链失败
-  let resolvedMusicId = normalizedMusicId
-  let resolvedMediaId = String(body?.mediaId || '').trim() || undefined
-  if (/^\d+$/.test(normalizedMusicId)) {
-    try {
-      const playable = await getTxSongPlayableInfo(normalizedMusicId)
-      resolvedMusicId = playable.songmid
-      if (!resolvedMediaId && playable.strMediaMid) resolvedMediaId = playable.strMediaMid
-    } catch (error: any) {
-      console.warn('[music/resolve-url] QQ 数字 songId 解析 MID 失败:', error?.message || error)
-      throw createError({ statusCode: 502, message: 'QQ 音乐播放链接解析失败' })
-    }
+  // 缓存仅用于匿名链路：带登录态时结果与用户绑定（VIP 音质/私有直链），不可共享
+  const cacheable = !cookie
+  const cacheKey = cacheable
+    ? buildRedisKey(
+        'musicres',
+        platform,
+        normalizedMusicId,
+        strategy,
+        String(body?.quality ?? ''),
+        String(body?.mediaId ?? ''),
+        songName,
+        Array.from(excludedSources).sort().join(',')
+      )
+    : ''
+
+  if (cacheKey) {
+    const cached = await readResolveCache(cacheKey)
+    if (cached) return cached
   }
 
-  // 聚合源兜底链：玉宁熙（按 mid）→ HelloWorld（按歌名），统一走后端以规避前端 CORS
-  if (strategy === 'aggregator') {
-    const aggregatorName = String(body?.name || '').trim()
-    const attempts: Array<{ id: string; run: () => Promise<string> }> = []
-    if (!excludedSources.has('yuafeng-tx')) {
-      attempts.push({ id: 'yuafeng-tx', run: () => resolveTxWithYuafeng(resolvedMusicId, body?.quality) })
+  const buildResponse = (
+    url: string,
+    source: string,
+    resolvedId: string,
+    idType: string,
+    authUsed: boolean,
+    activeCookie?: string
+  ): MusicResolveResult => {
+    const response: MusicResolveResult = {
+      success: true,
+      url,
+      source,
+      normalizedMusicId: resolvedId,
+      idType,
+      authUsed,
+      authDiagnostic: getQqCookieDiagnostic(activeCookie || cookie)
     }
-    if (!excludedSources.has('helloworld-tx') && aggregatorName) {
-      attempts.push({ id: 'helloworld-tx', run: () => resolveTxWithHelloWorld(aggregatorName) })
-    }
+    if (activeCookie) response.cookie = activeCookie
+    return response
+  }
 
-    let lastError = ''
-    for (const attempt of attempts) {
+  const runResolve = async (): Promise<MusicResolveResult> => {
+    // 官方与第三方取链均要求字母 songmid；历史数字 songId 先解析为 MID，避免原样透传导致取链失败
+    let resolvedMusicId = normalizedMusicId
+    let resolvedMediaId = String(body?.mediaId || '').trim() || undefined
+    if (/^\d+$/.test(normalizedMusicId)) {
       try {
-        const url = await attempt.run()
-        return {
-          success: true,
-          url,
-          source: attempt.id,
-          normalizedMusicId: resolvedMusicId,
-          idType: 'songmid',
-          authUsed: false,
-          authDiagnostic: getQqCookieDiagnostic(cookie)
-        }
+        const playable = await getTxSongPlayableInfo(normalizedMusicId)
+        resolvedMusicId = playable.songmid
+        if (!resolvedMediaId && playable.strMediaMid) resolvedMediaId = playable.strMediaMid
       } catch (error: any) {
-        lastError = error?.message || String(error)
-        console.warn(`[music/resolve-url] ${attempt.id} 解析失败:`, lastError)
+        console.warn('[music/resolve-url] QQ 数字 songId 解析 MID 失败:', error?.message || error)
+        throw createError({ statusCode: 502, message: 'QQ 音乐播放链接解析失败' })
       }
     }
+
+    // 聚合源兜底链：玉宁熙（按 mid）→ HelloWorld（按歌名）→ HYW，统一走后端以规避前端 CORS
+    if (strategy === 'aggregator') {
+      const attempts: Array<{ id: string; run: () => Promise<string> }> = []
+      if (!excludedSources.has('yuafeng-tx')) {
+        attempts.push({ id: 'yuafeng-tx', run: () => resolveTxWithYuafeng(resolvedMusicId, body?.quality) })
+      }
+      if (!excludedSources.has('helloworld-tx') && songName) {
+        attempts.push({ id: 'helloworld-tx', run: () => resolveTxWithHelloWorld(songName) })
+      }
+      if (!excludedSources.has('hyw-tx')) {
+        attempts.push({ id: 'hyw-tx', run: () => resolveTxWithHyw(resolvedMusicId, body?.quality) })
+      }
+
+      let lastError = ''
+      for (const attempt of attempts) {
+        try {
+          const url = await attempt.run()
+          return buildResponse(url, attempt.id, resolvedMusicId, 'songmid', false)
+        } catch (error: any) {
+          lastError = error?.message || String(error)
+          console.warn(`[music/resolve-url] ${attempt.id} 解析失败:`, lastError)
+        }
+      }
+      throw createError({
+        statusCode: 502,
+        message: lastError ? `QQ 聚合源解析失败：${lastError}` : 'QQ 聚合源解析失败'
+      })
+    }
+
+    // 官方 Cookie 链路：带用户登录态走 CgiGetVkey，可获取 VIP/高音质直链
+    if (strategy === 'official-first') {
+      if (excludedSources.has('qq-official')) {
+        throw createError({ statusCode: 502, message: 'QQ 音乐播放链接解析失败' })
+      }
+
+      const mediaId = resolvedMediaId
+
+      // SDK 与原生直连互为校验：SDK 依赖上游文件名策略，原生链路可诊断拒绝原因
+      const attemptOfficial = async (activeCookie?: string): Promise<string> => {
+        try {
+          return await resolveQqSdkPlayUrl(resolvedMusicId, body?.quality, activeCookie, mediaId)
+        } catch (error: any) {
+          const sdkError = error?.message || String(error)
+          console.warn('[music/resolve-url] QQ 官方 SDK 解析失败，尝试原生直连:', sdkError)
+
+          try {
+            return await resolveQqOfficialPlayUrl({
+              songmid: resolvedMusicId,
+              quality: body?.quality,
+              cookie: activeCookie,
+              mediaId
+            })
+          } catch (nativeError: any) {
+            const nativeErrorText = nativeError?.message || String(nativeError)
+            console.warn('[music/resolve-url] QQ 原生直连解析失败:', nativeErrorText)
+            throw createError({
+              statusCode: 502,
+              message: `QQ 官方链路解析失败：${sdkError}；原生直连：${nativeErrorText}`
+            })
+          }
+        }
+      }
+
+      let activeCookie = cookie || undefined
+      try {
+        const url = await attemptOfficial(activeCookie)
+        return buildResponse(url, 'qq-official', resolvedMusicId, 'songmid', Boolean(activeCookie))
+      } catch (error: any) {
+        // 登录态过期是解析失败的常见原因，续期成功后重试一轮
+        if (!activeCookie) throw error
+        const refreshResult = await refreshQqCredential({ cookie: activeCookie })
+        if (!refreshResult.refreshed) throw error
+        activeCookie = refreshResult.cookie
+
+        const url = await attemptOfficial(activeCookie)
+        return buildResponse(url, 'qq-official', resolvedMusicId, 'songmid', true, activeCookie)
+      }
+    }
+
+    // 第三方兜底链：HYW → 玉宁熙 → HelloWorld，任一成功即返回（原实现只有 HYW 一个源，
+    // 上游偶发 500 时直接 502，这里补上后续源，避免单源故障就让用户听不了歌）
+    const fallbackAttempts: Array<{ id: string; run: () => Promise<string> }> = []
+    if (!excludedSources.has('hyw-tx')) {
+      fallbackAttempts.push({ id: 'hyw-tx', run: () => resolveTxWithHyw(resolvedMusicId, body?.quality) })
+    }
+    if (!excludedSources.has('yuafeng-tx')) {
+      fallbackAttempts.push({ id: 'yuafeng-tx', run: () => resolveTxWithYuafeng(resolvedMusicId, body?.quality) })
+    }
+    if (!excludedSources.has('helloworld-tx') && songName) {
+      fallbackAttempts.push({ id: 'helloworld-tx', run: () => resolveTxWithHelloWorld(songName) })
+    }
+
+    let lastFallbackError = ''
+    for (const attempt of fallbackAttempts) {
+      try {
+        const url = await attempt.run()
+        return buildResponse(url, attempt.id, resolvedMusicId, 'songmid', Boolean(cookie))
+      } catch (error: any) {
+        lastFallbackError = error?.message || String(error)
+        console.warn(`[music/resolve-url] ${attempt.id} 解析失败:`, lastFallbackError)
+      }
+    }
+
     throw createError({
       statusCode: 502,
-      message: lastError ? `QQ 聚合源解析失败：${lastError}` : 'QQ 聚合源解析失败'
+      message: lastFallbackError ? `QQ 音乐播放链接解析失败：${lastFallbackError}` : 'QQ 音乐播放链接解析失败'
     })
   }
 
-  // 官方 Cookie 链路：带用户登录态走 CgiGetVkey，可获取 VIP/高音质直链
-  if (strategy === 'official-first') {
-    if (excludedSources.has('qq-official')) {
-      throw createError({ statusCode: 502, message: 'QQ 音乐播放链接解析失败' })
-    }
-
-    const mediaId = resolvedMediaId
-
-    // SDK 与原生直连互为校验：SDK 依赖上游文件名策略，原生链路可诊断拒绝原因
-    const attemptOfficial = async (activeCookie?: string): Promise<string> => {
-      try {
-        return await resolveQqSdkPlayUrl(resolvedMusicId, body?.quality, activeCookie, mediaId)
-      } catch (error: any) {
-        const sdkError = error?.message || String(error)
-        console.warn('[music/resolve-url] QQ 官方 SDK 解析失败，尝试原生直连:', sdkError)
-
-        try {
-          return await resolveQqOfficialPlayUrl({
-            songmid: resolvedMusicId,
-            quality: body?.quality,
-            cookie: activeCookie,
-            mediaId
-          })
-        } catch (nativeError: any) {
-          const nativeErrorText = nativeError?.message || String(nativeError)
-          console.warn('[music/resolve-url] QQ 原生直连解析失败:', nativeErrorText)
-          throw createError({
-            statusCode: 502,
-            message: `QQ 官方链路解析失败：${sdkError}；原生直连：${nativeErrorText}`
-          })
-        }
-      }
-    }
-
-    let activeCookie = cookie || undefined
+  // 并发合并：同一首歌的并发请求共用一个上游调用，避免瞬间打爆上游
+  if (cacheKey && inFlightResolves.has(cacheKey)) {
     try {
-      const url = await attemptOfficial(activeCookie)
-      return {
-        success: true,
-        url,
-        source: 'qq-official',
-        normalizedMusicId: resolvedMusicId,
-        idType: 'songmid',
-        authUsed: Boolean(activeCookie),
-        authDiagnostic: getQqCookieDiagnostic(activeCookie)
-      }
-    } catch (error: any) {
-      // 登录态过期是解析失败的常见原因，续期成功后重试一轮
-      if (!activeCookie) throw error
-      const refreshResult = await refreshQqCredential({ cookie: activeCookie })
-      if (!refreshResult.refreshed) throw error
-      activeCookie = refreshResult.cookie
-
-      const url = await attemptOfficial(activeCookie)
-      return {
-        success: true,
-        url,
-        source: 'qq-official',
-        normalizedMusicId: resolvedMusicId,
-        idType: 'songmid',
-        authUsed: true,
-        authDiagnostic: getQqCookieDiagnostic(activeCookie),
-        cookie: activeCookie
-      }
+      const shared = await inFlightResolves.get(cacheKey)!
+      return { ...shared, cached: true }
+    } catch (error) {
+      throw error
     }
   }
 
-  if (excludedSources.has('hyw-tx')) {
-    throw createError({ statusCode: 502, message: 'QQ 音乐播放链接解析失败' })
-  }
+  const resolvePromise = runResolve()
+  if (cacheKey) inFlightResolves.set(cacheKey, resolvePromise)
 
+  let result: MusicResolveResult
   try {
-    const url = await resolveTxWithHyw(resolvedMusicId, body?.quality)
-    return {
-      success: true,
-      url,
-      source: 'hyw-tx',
-      normalizedMusicId: resolvedMusicId,
-      idType: 'songmid',
-      authUsed: Boolean(cookie),
-      authDiagnostic: getQqCookieDiagnostic(cookie)
-    }
-  } catch (error: any) {
-    console.warn('[music/resolve-url] HYW QQ 回退失败:', error?.message || error)
+    result = await resolvePromise
+  } finally {
+    if (cacheKey) inFlightResolves.delete(cacheKey)
   }
 
-  throw createError({
-    statusCode: 502,
-    message: 'QQ 音乐播放链接解析失败'
-  })
+  if (cacheKey && !result.cookie) {
+    await writeResolveCache(cacheKey, result)
+  }
+
+  return result
 })
