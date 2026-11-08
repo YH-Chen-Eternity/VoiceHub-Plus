@@ -1,8 +1,9 @@
 name: AI PR Review
 
-# 说明：使用 pull_request_target 是为了让来自 fork / dependabot 的 PR
-# 也能获得写评论与调用 Models 的权限。本工作流不 checkout、不安装依赖、
-# 不执行 PR 中的任何代码，只通过 API 读取 diff 文本送审，因此是安全的。
+# 使用 pull_request_target 是为了让来自 fork / 自动化依赖更新的 PR
+# 也能获得写评论的权限。本工作流不 checkout、不安装依赖、
+# 不执行 PR 中的任何代码，只通过 API 读取 diff 纯文本送审，因此是安全的。
+# 审查能力由仓库配置的 OpenAI 兼容推理端点提供，启用方式见 .github/AI-PR-REVIEW.md。
 
 on:
   pull_request_target:
@@ -18,7 +19,6 @@ permissions:
   contents: read
   pull-requests: write
   issues: write
-  models: read
 
 concurrency:
   group: ai-pr-review-${{ github.event.pull_request.number || github.event.inputs.pr_number }}
@@ -30,11 +30,34 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      # 配置不齐时直接跳过审查步骤（状态显示为 skipped，而不是「成功但什么都没做」）。
+      # 只判断值是否为空，不打印、不回显任何凭据。
+      - name: 检查审查配置
+        id: config
+        env:
+          REVIEW_KEY: ${{ secrets.AI_REVIEW_API_KEY }}
+          REVIEW_BASE: ${{ vars.AI_REVIEW_BASE_URL }}
+          REVIEW_MODEL: ${{ vars.AI_REVIEW_MODEL }}
+        run: |
+          missing=""
+          [ -z "$REVIEW_KEY" ]   && missing="$missing AI_REVIEW_API_KEY"
+          [ -z "$REVIEW_BASE" ]  && missing="$missing AI_REVIEW_BASE_URL"
+          [ -z "$REVIEW_MODEL" ] && missing="$missing AI_REVIEW_MODEL"
+          if [ -n "$missing" ]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::AI 审查未启用，缺少配置：$missing 。按 .github/AI-PR-REVIEW.md 补齐后自动生效。"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: 审查改动并发布评论
+        if: steps.config.outputs.ready == 'true'
         uses: actions/github-script@v7
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REVIEW_MODEL: ${{ vars.AI_REVIEW_MODEL }}
+          AI_REVIEW_API_KEY: ${{ secrets.AI_REVIEW_API_KEY }}
+          AI_REVIEW_BASE_URL: ${{ vars.AI_REVIEW_BASE_URL }}
+          AI_REVIEW_MODEL: ${{ vars.AI_REVIEW_MODEL }}
         with:
           script: |
             const { owner, repo } = context.repo;
@@ -44,10 +67,23 @@ jobs:
             if (!prNumber) { core.setFailed('缺少 PR 编号'); return; }
 
             const MARKER = '<!-- ai-pr-review -->';
-            const MODEL = process.env.REVIEW_MODEL || 'openai/gpt-4o-mini';
+            const KEY = process.env.AI_REVIEW_API_KEY || '';
+            const BASE = (process.env.AI_REVIEW_BASE_URL || '').trim().replace(/\/+$/, '');
+            const MODEL = (process.env.AI_REVIEW_MODEL || '').trim();
             const MAX_FILES = 30;
             const MAX_PATCH_CHARS = 16000;
             const SKIP = /(^|\/)(pnpm-lock\.yaml|package-lock\.json|yarn\.lock|.*\.min\.(js|css)|.*\.(png|jpe?g|gif|webp|svg|ico|woff2?|ttf|eot|pdf|zip|gz|tar|map))$/i;
+
+            // 二次校验：任何一项缺失都明确说出缺什么，绝不静默退出。
+            const missing = [];
+            if (!KEY) missing.push('Secret AI_REVIEW_API_KEY');
+            if (!BASE) missing.push('Variable AI_REVIEW_BASE_URL');
+            if (!MODEL) missing.push('Variable AI_REVIEW_MODEL');
+            if (missing.length) {
+              core.warning('AI 审查未启用，缺少：' + missing.join('、') + '；配置说明见 .github/AI-PR-REVIEW.md');
+              return;
+            }
+            const ENDPOINT = BASE + '/chat/completions';
 
             const SYSTEM = [
               '你是资深代码审查工程师，只依据提供的 PR diff 做严格、简洁的审查。',
@@ -84,21 +120,22 @@ jobs:
               + '，跳过 ' + skipped + '，截断=' + truncated);
             if (!chunks.length) { core.info('没有可审查的文本改动，跳过'); return; }
 
-            // 3) 调用 GitHub Models（GITHUB_TOKEN + models: read，无需任何 API Key）
+            // 3) 调用 OpenAI 兼容的推理端点。
+            // 任何失败都把【HTTP 状态 + 响应原文片段】写进日志，便于一眼定位，
+            // 不再出现「运行 success 但 PR 上没有评论、原因被吞掉」的情况。
             let review = '';
             try {
-              const res = await fetch('https://models.github.ai/inference/chat/completions', {
+              const res = await fetch(ENDPOINT, {
                 method: 'POST',
+                signal: AbortSignal.timeout(90000),
                 headers: {
-                  'Authorization': 'Bearer ' + process.env.GITHUB_TOKEN,
-                  'Content-Type': 'application/json',
-                  'Accept': 'application/vnd.github+json',
-                  'X-GitHub-Api-Version': '2022-11-28'
+                  'Authorization': 'Bearer ' + KEY,
+                  'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
                   model: MODEL,
                   temperature: 0.1,
-                  max_tokens: 1000,
+                  max_tokens: 1200,
                   messages: [
                     { role: 'system', content: SYSTEM },
                     {
@@ -110,14 +147,25 @@ jobs:
                   ]
                 })
               });
+              const raw = await res.text();
               if (!res.ok) {
-                throw new Error('GitHub Models HTTP ' + res.status + ': ' + (await res.text()).slice(0, 200));
+                throw new Error('推理接口 HTTP ' + res.status + '：' + raw.replace(/\s+/g, ' ').slice(0, 300));
               }
-              const data = await res.json();
-              review = (data.choices?.[0]?.message?.content || '').trim();
-              if (!review) throw new Error('模型返回内容为空');
+              let data;
+              try { data = JSON.parse(raw); }
+              catch (_) {
+                throw new Error('推理接口返回的不是 JSON（原文前 120 字符）：' + raw.replace(/\s+/g, ' ').slice(0, 120));
+              }
+              let content = data?.choices?.[0]?.message?.content;
+              if (Array.isArray(content)) {
+                content = content.map(p => (typeof p === 'string' ? p : (p?.text || ''))).join('');
+              }
+              review = typeof content === 'string' ? content.trim() : '';
+              if (!review) {
+                throw new Error('模型返回内容为空（choices[0].message.content 为空或格式不支持）');
+              }
             } catch (e) {
-              core.warning('AI 审查未生成，不影响 PR 合并：' + e.message);
+              core.warning('AI 审查未生成，不影响 PR 合并。原因：' + (e && e.message ? e.message : String(e)));
               return;
             }
 
