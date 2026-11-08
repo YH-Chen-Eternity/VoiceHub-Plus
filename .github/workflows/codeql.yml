@@ -1,0 +1,36 @@
+# CodeQL 静态安全分析（JavaScript/TypeScript）
+# 每周一定时全量扫描 + push/PR 增量扫描，结果进 Security → Code scanning
+
+name: CodeQL
+
+on:
+  push:
+    branches: [community/voicehub-plus]
+  pull_request:
+    branches: [community/voicehub-plus]
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+jobs:
+  analyze:
+    name: Analyze (javascript-typescript)
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: 初始化 CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+          build-mode: none
+
+      - name: 执行分析
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: '/language:javascript-typescript'
