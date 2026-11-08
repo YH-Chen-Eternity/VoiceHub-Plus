@@ -1,0 +1,22 @@
+# Dependabot 自动依赖更新
+# npm（pnpm 项目同走 npm 生态）与 GitHub Actions 版本，每周一次；
+# minor/patch 归组为一个 PR，major 单独开 PR，人工确认后合并
+
+version: 2
+updates:
+  - package-ecosystem: 'npm'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types:
+          - 'minor'
+          - 'patch'
+
+  - package-ecosystem: 'github-actions'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+    open-pull-requests-limit: 5

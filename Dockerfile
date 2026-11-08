@@ -53,10 +53,15 @@ WORKDIR /app
 # 创建非 root 运行用户（2026-10-23 安全加固：原镜像 USER root，
 # 一旦应用被 RCE，攻击者直接持有容器内 root 权限）
 RUN set -eux; \
-    if getent group voicehub >/dev/null 2>&1; then \
-      adduser -S voicehub -G voicehub 2>/dev/null || true; \
+    if [ -f /etc/alpine-release ]; then \
+      if getent group voicehub >/dev/null 2>&1; then \
+        adduser -S voicehub -G voicehub 2>/dev/null || true; \
+      else \
+        addgroup -S voicehub && adduser -S voicehub -G voicehub; \
+      fi; \
     else \
-      addgroup -S voicehub && adduser -S voicehub -G voicehub; \
+      groupadd --system voicehub 2>/dev/null || true; \
+      useradd --system --gid voicehub --shell /bin/sh voicehub; \
     fi
 
 # 运行依赖必须在目标平台安装，不能从构建平台复制 node_modules。

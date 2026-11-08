@@ -554,6 +554,13 @@
       "when": 1793062200000,
       "tag": "20261027085000_comment_like_reveal",
       "breakpoints": true
+    },
+    {
+      "idx": 79,
+      "version": "7",
+      "when": 1794141232000,
+      "tag": "20261108123352_loose_bastion",
+      "breakpoints": true
     }
   ]
 }

@@ -1,8 +1,13 @@
 name: AI PR Review
 
-# 说明：使用 pull_request_target 是为了让来自 fork / dependabot 的 PR
-# 也能获得写评论与调用 Models 的权限。本工作流不 checkout、不安装依赖、
-# 不执行 PR 中的任何代码，只通过 API 读取 diff 文本送审，因此是安全的。
+# 使用 pull_request_target 是为了让来自 fork / 自动化依赖更新的 PR
+# 也能获得写评论的权限。本工作流不 checkout、不安装依赖、
+# 不执行 PR 中的任何代码，只通过 API 读取 diff 纯文本送审，因此是安全的。
+# 推理来源为主备两级，按顺序尝试、任一成功即用：
+#   1. NVIDIA / Nemotron 3 Ultra（首选）
+#   2. GLM 免费档（备用）
+# 两级都失败时等待 10 分钟整体重试一轮，仍失败则记录警告并正常结束（不阻塞 PR）。
+# 启用方式与来源对照见 .github/AI-PR-REVIEW.md。
 
 on:
   pull_request_target:
@@ -18,7 +23,6 @@ permissions:
   contents: read
   pull-requests: write
   issues: write
-  models: read
 
 concurrency:
   group: ai-pr-review-${{ github.event.pull_request.number || github.event.inputs.pr_number }}
@@ -28,13 +32,44 @@ jobs:
   review:
     if: github.event_name == 'workflow_dispatch' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 25
     steps:
+      # 配置不齐时直接跳过审查步骤（状态显示为 skipped，而不是「成功但什么都没做」）。
+      # NVIDIA Key 或 GLM Key 至少配一个；只配 GLM 时还需要地址与模型名。
+      # 只判断值是否为空，不打印、不回显任何凭据。
+      - name: 检查审查配置
+        id: config
+        env:
+          KEY_NV: ${{ secrets.AI_REVIEW_NVAPI_KEY }}
+          KEY_GLM: ${{ secrets.AI_REVIEW_API_KEY }}
+          REVIEW_BASE: ${{ vars.AI_REVIEW_BASE_URL }}
+          REVIEW_MODEL: ${{ vars.AI_REVIEW_MODEL }}
+        run: |
+          missing=""
+          if [ -z "$KEY_NV" ] && [ -z "$KEY_GLM" ]; then
+            missing="AI_REVIEW_NVAPI_KEY 或 AI_REVIEW_API_KEY（至少配置一个）"
+          elif [ -z "$KEY_NV" ] && { [ -z "$REVIEW_BASE" ] || [ -z "$REVIEW_MODEL" ]; }; then
+            missing="GLM 来源所需的 AI_REVIEW_BASE_URL / AI_REVIEW_MODEL"
+          fi
+          if [ -n "$missing" ]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::AI 审查未启用，缺少配置：$missing 。按 .github/AI-PR-REVIEW.md 补齐后自动生效。"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: 审查改动并发布评论
+        if: steps.config.outputs.ready == 'true'
         uses: actions/github-script@v7
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REVIEW_MODEL: ${{ vars.AI_REVIEW_MODEL }}
+          AI_REVIEW_NVAPI_KEY: ${{ secrets.AI_REVIEW_NVAPI_KEY }}
+          AI_REVIEW_API_KEY: ${{ secrets.AI_REVIEW_API_KEY }}
+          AI_REVIEW_BASE_URL: ${{ vars.AI_REVIEW_BASE_URL }}
+          AI_REVIEW_MODEL: ${{ vars.AI_REVIEW_MODEL }}
+          AI_REVIEW_NV_BASE_URL: ${{ vars.AI_REVIEW_NV_BASE_URL }}
+          AI_REVIEW_NV_MODEL: ${{ vars.AI_REVIEW_NV_MODEL }}
+          AI_REVIEW_RETRY_WAIT_MS: ${{ vars.AI_REVIEW_RETRY_WAIT_MS }}
         with:
           script: |
             const { owner, repo } = context.repo;
@@ -44,10 +79,35 @@ jobs:
             if (!prNumber) { core.setFailed('缺少 PR 编号'); return; }
 
             const MARKER = '<!-- ai-pr-review -->';
-            const MODEL = process.env.REVIEW_MODEL || 'openai/gpt-4o-mini';
+            const NV_KEY = process.env.AI_REVIEW_NVAPI_KEY || '';
+            const NV_BASE = (process.env.AI_REVIEW_NV_BASE_URL || 'https://integrate.api.nvidia.com/v1').trim().replace(/\/+$/, '');
+            const NV_MODEL = (process.env.AI_REVIEW_NV_MODEL || 'nvidia/nemotron-3-ultra-550b-a55b').trim();
+            const GLM_KEY = process.env.AI_REVIEW_API_KEY || '';
+            const GLM_BASE = (process.env.AI_REVIEW_BASE_URL || '').trim().replace(/\/+$/, '');
+            const GLM_MODEL = (process.env.AI_REVIEW_MODEL || '').trim();
             const MAX_FILES = 30;
             const MAX_PATCH_CHARS = 16000;
             const SKIP = /(^|\/)(pnpm-lock\.yaml|package-lock\.json|yarn\.lock|.*\.min\.(js|css)|.*\.(png|jpe?g|gif|webp|svg|ico|woff2?|ttf|eot|pdf|zip|gz|tar|map))$/i;
+
+            // 推理来源主备两级：首选在前，按顺序尝试；任一成功即用其结果。
+            // 单次请求 90 秒超时封顶，首选挂起/失败不会拖死整个任务。
+            const providers = [];
+            if (NV_KEY) {
+              providers.push({ name: '首选 nvidia / nemotron', key: NV_KEY, base: NV_BASE, model: NV_MODEL });
+            }
+            if (GLM_KEY && GLM_BASE && GLM_MODEL) {
+              providers.push({ name: '备用 glm', key: GLM_KEY, base: GLM_BASE, model: GLM_MODEL });
+            }
+            // 二次校验：配置缺失明确说出缺什么，绝不静默退出。
+            if (!providers.length) {
+              core.warning('AI 审查未启用，缺少：AI_REVIEW_NVAPI_KEY 或 AI_REVIEW_API_KEY（至少一个）'
+                + '；配置说明见 .github/AI-PR-REVIEW.md');
+              return;
+            }
+            if (GLM_KEY && (!GLM_BASE || !GLM_MODEL)) {
+              core.warning('备用来源配置不完整（缺 AI_REVIEW_BASE_URL 或 AI_REVIEW_MODEL），本次仅使用首选来源');
+            }
+            const RETRY_WAIT_MS = Number(process.env.AI_REVIEW_RETRY_WAIT_MS) || 600000;
 
             const SYSTEM = [
               '你是资深代码审查工程师，只依据提供的 PR diff 做严格、简洁的审查。',
@@ -84,21 +144,20 @@ jobs:
               + '，跳过 ' + skipped + '，截断=' + truncated);
             if (!chunks.length) { core.info('没有可审查的文本改动，跳过'); return; }
 
-            // 3) 调用 GitHub Models（GITHUB_TOKEN + models: read，无需任何 API Key）
-            let review = '';
-            try {
-              const res = await fetch('https://models.github.ai/inference/chat/completions', {
+            // 3) 依次尝试各推理来源；全部失败则等待后整体重试一轮。
+            // 任何失败都把【来源 + HTTP 状态 + 响应原文片段】写进日志，便于一眼定位。
+            const callProvider = async (p) => {
+              const res = await fetch(p.base + '/chat/completions', {
                 method: 'POST',
+                signal: AbortSignal.timeout(90000),
                 headers: {
-                  'Authorization': 'Bearer ' + process.env.GITHUB_TOKEN,
-                  'Content-Type': 'application/json',
-                  'Accept': 'application/vnd.github+json',
-                  'X-GitHub-Api-Version': '2022-11-28'
+                  'Authorization': 'Bearer ' + p.key,
+                  'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
-                  model: MODEL,
+                  model: p.model,
                   temperature: 0.1,
-                  max_tokens: 1000,
+                  max_tokens: 1200,
                   messages: [
                     { role: 'system', content: SYSTEM },
                     {
@@ -110,27 +169,58 @@ jobs:
                   ]
                 })
               });
+              const raw = await res.text();
               if (!res.ok) {
-                throw new Error('GitHub Models HTTP ' + res.status + ': ' + (await res.text()).slice(0, 200));
+                throw new Error('HTTP ' + res.status + '：' + raw.replace(/\s+/g, ' ').slice(0, 300));
               }
-              const data = await res.json();
-              review = (data.choices?.[0]?.message?.content || '').trim();
-              if (!review) throw new Error('模型返回内容为空');
-            } catch (e) {
-              core.warning('AI 审查未生成，不影响 PR 合并：' + e.message);
+              let data;
+              try { data = JSON.parse(raw); }
+              catch (_) {
+                throw new Error('返回的不是 JSON（原文前 120 字符）：' + raw.replace(/\s+/g, ' ').slice(0, 120));
+              }
+              let content = data?.choices?.[0]?.message?.content;
+              if (Array.isArray(content)) {
+                content = content.map(x => (typeof x === 'string' ? x : (x?.text || ''))).join('');
+              }
+              const text = typeof content === 'string' ? content.trim() : '';
+              if (!text) {
+                throw new Error('模型返回内容为空（choices[0].message.content 为空或格式不支持）');
+              }
+              return text;
+            };
+
+            let review = '', usedProvider = null;
+            for (let round = 1; round <= 2 && !review; round++) {
+              for (const p of providers) {
+                try {
+                  review = await callProvider(p);
+                  usedProvider = p;
+                  break;
+                } catch (e) {
+                  core.warning('推理来源「' + p.name + '」第 ' + round + ' 轮失败：' + (e && e.message ? e.message : String(e)));
+                }
+              }
+              if (!review && round === 1) {
+                core.info('所有推理来源本轮均失败，' + Math.round(RETRY_WAIT_MS / 1000) + ' 秒后重试一轮');
+                await new Promise(r => setTimeout(r, RETRY_WAIT_MS));
+              }
+            }
+            if (!review) {
+              core.warning('AI 审查未生成：重试后所有推理来源仍失败，不影响 PR 合并。可稍后在 Actions 页手动重跑。');
               return;
             }
 
             // 4) 幂等发布/更新同一条评论，避免每次 push 刷屏
             const body = [
               MARKER,
-              '## AI 代码审查（' + MODEL + '）',
+              '## AI 代码审查（' + usedProvider.model + '）',
               '',
               review.slice(0, 6000),
               '',
               '<sub>送审 ' + chunks.length + '/' + files.length + ' 个文件'
                 + (truncated ? '（已按上限截断）' : '')
-                + ' · 跳过 ' + skipped + ' 个 · [查看工作流日志]('
+                + ' · 跳过 ' + skipped + ' 个 · 来源：' + usedProvider.name
+                + ' · [查看工作流日志]('
                 + context.serverUrl + '/' + owner + '/' + repo + '/actions/runs/' + context.runId
                 + ')</sub>'
             ].join('\n');
