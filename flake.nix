@@ -200,6 +200,8 @@
                   database.createLocally = true;
                   # deploy.js 强制要求 JWT_SECRET；测试值固定即可
                   extraEnvironment.JWT_SECRET = "voicehub-vm-test-secret-0123456789";
+                  # 社区安全加固要求初始管理员密码（≥8 位）；测试值固定即可
+                  extraEnvironment.ADMIN_INITIAL_PASSWORD = "vm-test-admin-pw-2026";
                 };
 
                 virtualisation = {
