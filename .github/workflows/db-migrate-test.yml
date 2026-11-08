@@ -51,7 +51,7 @@ jobs:
           --health-retries 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       # setup-node v5 会按 packageManager 自动探测并调用包管理器做依赖缓存，
       # 因此 pnpm 必须先于 Node 安装；版本沿用 package.json 的 packageManager
