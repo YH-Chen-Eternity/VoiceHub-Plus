@@ -1,0 +1,112 @@
+name: CI Summary
+
+# 把一轮 PR 检查（CodeQL / Docker 构建 / Nix CI / DB 迁移测试 / AI 审查等）
+# 的最终结果汇总成一条评论贴到 PR 上，每次推送幂等更新同一条，不刷屏。
+# 触发：本仓库的 check_suite 全部检查完成时（completed 含超时兜底）。
+
+on:
+  check_suite:
+    types: [completed]
+
+permissions:
+  contents: read
+  checks: read
+  pull-requests: write
+
+concurrency:
+  group: ci-summary-${{ github.event.check_suite.head_sha }}
+  cancel-in-progress: true
+
+jobs:
+  summary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: 汇总检查结果并评论
+        uses: actions/github-script@v7
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const suite = context.payload.check_suite;
+            const sha = suite.head_sha;
+            const MARKER = '<!-- ci-summary -->';
+
+            // 与该 commit 关联的 PR：先取事件自带，fork 场景为空时再按 commit 反查
+            let prNumbers = (suite.pull_requests || []).map(p => p.number);
+            if (!prNumbers.length) {
+              try {
+                const r = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+                  owner, repo, commit_sha: sha, per_page: 10
+                });
+                prNumbers = r.data.map(p => p.number);
+              } catch (e) {
+                core.warning('按 commit 反查 PR 失败：' + e.message);
+              }
+            }
+            if (!prNumbers.length) {
+              core.info('该 check_suite 未关联 PR，跳过');
+              return;
+            }
+
+            // 取该 ref 上所有 check run（取最新一轮），按结论渲染
+            const runs = await github.paginate(github.rest.checks.listForRef, {
+              owner, repo, ref: sha, per_page: 100, filter: 'latest'
+            });
+            if (!runs.length) { core.info('没有 check run，跳过'); return; }
+
+            const ICON = {
+              success: '✅', failure: '❌', cancelled: '⛔', timed_out: '⏱️',
+              neutral: '➖', skipped: '⏭️', action_required: '⚠️',
+              queued: '⏳', in_progress: '🔄', pending: '⏳'
+            };
+            const rows = runs.map(c => {
+              const state = c.conclusion || c.status;
+              const icon = ICON[state] || '❔';
+              const link = '[' + c.name + '](' + c.html_url + ')';
+              const text = c.conclusion === 'failure' ? '失败'
+                : c.conclusion === 'success' ? '通过'
+                : c.conclusion === 'cancelled' ? '已取消'
+                : c.conclusion === 'timed_out' ? '超时'
+                : c.conclusion === 'skipped' ? '跳过'
+                : c.conclusion === 'action_required' ? '待批准（首次贡献者）'
+                : '进行中';
+              return '| ' + icon + ' | ' + link + ' | ' + text + ' |';
+            });
+
+            const fails = runs.filter(c => c.conclusion === 'failure').length;
+            const done = runs.filter(c => c.conclusion).length;
+            const head =
+              fails === 0 && done === runs.length && done > 0
+                ? '✅ **全部检查通过**'
+                : fails > 0 ? '❌ **有 ' + fails + ' 项检查失败**'
+                : '🔄 **检查进行中（' + done + '/' + runs.length + ' 完成）**';
+
+            const body = [
+              MARKER,
+              '## CI 检查汇总',
+              '',
+              head,
+              '',
+              '| 状态 | 检查 | 结论 |',
+              '| --- | --- | --- |',
+              ...rows,
+              '',
+              '<sub>提交 <code>' + sha.slice(0, 8) + '</code> · 本评论随新推送自动更新 · '
+                + '[查看全部检查](' + context.serverUrl + '/' + owner + '/' + repo + '/commit/' + sha + '/checks)</sub>'
+            ].join('\n');
+
+            // 每个 PR 幂等更新同一条汇总评论
+            for (const n of prNumbers) {
+              const comments = await github.paginate(github.rest.issues.listComments, {
+                owner, repo, issue_number: n, per_page: 100
+              });
+              const mine = comments.find(c => (c.body || '').includes(MARKER));
+              if (mine) {
+                await github.rest.issues.updateComment({ owner, repo, comment_id: mine.id, body });
+              } else {
+                await github.rest.issues.createComment({ owner, repo, issue_number: n, body });
+              }
+              core.info('PR #' + n + ' 汇总评论已发布/更新');
+            }
