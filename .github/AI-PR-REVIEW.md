@@ -4,12 +4,12 @@
 
 - 工作流文件：[`.github/workflows/ai-pr-review.yml`](workflows/ai-pr-review.yml)
 - 推理来源：**首选 + 备用**两级，均为标准 OpenAI 兼容 `/chat/completions` 端点，厂商可随时更换
-- 当前接入：首选 NVIDIA（`deepseek-ai/deepseek-v4.1-flash`），备用 GLM（`glm-4.7-flash`），两者都有免费额度
-- 失败策略：首选失败自动切备用；两级都失败时**等待 10 分钟整体重试一轮**，仍失败则记录警告并正常结束，不会让 PR 检查变红
+- 当前接入：首选 NVIDIA（`nvidia/nemotron-3-ultra-550b-a55b`），备用 GLM（`glm-4.7-flash`），两者都有免费额度
+- 失败策略：首选失败（含挂起，单次请求 90 秒封顶）自动切备用；两级都失败时**等待 10 分钟整体重试一轮**，仍失败则记录警告并正常结束，不会让 PR 检查变红
 
 ## 一、配置清单
 
-Secret 与变量都在 `Settings → Secrets and variables → Actions` 里维护。**首选、备用至少配置一个**，工作流即可运行。
+Secret 与变量都在 `Settings → Secrets and variables → Actions` 里维护。**NVIDIA Key、GLM Key 至少配置一个**，工作流即可运行。
 
 | 类型 | 名称 | 作用 | 现状 |
 | --- | --- | --- | --- |
@@ -18,7 +18,7 @@ Secret 与变量都在 `Settings → Secrets and variables → Actions` 里维�
 | Variable | `AI_REVIEW_BASE_URL` | 备用端点基地址（不含 `/chat/completions`） | `https://open.bigmodel.cn/api/paas/v4` |
 | Variable | `AI_REVIEW_MODEL` | 备用模型 ID | `glm-4.7-flash` |
 | Variable | `AI_REVIEW_NV_BASE_URL` | 可选，覆盖首选端点地址 | 默认 `https://integrate.api.nvidia.com/v1` |
-| Variable | `AI_REVIEW_NV_MODEL` | 可选，覆盖首选模型 ID | 默认 `deepseek-ai/deepseek-v4.1-flash` |
+| Variable | `AI_REVIEW_NV_MODEL` | 可选，覆盖首选模型 ID | 默认 `nvidia/nemotron-3-ultra-550b-a55b` |
 | Variable | `AI_REVIEW_RETRY_WAIT_MS` | 可选，两级都失败后的重试等待毫秒数 | 默认 `600000`（10 分钟） |
 
 密钥用仓库公钥加密写入 Secret，不进代码、日志与评论；检查步骤只判断值是否为空，不回显。
@@ -29,7 +29,7 @@ Secret 与变量都在 `Settings → Secrets and variables → Actions` 里维�
 
 | 来源 | 申请地址 | 说明 |
 | --- | --- | --- |
-| NVIDIA（首选） | `https://build.nvidia.com` | 开发者账号自带免费调用额度；模型目录里有 `deepseek-ai/deepseek-v4.1-flash`，额度以官方页面为准 |
+| NVIDIA（首选） | `https://build.nvidia.com` | 开发者账号自带免费调用额度；实测 `nvidia/nemotron-3-ultra-550b-a55b` 响应稳定（约 1 秒）。注意其目录里的 DeepSeek 系模型（`deepseek-ai/deepseek-v4.1-flash`）服务端长期挂起无响应，勿选用 |
 | 智谱 GLM（备用） | `https://open.bigmodel.cn` | Flash 档免费，高峰期可能返回 429 限流 |
 | 其他可换厂商 | 见下方对照 | 均兼容 OpenAI 格式，改两个 Variable 即可切换 |
 
@@ -78,5 +78,5 @@ Secret 与变量都在 `Settings → Secrets and variables → Actions` 里维�
 - 大模型看不到未改动的上下文文件，只能依据 diff 判断，可能漏掉跨文件的隐含问题。
 - 超大 PR 会按上限截断，评论底部会标注实际送审文件数。
 - 生成结果可能有误报，请人工复核后再决定是否修改代码。
-- 免费额度由所选厂商按其账号维度计算；两级来源都限流时，重试一轮后放弃，不影响 PR。
+- 免费额度由所选厂商按其账号维度计算；两级来源都限流/失败时，重试一轮后放弃，不影响 PR。
 - 重试等待期间该运行会占用约 10 分钟执行时长，公开仓库免费额度充足；新提交会自动取消等待中的旧运行。
