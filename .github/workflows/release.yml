@@ -128,7 +128,7 @@ jobs:
       # setup-node v5 会按 packageManager 自动探测并调用包管理器做依赖缓存，
       # 因此 pnpm 必须先于 Node 安装；版本沿用 package.json 的 packageManager
       - name: 安装 pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
 
       - name: 安装 Node
         uses: actions/setup-node@v5
