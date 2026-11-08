@@ -3,7 +3,9 @@ name: AI PR Review
 # 使用 pull_request_target 是为了让来自 fork / 自动化依赖更新的 PR
 # 也能获得写评论的权限。本工作流不 checkout、不安装依赖、
 # 不执行 PR 中的任何代码，只通过 API 读取 diff 纯文本送审，因此是安全的。
-# 审查能力由仓库配置的 OpenAI 兼容推理端点提供，启用方式见 .github/AI-PR-REVIEW.md。
+# 推理来源为「首选 + 备用」两级：首选失败自动切备用，两级都失败时
+# 等待 10 分钟再整体重试一轮，仍失败则记录警告并正常结束（不阻塞 PR）。
+# 启用方式与来源对照见 .github/AI-PR-REVIEW.md。
 
 on:
   pull_request_target:
@@ -28,21 +30,25 @@ jobs:
   review:
     if: github.event_name == 'workflow_dispatch' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
     steps:
       # 配置不齐时直接跳过审查步骤（状态显示为 skipped，而不是「成功但什么都没做」）。
+      # 首选或备用 Key 至少配一个即可；备用 Key 存在时必须有配套的地址与模型名。
       # 只判断值是否为空，不打印、不回显任何凭据。
       - name: 检查审查配置
         id: config
         env:
-          REVIEW_KEY: ${{ secrets.AI_REVIEW_API_KEY }}
+          KEY_NV: ${{ secrets.AI_REVIEW_NVAPI_KEY }}
+          KEY_GLM: ${{ secrets.AI_REVIEW_API_KEY }}
           REVIEW_BASE: ${{ vars.AI_REVIEW_BASE_URL }}
           REVIEW_MODEL: ${{ vars.AI_REVIEW_MODEL }}
         run: |
           missing=""
-          [ -z "$REVIEW_KEY" ]   && missing="$missing AI_REVIEW_API_KEY"
-          [ -z "$REVIEW_BASE" ]  && missing="$missing AI_REVIEW_BASE_URL"
-          [ -z "$REVIEW_MODEL" ] && missing="$missing AI_REVIEW_MODEL"
+          if [ -z "$KEY_NV" ] && [ -z "$KEY_GLM" ]; then
+            missing="AI_REVIEW_NVAPI_KEY 或 AI_REVIEW_API_KEY（至少配置一个）"
+          elif [ -n "$KEY_GLM" ] && { [ -z "$REVIEW_BASE" ] || [ -z "$REVIEW_MODEL" ]; }; then
+            missing="备用来源所需的 AI_REVIEW_BASE_URL / AI_REVIEW_MODEL"
+          fi
           if [ -n "$missing" ]; then
             echo "ready=false" >> "$GITHUB_OUTPUT"
             echo "::warning::AI 审查未启用，缺少配置：$missing 。按 .github/AI-PR-REVIEW.md 补齐后自动生效。"
@@ -55,9 +61,13 @@ jobs:
         uses: actions/github-script@v7
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          AI_REVIEW_NVAPI_KEY: ${{ secrets.AI_REVIEW_NVAPI_KEY }}
           AI_REVIEW_API_KEY: ${{ secrets.AI_REVIEW_API_KEY }}
           AI_REVIEW_BASE_URL: ${{ vars.AI_REVIEW_BASE_URL }}
           AI_REVIEW_MODEL: ${{ vars.AI_REVIEW_MODEL }}
+          AI_REVIEW_NV_BASE_URL: ${{ vars.AI_REVIEW_NV_BASE_URL }}
+          AI_REVIEW_NV_MODEL: ${{ vars.AI_REVIEW_NV_MODEL }}
+          AI_REVIEW_RETRY_WAIT_MS: ${{ vars.AI_REVIEW_RETRY_WAIT_MS }}
         with:
           script: |
             const { owner, repo } = context.repo;
@@ -67,23 +77,34 @@ jobs:
             if (!prNumber) { core.setFailed('缺少 PR 编号'); return; }
 
             const MARKER = '<!-- ai-pr-review -->';
-            const KEY = process.env.AI_REVIEW_API_KEY || '';
-            const BASE = (process.env.AI_REVIEW_BASE_URL || '').trim().replace(/\/+$/, '');
-            const MODEL = (process.env.AI_REVIEW_MODEL || '').trim();
+            const NV_KEY = process.env.AI_REVIEW_NVAPI_KEY || '';
+            const NV_BASE = (process.env.AI_REVIEW_NV_BASE_URL || 'https://integrate.api.nvidia.com/v1').trim().replace(/\/+$/, '');
+            const NV_MODEL = (process.env.AI_REVIEW_NV_MODEL || 'deepseek-ai/deepseek-v4.1-flash').trim();
+            const GLM_KEY = process.env.AI_REVIEW_API_KEY || '';
+            const GLM_BASE = (process.env.AI_REVIEW_BASE_URL || '').trim().replace(/\/+$/, '');
+            const GLM_MODEL = (process.env.AI_REVIEW_MODEL || '').trim();
             const MAX_FILES = 30;
             const MAX_PATCH_CHARS = 16000;
             const SKIP = /(^|\/)(pnpm-lock\.yaml|package-lock\.json|yarn\.lock|.*\.min\.(js|css)|.*\.(png|jpe?g|gif|webp|svg|ico|woff2?|ttf|eot|pdf|zip|gz|tar|map))$/i;
 
-            // 二次校验：任何一项缺失都明确说出缺什么，绝不静默退出。
-            const missing = [];
-            if (!KEY) missing.push('Secret AI_REVIEW_API_KEY');
-            if (!BASE) missing.push('Variable AI_REVIEW_BASE_URL');
-            if (!MODEL) missing.push('Variable AI_REVIEW_MODEL');
-            if (missing.length) {
-              core.warning('AI 审查未启用，缺少：' + missing.join('、') + '；配置说明见 .github/AI-PR-REVIEW.md');
+            // 推理来源：首选在前，按顺序尝试；任一成功即用其结果。
+            const providers = [];
+            if (NV_KEY) {
+              providers.push({ name: '首选 nvidia / deepseek', key: NV_KEY, base: NV_BASE, model: NV_MODEL });
+            }
+            if (GLM_KEY && GLM_BASE && GLM_MODEL) {
+              providers.push({ name: '备用 glm', key: GLM_KEY, base: GLM_BASE, model: GLM_MODEL });
+            }
+            // 二次校验：配置缺失明确说出缺什么，绝不静默退出。
+            if (!providers.length) {
+              core.warning('AI 审查未启用，缺少：AI_REVIEW_NVAPI_KEY 或 AI_REVIEW_API_KEY（至少一个）'
+                + '；配置说明见 .github/AI-PR-REVIEW.md');
               return;
             }
-            const ENDPOINT = BASE + '/chat/completions';
+            if (GLM_KEY && (!GLM_BASE || !GLM_MODEL)) {
+              core.warning('备用来源配置不完整（缺 AI_REVIEW_BASE_URL 或 AI_REVIEW_MODEL），本次仅使用首选来源');
+            }
+            const RETRY_WAIT_MS = Number(process.env.AI_REVIEW_RETRY_WAIT_MS) || 600000;
 
             const SYSTEM = [
               '你是资深代码审查工程师，只依据提供的 PR diff 做严格、简洁的审查。',
@@ -120,20 +141,18 @@ jobs:
               + '，跳过 ' + skipped + '，截断=' + truncated);
             if (!chunks.length) { core.info('没有可审查的文本改动，跳过'); return; }
 
-            // 3) 调用 OpenAI 兼容的推理端点。
-            // 任何失败都把【HTTP 状态 + 响应原文片段】写进日志，便于一眼定位，
-            // 不再出现「运行 success 但 PR 上没有评论、原因被吞掉」的情况。
-            let review = '';
-            try {
-              const res = await fetch(ENDPOINT, {
+            // 3) 依次尝试各推理来源；全部失败则等待后整体重试一轮。
+            // 任何失败都把【来源 + HTTP 状态 + 响应原文片段】写进日志，便于一眼定位。
+            const callProvider = async (p) => {
+              const res = await fetch(p.base + '/chat/completions', {
                 method: 'POST',
                 signal: AbortSignal.timeout(90000),
                 headers: {
-                  'Authorization': 'Bearer ' + KEY,
+                  'Authorization': 'Bearer ' + p.key,
                   'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
-                  model: MODEL,
+                  model: p.model,
                   temperature: 0.1,
                   max_tokens: 1200,
                   messages: [
@@ -149,36 +168,56 @@ jobs:
               });
               const raw = await res.text();
               if (!res.ok) {
-                throw new Error('推理接口 HTTP ' + res.status + '：' + raw.replace(/\s+/g, ' ').slice(0, 300));
+                throw new Error('HTTP ' + res.status + '：' + raw.replace(/\s+/g, ' ').slice(0, 300));
               }
               let data;
               try { data = JSON.parse(raw); }
               catch (_) {
-                throw new Error('推理接口返回的不是 JSON（原文前 120 字符）：' + raw.replace(/\s+/g, ' ').slice(0, 120));
+                throw new Error('返回的不是 JSON（原文前 120 字符）：' + raw.replace(/\s+/g, ' ').slice(0, 120));
               }
               let content = data?.choices?.[0]?.message?.content;
               if (Array.isArray(content)) {
-                content = content.map(p => (typeof p === 'string' ? p : (p?.text || ''))).join('');
+                content = content.map(x => (typeof x === 'string' ? x : (x?.text || ''))).join('');
               }
-              review = typeof content === 'string' ? content.trim() : '';
-              if (!review) {
+              const text = typeof content === 'string' ? content.trim() : '';
+              if (!text) {
                 throw new Error('模型返回内容为空（choices[0].message.content 为空或格式不支持）');
               }
-            } catch (e) {
-              core.warning('AI 审查未生成，不影响 PR 合并。原因：' + (e && e.message ? e.message : String(e)));
+              return text;
+            };
+
+            let review = '', usedProvider = null;
+            for (let round = 1; round <= 2 && !review; round++) {
+              for (const p of providers) {
+                try {
+                  review = await callProvider(p);
+                  usedProvider = p;
+                  break;
+                } catch (e) {
+                  core.warning('推理来源「' + p.name + '」第 ' + round + ' 轮失败：' + (e && e.message ? e.message : String(e)));
+                }
+              }
+              if (!review && round === 1) {
+                core.info('所有推理来源本轮均失败，' + Math.round(RETRY_WAIT_MS / 1000) + ' 秒后重试一轮');
+                await new Promise(r => setTimeout(r, RETRY_WAIT_MS));
+              }
+            }
+            if (!review) {
+              core.warning('AI 审查未生成：重试后所有推理来源仍失败，不影响 PR 合并。可稍后在 Actions 页手动重跑。');
               return;
             }
 
             // 4) 幂等发布/更新同一条评论，避免每次 push 刷屏
             const body = [
               MARKER,
-              '## AI 代码审查（' + MODEL + '）',
+              '## AI 代码审查（' + usedProvider.model + '）',
               '',
               review.slice(0, 6000),
               '',
               '<sub>送审 ' + chunks.length + '/' + files.length + ' 个文件'
                 + (truncated ? '（已按上限截断）' : '')
-                + ' · 跳过 ' + skipped + ' 个 · [查看工作流日志]('
+                + ' · 跳过 ' + skipped + ' 个 · 来源：' + usedProvider.name
+                + ' · [查看工作流日志]('
                 + context.serverUrl + '/' + owner + '/' + repo + '/actions/runs/' + context.runId
                 + ')</sub>'
             ].join('\n');
