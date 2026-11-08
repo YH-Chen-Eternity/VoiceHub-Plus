@@ -2,10 +2,21 @@ name: CI Summary
 
 # 把一轮 PR 检查（CodeQL / Docker 构建 / Nix CI / DB 迁移测试 / AI 审查等）
 # 的最终结果汇总成一条评论贴到 PR 上，每次推送幂等更新同一条，不刷屏。
-# 触发：本仓库的 check_suite 全部检查完成时（completed 含超时兜底）。
+# 说明：check_suite 事件在 GitHub 上投递不可靠（纯 Actions 检查套件经常不触发），
+# 因此改用 workflow_run 监听各工作流完成事件——任一完成即触发一次汇总，
+# 评论幂等更新，最后一轮触发得到的就是完整结果。
+# 注意：workflow_run 事件只读取默认分支上的工作流定义。
 
 on:
-  check_suite:
+  workflow_run:
+    workflows:
+      - CodeQL
+      - Build and Push Docker Image
+      - Build and Push PostgreSQL Docker Image
+      - Nix CI
+      - DB Migration Test
+      - Build VoiceHub FPK
+      - AI PR Review
     types: [completed]
 
 permissions:
@@ -14,7 +25,7 @@ permissions:
   pull-requests: write
 
 concurrency:
-  group: ci-summary-${{ github.event.check_suite.head_sha }}
+  group: ci-summary-${{ github.event.workflow_run.head_sha }}
   cancel-in-progress: true
 
 jobs:
@@ -29,24 +40,21 @@ jobs:
         with:
           script: |
             const { owner, repo } = context.repo;
-            const suite = context.payload.check_suite;
-            const sha = suite.head_sha;
+            const sha = context.payload.workflow_run.head_sha;
             const MARKER = '<!-- ci-summary -->';
 
-            // 与该 commit 关联的 PR：先取事件自带，fork 场景为空时再按 commit 反查
-            let prNumbers = (suite.pull_requests || []).map(p => p.number);
-            if (!prNumbers.length) {
-              try {
-                const r = await github.rest.repos.listPullRequestsAssociatedWithCommit({
-                  owner, repo, commit_sha: sha, per_page: 10
-                });
-                prNumbers = r.data.map(p => p.number);
-              } catch (e) {
-                core.warning('按 commit 反查 PR 失败：' + e.message);
-              }
+            // 与该 commit 关联的 PR（fork PR 也能查到）
+            let prNumbers = [];
+            try {
+              const r = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+                owner, repo, commit_sha: sha, per_page: 10
+              });
+              prNumbers = r.data.map(p => p.number);
+            } catch (e) {
+              core.warning('按 commit 反查 PR 失败：' + e.message);
             }
             if (!prNumbers.length) {
-              core.info('该 check_suite 未关联 PR，跳过');
+              core.info('该 commit 未关联 PR，跳过');
               return;
             }
 
@@ -61,27 +69,25 @@ jobs:
               neutral: '➖', skipped: '⏭️', action_required: '⚠️',
               queued: '⏳', in_progress: '🔄', pending: '⏳'
             };
+            const LABEL = {
+              success: '通过', failure: '失败', cancelled: '已取消', timed_out: '超时',
+              skipped: '跳过', action_required: '待批准（首次贡献者）', neutral: '无关',
+              in_progress: '进行中', queued: '排队中', pending: '排队中'
+            };
             const rows = runs.map(c => {
               const state = c.conclusion || c.status;
               const icon = ICON[state] || '❔';
+              const label = LABEL[state] || state;
               const link = '[' + c.name + '](' + c.html_url + ')';
-              const text = c.conclusion === 'failure' ? '失败'
-                : c.conclusion === 'success' ? '通过'
-                : c.conclusion === 'cancelled' ? '已取消'
-                : c.conclusion === 'timed_out' ? '超时'
-                : c.conclusion === 'skipped' ? '跳过'
-                : c.conclusion === 'action_required' ? '待批准（首次贡献者）'
-                : '进行中';
-              return '| ' + icon + ' | ' + link + ' | ' + text + ' |';
+              return '| ' + icon + ' | ' + link + ' | ' + label + ' |';
             });
 
             const fails = runs.filter(c => c.conclusion === 'failure').length;
             const done = runs.filter(c => c.conclusion).length;
             const head =
-              fails === 0 && done === runs.length && done > 0
-                ? '✅ **全部检查通过**'
-                : fails > 0 ? '❌ **有 ' + fails + ' 项检查失败**'
-                : '🔄 **检查进行中（' + done + '/' + runs.length + ' 完成）**';
+              fails > 0 ? '❌ **有 ' + fails + ' 项检查失败**'
+              : done === runs.length && done > 0 ? '✅ **全部检查通过**'
+              : '🔄 **检查进行中（' + done + '/' + runs.length + ' 完成）**';
 
             const body = [
               MARKER,
