@@ -1,42 +1,18 @@
 import { SmtpService } from '~~/server/services/smtpService'
 import { getSystemSettingsCached } from '~~/server/utils/system-settings-helper'
-import { SMTP_PASSWORD_MASK } from '~~/server/api/admin/system-settings/secretMask'
+import { hasAdminPermission } from '~/utils/admin-permissions'
+import { resolveSmtpTestConfig } from '~~/server/utils/smtp-test-config'
+import { ADMIN_AUDIT_RESULT, recordAdminAudit } from '~~/server/utils/admin-audit'
 
 export default defineEventHandler(async (event) => {
-  // 检查请求方法
-  if (getMethod(event) !== 'POST') {
-    throw createError({
-      statusCode: 405,
-      message: '方法不被允许'
-    })
-  }
-
-  // 检查用户认证和权限
-  const user = event.context.user
-
-  if (!user) {
-    throw createError({
-      statusCode: 401,
-      message: '未授权访问'
-    })
-  }
-
-  if (!['ADMIN', 'SUPER_ADMIN'].includes(user.role)) {
-    throw createError({
-      statusCode: 403,
-      message: '只有管理员才能测试SMTP连接'
-    })
-  }
-
+  let smtpService: SmtpService | undefined
   try {
-    const body = await readBody(event)
-
-    // 验证配置
-    if (!body.smtpEnabled) {
-      return {
-        success: false,
-        message: 'SMTP服务未启用'
-      }
+    const body = await readBody(event) || {}
+    const stored = await getSystemSettingsCached() || {}
+    const config = resolveSmtpTestConfig(body, stored, hasAdminPermission(event.context.user, 'smtp:write'))
+    if (!config.smtpEnabled) return { success: false, message: 'SMTP服务未启用' }
+    if (!config.smtpHost || !config.smtpUsername || !config.smtpPassword) {
+      return { success: false, message: '请填写完整的SMTP配置信息' }
     }
 
     if (!body.smtpHost || !body.smtpUsername || !body.smtpPassword) {
@@ -106,5 +82,7 @@ export default defineEventHandler(async (event) => {
       message: '测试连接失败',
       detail: error instanceof Error ? error.message : String(error)
     }
+  } finally {
+    smtpService?.transporter?.close()
   }
 })

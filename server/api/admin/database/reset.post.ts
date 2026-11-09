@@ -1,6 +1,7 @@
 import { createError, defineEventHandler } from 'h3'
 import { db } from '~/drizzle/db'
 import {
+  adminAuditLogs,
   apiKeyPermissions,
   apiKeys,
   apiLogs,
@@ -23,6 +24,7 @@ import {
   votes
 } from '~/drizzle/schema'
 import { ne, sql } from 'drizzle-orm'
+import { recordAdminAudit } from '~~/server/utils/admin-audit'
 
 function getFirstRow<T>(result: any): T | undefined {
   return result?.rows?.[0] ?? result?.[0]
@@ -61,6 +63,7 @@ async function resetAutoIncrementSequences() {
     { name: 'systemSettings', dbName: 'SystemSettings' },
     { name: 'songBlacklists', dbName: 'SongBlacklist' },
     { name: 'userStatusLogs', dbName: 'user_status_logs' },
+    { name: 'adminAuditLogs', dbName: 'admin_audit_logs' },
     { name: 'userIdentities', dbName: 'UserIdentity' },
     { name: 'requestTimes', dbName: 'RequestTime' },
     { name: 'songReplayRequests', dbName: 'song_replay_requests' },
@@ -110,14 +113,7 @@ async function resetAutoIncrementSequences() {
 
 export default defineEventHandler(async (event) => {
   try {
-    // 验证管理员权限：重置数据库仅限超级管理员
     const user = event.context.user
-    if (!user || user.role !== 'SUPER_ADMIN') {
-      throw createError({
-        statusCode: 403,
-        message: '只有超级管理员可以重置数据库'
-      })
-    }
 
     const resetResults = {
       success: true,
@@ -136,7 +132,13 @@ export default defineEventHandler(async (event) => {
       await db.transaction(async (tx) => {
         // 按照外键依赖顺序删除数据
 
-        // 1. API 日志与权限 (依赖于 API 密钥)
+        // 1. API 日志、审计日志与权限
+        const deletedAdminAuditLogs = await tx
+          .delete(adminAuditLogs)
+          .returning({ id: adminAuditLogs.id })
+        resetResults.details.recordsDeleted += deletedAdminAuditLogs.length
+        resetResults.details.tablesCleared++
+
         const deletedApiLogs = await tx.delete(apiLogs).returning({ id: apiLogs.id })
         resetResults.details.recordsDeleted += deletedApiLogs.length
         resetResults.details.tablesCleared++
@@ -271,6 +273,15 @@ export default defineEventHandler(async (event) => {
         message: `重置数据库失败：${error.message}`
       })
     }
+
+    // 重置会清空审计表，因此这条记录必须写在清理之后
+    await recordAdminAudit(event, 'database.reset', {
+      targetType: 'database',
+      summary: {
+        tablesCleared: resetResults.details.tablesCleared,
+        recordsDeleted: resetResults.details.recordsDeleted
+      }
+    })
 
     return resetResults
   } catch (error: any) {

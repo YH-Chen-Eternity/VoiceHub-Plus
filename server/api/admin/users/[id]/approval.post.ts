@@ -1,3 +1,4 @@
+import { assertAccountPermissionExpansion, withPermissionTransaction } from '~~/server/utils/permission-admin'
 import { defineEventHandler, getRouterParam, readBody } from 'h3'
 import { db } from '~/drizzle/db'
 import { users, userStatusLogs } from '~/drizzle/schema'
@@ -40,12 +41,9 @@ async function notifyRejected(name: string | null, email: string | null, reason:
 }
 
 // 注册审核：approve 通过（可修改注册信息），reject 拒绝（删除账户并记录理由与用户快照）
+import { recordAdminAudit } from '~~/server/utils/admin-audit'
 export default defineEventHandler(async (event) => {
-  // 检查认证和权限
   const operator = event.context.user
-  if (!operator || !['ADMIN', 'SUPER_ADMIN'].includes(operator.role)) {
-    throw createApiError(403, SERVER_ERROR_CODES.COMMON_INSUFFICIENT_PERMISSION, '没有权限访问')
-  }
 
   const userId = getRouterParam(event, 'id')
   const body = await readBody(event)
@@ -128,7 +126,12 @@ export default defineEventHandler(async (event) => {
       updateData.remark = body.remark.trim() || null
     }
 
-    await db.transaction(async (tx) => {
+    await withPermissionTransaction(event, async (tx, templates) => {
+      const [freshTarget] = await tx.select().from(users).where(eq(users.id, userIdNumber)).limit(1).for('update')
+      if (!freshTarget || freshTarget.status !== 'pending') {
+        throw createApiError(409, SERVER_ERROR_CODES.USER_NOT_PENDING, '该用户已不在待审核状态')
+      }
+      assertAccountPermissionExpansion(freshTarget, { ...freshTarget, status: 'active' }, templates, operator.perms ?? [])
       // 并发防护：仅当用户仍处于 pending 时才通过（防止另一管理员已处理后重复写入）
       const updated = await tx
         .update(users)
@@ -152,6 +155,12 @@ export default defineEventHandler(async (event) => {
 
     await notifyApproved(typeof updateData.name === 'string' ? updateData.name : targetUser.name, targetUser.email)
 
+    await recordAdminAudit(event, 'user.approval', {
+      targetType: 'user',
+      targetId: userIdNumber,
+      summary: { username: targetUser.username, result: 'approve' }
+    })
+
     return {
       success: true,
       message: '注册审核通过'
@@ -161,7 +170,7 @@ export default defineEventHandler(async (event) => {
   // 拒绝：删除账户，日志保存用户快照（用户删除后审计仍可追溯）
   const rejectReason = typeof reason === 'string' && reason.trim() ? reason.trim() : '注册审核拒绝'
 
-  await db.transaction(async (tx) => {
+  await withPermissionTransaction(event, async (tx) => {
     // 并发防护：仅当用户仍处于 pending 时才删除（防止删除已被其他管理员处理的用户）
     const deleted = await tx
       .delete(users)
@@ -183,6 +192,12 @@ export default defineEventHandler(async (event) => {
   })
 
   await notifyRejected(targetUser.name, targetUser.email, rejectReason)
+
+  await recordAdminAudit(event, 'user.approval', {
+    targetType: 'user',
+    targetId: userIdNumber,
+    summary: { username: targetUser.username, result: 'reject', reason: rejectReason }
+  })
 
   return {
     success: true,

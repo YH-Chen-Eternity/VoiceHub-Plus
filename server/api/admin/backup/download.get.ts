@@ -1,17 +1,10 @@
 import { createError, defineEventHandler, getQuery, setHeader } from 'h3'
 import { promises as fs } from 'fs'
 import path from 'path'
+import { isSafeBackupFilename } from '~~/server/utils/backup-filename'
 
 export default defineEventHandler(async (event) => {
   try {
-    // 验证管理员权限
-    const user = event.context.user
-    if (!user || user.role !== 'SUPER_ADMIN') {
-      throw createError({
-        statusCode: 403,
-        message: '只有超级管理员可以下载备份文件'
-      })
-    }
 
     const query = getQuery(event)
     const { filename } = query
@@ -23,21 +16,8 @@ export default defineEventHandler(async (event) => {
       })
     }
 
-    // 安全检查：确保文件名不包含路径遍历字符
-    if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
-      throw createError({
-        statusCode: 400,
-        message: '无效的文件名'
-      })
-    }
-
-    // 检查文件是否为备份文件
-    if (
-      !filename.endsWith('.json') ||
-      (!filename.startsWith('database-backup-') &&
-        !filename.startsWith('users-backup-') &&
-        !filename.startsWith('uploaded-'))
-    ) {
+    // 安全校验：统一走备份文件名白名单（纯 basename + 无遍历 + 前缀 + .json）
+    if (!isSafeBackupFilename(filename)) {
       throw createError({
         statusCode: 400,
         message: '无效的备份文件'

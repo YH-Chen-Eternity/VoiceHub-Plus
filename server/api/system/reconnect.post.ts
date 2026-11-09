@@ -27,7 +27,7 @@ export default defineEventHandler(async (event) => {
         message: '数据库连接正常',
         connectionStatus,
         poolStatus,
-        timestamp: new Date().toISOString()
+        timestamp: getServerDate().toISOString()
       }
     } else {
       console.log('[Reconnect API] 数据库连接异常')
@@ -36,15 +36,16 @@ export default defineEventHandler(async (event) => {
         message: '数据库连接异常',
         connectionStatus,
         poolStatus,
-        timestamp: new Date().toISOString()
+        timestamp: getServerDate().toISOString()
       }
     }
   } catch (error: any) {
     console.error('[Reconnect API] 重连过程中出错:', error)
     return {
       success: false,
-      message: '重连过程中出错，请稍后重试或联系管理员',
-      timestamp: new Date().toISOString()
+      message: '重连过程中出错: ' + error.message,
+      timestamp: getServerDate().toISOString()
+      error: error.message,
     }
   }
 })

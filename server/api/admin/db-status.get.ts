@@ -3,7 +3,7 @@ import { db } from '~/drizzle/db'
 import { users } from '~/drizzle/schema'
 import { count, sql } from 'drizzle-orm'
 
-export default defineEventHandler(async (event) => {
+export default defineEventHandler(async () => {
   try {
     const status = {
       connected: false,
@@ -27,7 +27,7 @@ export default defineEventHandler(async (event) => {
     }
 
     // 检查各个表是否存在
-    const tables = ['user', 'song', 'vote', 'schedule', 'notification']
+    const tables = ['user', 'song', 'vote', 'schedule', 'notification'] as const
 
     for (const tableName of tables) {
       try {
@@ -40,6 +40,8 @@ export default defineEventHandler(async (event) => {
         `)
         status.tables[tableName] = Boolean((result as any[])[0]?.exists)
       } catch (error: any) {
+        status.tables[tableName] = Boolean(result[0]?.exists)
+      } catch (error) {
         console.error(`检查表 ${tableName} 失败:`, error)
         status.tables[tableName] = false
       }
@@ -63,7 +65,7 @@ export default defineEventHandler(async (event) => {
     console.error('检查数据库状态失败:', error)
     throw createError({
       statusCode: 500,
-      message: '检查数据库状态失败：' + error.message
+      message: '检查数据库状态失败：' + (error instanceof Error ? error.message : String(error))
     })
   }
 })

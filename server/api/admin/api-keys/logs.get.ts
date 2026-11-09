@@ -1,22 +1,13 @@
 import { ApiLogService } from '~~/server/services/apiLogService'
+import { resolvePagination } from '~~/server/utils/pagination'
 
 /**
  * 获取API访问日志
  * GET /api/admin/api-keys/logs
  */
 export default defineEventHandler(async (event) => {
-  // 检查用户权限 - 只有超级管理员可以查看 API 日志
-  const user = event.context.user
-  if (!user || user.role !== 'SUPER_ADMIN') {
-    throw createError({
-      statusCode: 403,
-      message: '只有超级管理员可以查看 API 日志'
-    })
-  }
-
   const query = getQuery(event)
-  const page = parseInt(query.page as string) || 1
-  const limit = parseInt(query.limit as string) || 50
+  const { page, limit } = resolvePagination(query.page, query.limit, 50, 500)
   const apiKeyId = query.apiKeyId as string
   const endpoint = query.endpoint as string
   const method = query.method as string
@@ -24,8 +15,6 @@ export default defineEventHandler(async (event) => {
   const startDate = query.startDate as string
   const endDate = query.endDate as string
   const ipAddress = query.ipAddress as string
-
-  const offset = (page - 1) * limit
 
   try {
     // 使用ApiLogService获取日志

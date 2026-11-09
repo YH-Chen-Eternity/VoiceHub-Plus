@@ -9,12 +9,18 @@ import { eq } from 'drizzle-orm'
 import { isUserBlocked, getUserBlockRemainingTime } from '../services/securityService'
 import { isSupportedOAuthProvider } from '../services/oauthConfigService'
 import { isSecureRequest } from '../utils/request-utils'
-import { resolveRequirePasswordChange } from '../utils/system-settings-helper'
+import { getRolePermissionTemplatesCached, resolveRequirePasswordChange } from '../utils/system-settings-helper'
 import {
   isPublicApiPath,
   shouldBlockDuringPasswordChange,
   shouldBypassPublicApiAuthentication
 } from '../utils/auth-route-policy'
+import { resolvePermissionRouteGuard } from '../utils/admin-permission-routes'
+import {
+  hasAllPermissions,
+  hasAnyPermission,
+  resolveEffectivePermissions
+} from '~~/app/utils/admin-permissions'
 import { getPasswordSetupState } from '../utils/initial-password-policy'
 import { createApiError } from '../utils/apiError'
 import { BOT_ROUTES, SERVER_ERROR_CODES } from '../config/constants'
@@ -154,7 +160,8 @@ export default defineEventHandler(async (event) => {
         tokenVersion: users.tokenVersion,
         email: users.email,
         emailVerified: users.emailVerified,
-        legalConsentVersion: users.legalConsentVersion
+        legalConsentVersion: users.legalConsentVersion,
+        permissions: users.permissions
       })
       .from(users)
       .where(eq(users.id, decoded.userId))
@@ -297,6 +304,7 @@ export default defineEventHandler(async (event) => {
     }
 
     const passwordSetupState = getPasswordSetupState(user, requirePasswordChange)
+    const perms = resolveEffectivePermissions(user, await getRolePermissionTemplatesCached())
     event.context.user = {
       id: user.id,
       username: user.username,
@@ -304,6 +312,7 @@ export default defineEventHandler(async (event) => {
       grade: user.grade,
       class: user.class,
       role: user.role,
+      perms,
       status: user.status,
       passwordChangedAt: user.passwordChangedAt,
       forcePasswordChange: user.forcePasswordChange,

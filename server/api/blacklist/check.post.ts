@@ -1,3 +1,4 @@
+import { hasAdminPermission } from '~~/app/utils/admin-permissions'
 import { createError, defineEventHandler, readBody } from 'h3'
 import { getSystemSettingsCached } from '~~/server/utils/system-settings-helper'
 import { checkSongBlacklist } from '~~/server/utils/songBlacklistMatch'
@@ -15,7 +16,7 @@ export default defineEventHandler(async (event) => {
 
   // 管理员不受黑名单限制
   const user = event.context.user
-  if (user && ['SUPER_ADMIN', 'ADMIN', 'SONG_ADMIN'].includes(user.role)) {
+  if (hasAdminPermission(user, 'songs:bypass-limits')) {
     return {
       isBlocked: false,
       reasons: [],

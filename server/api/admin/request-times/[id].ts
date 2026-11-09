@@ -1,24 +1,9 @@
 import { db } from '~/drizzle/db'
 import { requestTimes } from '~/drizzle/schema'
 import { and, eq, ne } from 'drizzle-orm'
+import { recordAdminAudit } from '~~/server/utils/admin-audit'
 
 export default defineEventHandler(async (event) => {
-  const user = event.context.user
-
-  if (!user) {
-    throw createError({
-      statusCode: 401,
-      message: '未授权访问'
-    })
-  }
-
-  if (!['SONG_ADMIN', 'ADMIN', 'SUPER_ADMIN'].includes(user.role)) {
-    throw createError({
-      statusCode: 403,
-      message: '只有管理员才能访问投稿开放时段'
-    })
-  }
-
   const id = parseInt(event.context.params?.id || '0')
 
   if (!id) {
@@ -100,6 +85,15 @@ export default defineEventHandler(async (event) => {
         .returning()
       const updatedRequestTime = updatedRequestTimeResult[0]
 
+      await recordAdminAudit(event, 'request-time.update', {
+        targetType: 'request-time',
+        targetId: id,
+        summary: {
+          name: updatedRequestTime?.name,
+          enabled: updatedRequestTime?.enabled
+        }
+      })
+
       return updatedRequestTime
     } catch (error: any) {
       console.error('更新投稿开放时段失败:', error)
@@ -148,6 +142,15 @@ export default defineEventHandler(async (event) => {
         .returning()
       const updatedRequestTime = updatedRequestTimeResult[0]
 
+      await recordAdminAudit(event, 'request-time.update', {
+        targetType: 'request-time',
+        targetId: id,
+        summary: {
+          name: updatedRequestTime?.name,
+          enabled: updatedRequestTime?.enabled
+        }
+      })
+
       return updatedRequestTime
     } catch (error: any) {
       console.error('部分更新投稿开放时段失败:', error)
@@ -168,6 +171,12 @@ export default defineEventHandler(async (event) => {
         .where(eq(requestTimes.id, id))
         .returning()
       const deletedRequestTime = deletedRequestTimeResult[0]
+
+      await recordAdminAudit(event, 'request-time.delete', {
+        targetType: 'request-time',
+        targetId: id,
+        summary: { name: deletedRequestTime?.name }
+      })
 
       return {
         message: '投稿开放时段已成功删除'

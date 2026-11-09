@@ -1,20 +1,17 @@
-import { verifyAdminAuth } from '~~/server/utils/auth'
 import { databaseManager } from '~~/server/utils/database-manager'
+import { recordAdminAudit } from '~~/server/utils/admin-audit'
 
 export default defineEventHandler(async (event) => {
   try {
-    const authResult = await verifyAdminAuth(event)
-
-    if (!authResult.success) {
-      throw createError({
-        statusCode: 401,
-        message: authResult.message
-      })
-    }
-
     const cleanedCount = await databaseManager.cleanupExpiredSessions()
 
     databaseManager.clearHealthCheckCache()
+
+    await recordAdminAudit(event, 'database.cleanup', {
+      targetType: 'session',
+      targetId: `batch:${cleanedCount}`,
+      summary: { cleanedCount }
+    })
 
     return {
       success: true,

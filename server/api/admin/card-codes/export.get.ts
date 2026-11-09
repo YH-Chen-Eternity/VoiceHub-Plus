@@ -4,14 +4,6 @@ import { and, desc, eq, ilike, or, inArray } from 'drizzle-orm'
 import { setHeader } from 'h3'
 
 export default defineEventHandler(async (event) => {
-  const user = event.context.user
-  if (!user) {
-    throw createError({ statusCode: 401, message: '未授权访问' })
-  }
-  if (!['SONG_ADMIN', 'ADMIN', 'SUPER_ADMIN'].includes(user.role)) {
-    throw createError({ statusCode: 403, message: '权限不足' })
-  }
-
   try {
     const query = getQuery(event)
     const idsParam = typeof query.ids === 'string' ? query.ids.trim() : ''
@@ -44,11 +36,12 @@ export default defineEventHandler(async (event) => {
 
     const statusLabelMap: Record<string, string> = {
       AVAILABLE: '可用',
+      ASSIGNED: '已派发',
       LOCKED: '已锁定',
       REDEEMED: '已核销',
       INVALID: '已作废'
     }
-    const header = ['ID', '点歌券', '状态', '备注', '创建时间', '更新时间', '锁定用户ID', '锁定时间', '核销用户ID', '核销时间']
+    const header = ['ID', '点歌券', '状态', '备注', '创建时间', '更新时间', '锁定用户ID', '锁定时间', '核销用户ID', '核销时间', '持有人用户ID', '派发时间']
     const csvRows = [header.join(',')]
     for (const r of rows) {
       const esc = (v: any) => {
@@ -69,7 +62,9 @@ export default defineEventHandler(async (event) => {
         esc(r.lockedBy),
         esc(r.lockedAt),
         esc(r.redeemedBy),
-        esc(r.redeemedAt)
+        esc(r.redeemedAt),
+        esc(r.assignedTo),
+        esc(r.assignedAt)
       ].join(','))
     }
 

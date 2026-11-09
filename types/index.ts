@@ -6,7 +6,9 @@ export interface User {
   name: string | null
   grade?: string | null
   class?: string | null
-  role: 'USER' | 'ADMIN' | 'SUPER_ADMIN' | 'SONG_ADMIN' | 'BROADCASTER' | 'REVIEWER'
+  role: 'USER' | 'ADMIN' | 'SUPER_ADMIN' | 'SONG_ADMIN'
+  // 后台权限码（含通配与 ! 拒绝项），由服务端按角色模板与用户覆盖解析后下发
+  perms?: string[]
   lastLoginAt?: Date | null
   lastLoginIp?: string | null
   forcePasswordChange?: boolean
@@ -41,6 +43,8 @@ export interface Song {
   semester: string | null
   preferredPlayTimeId?: number | null
   preferredPlayTime?: PlayTime | null
+  // 点歌时选定的期望播出日期（YYYY-MM-DD），与 preferredPlayTime 共同构成「日期 + 时段」
+  preferredPlayDate?: string | null
   cover?: string | null // 音乐封面URL
   musicPlatform?: string | null // 音乐平台（netease, tencent等）
   musicId?: string | null // 平台上的歌曲ID
@@ -148,6 +152,10 @@ export interface PlayTime {
   endTime?: string // 结束时间，格式为"HH:MM"，可选
   enabled: boolean // 是否启用
   description?: string // 描述，可选
+  // 适用星期（0=周日, 1=周一 … 6=周六）；null/undefined = 每天均可选
+  weekdays?: number[] | null
+  // 是否为默认播出时段：用户投稿未选择时段时自动预选，同一时间最多一个
+  isDefault?: boolean
 }
 
 // 学期接口

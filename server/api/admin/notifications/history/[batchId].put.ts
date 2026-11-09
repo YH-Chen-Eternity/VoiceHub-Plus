@@ -5,7 +5,6 @@ import { notifications } from '~/drizzle/schema'
 import { SERVER_ERROR_CODES } from '~~/server/config/constants'
 import { createApiError } from '~~/server/utils/apiError'
 import {
-  canSendSystemNotification,
   createNotificationSenderSnapshot,
   NOTIFICATION_SOURCES,
   NOTIFICATION_CONTENT_MAX_LENGTH,
@@ -14,20 +13,10 @@ import {
   serializeNotificationSender
 } from '~~/server/utils/important-notification-policy'
 import { resolveNotificationBatchReference } from '~~/server/utils/notification-history-policy'
+import { recordAdminAudit } from '~~/server/utils/admin-audit'
 
 export default defineEventHandler(async (event) => {
   const user = event.context.user
-  if (!user) {
-    throw createApiError(401, SERVER_ERROR_CODES.NOTIFICATION_AUTH_REQUIRED, '请先登录后修改通知')
-  }
-
-  if (!canSendSystemNotification(user.role)) {
-    throw createApiError(
-      403,
-      SERVER_ERROR_CODES.NOTIFICATION_ADMIN_REQUIRED,
-      '只有管理员可以修改通知'
-    )
-  }
 
   const batchReference = resolveNotificationBatchReference(getRouterParam(event, 'batchId'))
   if (!batchReference) {
@@ -128,6 +117,12 @@ export default defineEventHandler(async (event) => {
         throw createApiError(404, SERVER_ERROR_CODES.NOTIFICATION_NOT_FOUND, '通知不存在')
       }
 
+      await recordAdminAudit(event, 'notification.resend', {
+        targetType: 'notification',
+        targetId: batchReference.batchId ?? batchReference.notificationId,
+        summary: { title, content, recipientCount: recipientUserIds.length, newBatchId: batchId }
+      })
+
       return {
         success: true,
         createdNewBatch: true,
@@ -172,6 +167,12 @@ export default defineEventHandler(async (event) => {
   if (updatedRows.length === 0) {
     throw createApiError(404, SERVER_ERROR_CODES.NOTIFICATION_NOT_FOUND, '通知不存在')
   }
+
+  await recordAdminAudit(event, 'notification.update', {
+    targetType: 'notification',
+    targetId: batchReference.batchId ?? batchReference.notificationId,
+    summary: { title, content, updatedCount: updatedRows.length }
+  })
 
   return {
     success: true,

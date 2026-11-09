@@ -2,13 +2,8 @@ import { db, songReplayRequests, songs } from '~/drizzle/db'
 import { eq, and } from 'drizzle-orm'
 import { createReplayRequestRejectedNotification } from '~~/server/services/notificationService'
 
+import { recordAdminAudit } from '~~/server/utils/admin-audit'
 export default defineEventHandler(async (event) => {
-  // 检查管理员权限
-  const user = event.context.user
-  if (!user || !['SONG_ADMIN', 'ADMIN', 'SUPER_ADMIN'].includes(user.role)) {
-    throw createError({ statusCode: 403, message: '权限不足' })
-  }
-
   const body = await readBody(event)
   const { songId } = body
 
@@ -49,6 +44,12 @@ export default defineEventHandler(async (event) => {
       }
     )
   }
+
+  await recordAdminAudit(event, 'replay.reject', {
+    targetType: 'replay-request',
+    targetId: songId,
+    summary: { title: song.title, rejected: pendingRequests.length }
+  })
 
   return { success: true }
 })

@@ -1,7 +1,9 @@
+import { hasAdminPermission, PRIV_LOGS } from '~~/app/utils/admin-permissions'
 import { db } from '~/drizzle/db'
 import { systemSettings } from '~/drizzle/schema'
 import { eq } from 'drizzle-orm'
 import { SMTP_PASSWORD_MASK, SECRET_FIELD_MASK, maskSystemSettingsSecrets } from './secretMask'
+import { findSuperAdminOnlySettingFields, stripSuperAdminOnlySettingFields } from '~/utils/settingsPermissions'
 import { isValidAstrbotWeeklyConfigInput, normalizeAstrbotWeeklyConfig } from '~~/server/utils/astrbot-weekly-config'
 import { SYSTEM_SETTINGS_DEFAULTS } from '~~/server/utils/system-settings-defaults'
 import { isAstrbotPullMode } from '~~/server/utils/astrbot-pull'
@@ -13,12 +15,18 @@ import {
   normalizeAggregateOAuthLoginTypes
 } from '~~/server/utils/oauth-providers'
 import { createApiError } from '~~/server/utils/apiError'
+import { recordAdminAudit } from '~~/server/utils/admin-audit'
+import { CUSTOM_CSS_MAX_LENGTH, containsStyleCloser, trimCustomCss } from '~/utils/custom-css-policy'
 import {
   SERVER_ERROR_CODES,
   MUSIC_SOURCE_PLATFORMS,
   DEFAULT_THEMES,
   CAPTCHA_PROVIDERS,
-  ALIYUN_ESA_CAPTCHA_REGIONS
+  ALIYUN_ESA_CAPTCHA_REGIONS,
+  API_LOG_LEVELS,
+  LOG_RETENTION_MAX_DAYS,
+  MIN_API_LOG_RETENTION_DAYS,
+  MIN_AUDIT_LOG_RETENTION_DAYS
 } from '~~/server/config/constants'
 import { parseThemeArray, validateThemeConfig } from '~~/server/utils/theme-config'
 import { fetchGradeClassOptions } from '~~/server/utils/grade-class-options'
@@ -31,6 +39,7 @@ import {
 } from '~~/server/utils/astrbot-group'
 import { ASTRBOT_PLATFORMS } from '~~/server/utils/astrbot-platforms'
 import { ESA_CAPTCHA_ENDPOINTS, parseEsaCaptchaScenes } from '~/utils/esaCaptcha'
+import { invalidScopeFields, isAdminSettingsScope, pickScopeSettings } from '~~/server/utils/admin-settings-scope'
 
 /**
  * 解析数据库中存储的平台数组（历史脏数据/异常写入时回退默认值）
@@ -174,47 +183,50 @@ const validatePlatformArray = (fieldName: string, value: unknown, requireUnique 
 }
 
 export default defineEventHandler(async (event) => {
-  // 检查用户认证和权限
   const user = event.context.user
-
-  if (!user) {
-    throw createError({
-      statusCode: 401,
-      message: '未授权访问'
-    })
-  }
-
-  if (!['ADMIN', 'SUPER_ADMIN'].includes(user.role)) {
-    throw createError({
-      statusCode: 403,
-      message: '只有管理员才能更新系统设置'
-    })
-  }
 
   try {
     const body = await readBody(event)
+    const scope = event.context.adminSettingsScope
+    if (isAdminSettingsScope(scope) && (invalidScopeFields(scope, body).length || !Object.keys(body).length)) {
+      throw createApiError(400, SERVER_ERROR_CODES.COMMON_INVALID_PARAMS, '提交了该模块以外的配置字段')
+    }
+    if (body && Object.prototype.hasOwnProperty.call(body, 'rolePermissionTemplates')) {
+      throw createApiError(400, SERVER_ERROR_CODES.COMMON_INVALID_PARAMS, '角色权限模板须通过权限矩阵修改')
+    }
+
+    // 通用配置接口的敏感字段须持有独立权限；模块接口已限定字段范围。
+    if (!isAdminSettingsScope(scope) && !hasAdminPermission(user, 'system-settings:secrets')) {
+      const rejectedFields = findSuperAdminOnlySettingFields(body)
+      if (rejectedFields.length > 0) {
+        console.warn('[SystemSettings] 提交未授权敏感配置已拒绝:', rejectedFields.join(', '))
+        throw createApiError(403, SERVER_ERROR_CODES.COMMON_INSUFFICIENT_PERMISSION, '没有修改敏感配置的权限')
+      }
+    }
 
     // 验证请求体
-    const updateData: any = {}
+    let updateData: any = {}
 
     // 获取当前设置，用于验证依赖配置的完整性
     const settingsResult = await db.select().from(systemSettings).limit(1)
     let settings = settingsResult[0]
 
+    // 日志配置变更前原值：这三个字段非凭据，可在审计里记录前后值以便取证
+    const previousLogSettings = {
+      apiLogLevel: settings?.apiLogLevel,
+      apiLogRetentionDays: settings?.apiLogRetentionDays,
+      auditLogRetentionDays: settings?.auditLogRetentionDays
+    }
+
     if (body.defaultTheme !== undefined || body.enabledThemes !== undefined) {
-      if (user.role !== 'SUPER_ADMIN') {
-        // 主题设置仅超级管理员可修改：普通管理员请求剥离主题字段，其余配置照常处理
-        delete body.defaultTheme
-        delete body.enabledThemes
-      } else {
-        const enabledThemes = body.enabledThemes !== undefined
-          ? validateThemeConfig(body.defaultTheme ?? settings?.defaultTheme ?? 'System', body.enabledThemes)
-          : parseThemeArray(settings?.enabledThemes, DEFAULT_THEMES)
-        const defaultTheme = body.defaultTheme !== undefined ? body.defaultTheme : settings?.defaultTheme || 'System'
-        validateThemeConfig(defaultTheme, JSON.stringify(enabledThemes))
-        if (body.defaultTheme !== undefined) updateData.defaultTheme = defaultTheme
-        updateData.enabledThemes = JSON.stringify(enabledThemes)
-      }
+      // 普通管理员提交主题字段已由上方守卫拦截，此处仅处理超级管理员请求
+      const enabledThemes = body.enabledThemes !== undefined
+        ? validateThemeConfig(body.defaultTheme ?? settings?.defaultTheme ?? 'System', body.enabledThemes)
+        : parseThemeArray(settings?.enabledThemes, DEFAULT_THEMES)
+      const defaultTheme = body.defaultTheme !== undefined ? body.defaultTheme : settings?.defaultTheme || 'System'
+      validateThemeConfig(defaultTheme, JSON.stringify(enabledThemes))
+      if (body.defaultTheme !== undefined) updateData.defaultTheme = defaultTheme
+      updateData.enabledThemes = JSON.stringify(enabledThemes)
     }
 
     // 统计代码会原样注入全站 SSR head，等同任意脚本执行，仅超级管理员可修改
@@ -263,6 +275,31 @@ export default defineEventHandler(async (event) => {
       updateData.enablePlayTimeSelection = body.enablePlayTimeSelection
     }
 
+    if (body.playSlotRequired !== undefined) {
+      if (typeof body.playSlotRequired !== 'boolean') {
+        throw createError({
+          statusCode: 400,
+          message: 'playSlotRequired 必须是布尔值'
+        })
+      }
+      updateData.playSlotRequired = body.playSlotRequired
+    }
+
+    // 交叉校验：「时段必选」依赖「播出时段选择」总开关，提交值与当前持久化值合并后判定
+    const mergedEnablePlayTimeSelection = body.enablePlayTimeSelection !== undefined
+      ? body.enablePlayTimeSelection
+      : settings?.enablePlayTimeSelection === true
+    const mergedPlaySlotRequired = body.playSlotRequired !== undefined
+      ? body.playSlotRequired
+      : settings?.playSlotRequired === true
+    if (mergedPlaySlotRequired && !mergedEnablePlayTimeSelection) {
+      throw createApiError(
+        400,
+        SERVER_ERROR_CODES.COMMON_INVALID_PARAMS,
+        '启用「时段必选」前需先开启「播出时段选择」'
+      )
+    }
+
     if (body.siteTitle !== undefined) {
       updateData.siteTitle = body.siteTitle
     }
@@ -300,6 +337,29 @@ export default defineEventHandler(async (event) => {
         throw createApiError(400, SERVER_ERROR_CODES.COMMON_INVALID_PARAMS, 'statisticsCode 必须是字符串或 null')
       }
       updateData.statisticsCode = body.statisticsCode
+    }
+
+    if (body.customCss !== undefined) {
+      if (body.customCss !== null && typeof body.customCss !== 'string') {
+        throw createApiError(400, SERVER_ERROR_CODES.COMMON_INVALID_PARAMS, 'customCss 必须是字符串或 null')
+      }
+      const css = trimCustomCss(body.customCss)
+      if (css.length > CUSTOM_CSS_MAX_LENGTH) {
+        throw createApiError(
+          400,
+          SERVER_ERROR_CODES.SETTINGS_CUSTOM_CSS_TOO_LONG,
+          `自定义 CSS 不能超过 ${CUSTOM_CSS_MAX_LENGTH} 个字符`,
+          { params: [CUSTOM_CSS_MAX_LENGTH] }
+        )
+      }
+      if (containsStyleCloser(css)) {
+        throw createApiError(
+          400,
+          SERVER_ERROR_CODES.SETTINGS_CUSTOM_CSS_STYLE_CLOSER,
+          '自定义 CSS 不允许包含 </style>'
+        )
+      }
+      updateData.customCss = css || null
     }
 
     if (body.legalConsentEnabled !== undefined) {
@@ -360,6 +420,13 @@ export default defineEventHandler(async (event) => {
         throw createApiError(400, SERVER_ERROR_CODES.COMMON_INVALID_PARAMS, 'statisticsCodeEnabled 必须是布尔值')
       }
       updateData.statisticsCodeEnabled = body.statisticsCodeEnabled
+    }
+
+    if (body.customCssEnabled !== undefined) {
+      if (typeof body.customCssEnabled !== 'boolean') {
+        throw createApiError(400, SERVER_ERROR_CODES.COMMON_INVALID_PARAMS, 'customCssEnabled 必须是布尔值')
+      }
+      updateData.customCssEnabled = body.customCssEnabled
     }
 
     if (body.showBeianIcon !== undefined) {
@@ -1396,6 +1463,49 @@ export default defineEventHandler(async (event) => {
     // 时长>0 且 enable 未显式提交 ⇒ 自动开启，维持"时长与开关自洽"不变量
     if (anyRestrictionHoursPositive && body.enableSubmissionRestriction === undefined) {
       updateData.enableSubmissionRestriction = true
+    }
+
+    // 日志管理：记录级别与保留天数（0 = 永久保留）
+    // 未走 logging 模块接口时同样要求私有码，避免用通用配置权限绕过
+    if (!isAdminSettingsScope(scope)) {
+      const logFields = ['apiLogLevel', 'apiLogRetentionDays', 'auditLogRetentionDays']
+      if (logFields.some((field) => body[field] !== undefined) && !hasAdminPermission(user, PRIV_LOGS)) {
+        throw createApiError(403, SERVER_ERROR_CODES.COMMON_INSUFFICIENT_PERMISSION, '没有修改日志配置的权限')
+      }
+    }
+    if (body.apiLogLevel !== undefined) {
+      if (!(API_LOG_LEVELS as readonly unknown[]).includes(body.apiLogLevel)) {
+        throw createApiError(
+          400,
+          SERVER_ERROR_CODES.SETTINGS_LOG_LEVEL_INVALID,
+          `apiLogLevel 必须是 ${API_LOG_LEVELS.join('、')}`
+        )
+      }
+      updateData.apiLogLevel = body.apiLogLevel
+    }
+    // 保留天数：0 = 永久保留，否则不得低于该类型的下限，防止压到极小后清掉近期日志
+    const retentionMins = {
+      apiLogRetentionDays: MIN_API_LOG_RETENTION_DAYS,
+      auditLogRetentionDays: MIN_AUDIT_LOG_RETENTION_DAYS
+    } as const
+    for (const field of ['apiLogRetentionDays', 'auditLogRetentionDays'] as const) {
+      if (body[field] === undefined) continue
+      const days = body[field]
+      const minDays = retentionMins[field]
+      const valid = Number.isInteger(days) && (days === 0 || (days >= minDays && days <= LOG_RETENTION_MAX_DAYS))
+      if (!valid) {
+        throw createApiError(
+          400,
+          SERVER_ERROR_CODES.SETTINGS_LOG_RETENTION_INVALID,
+          `${field} 必须是 0 或 ${minDays}-${LOG_RETENTION_MAX_DAYS} 的整数`,
+          { params: [minDays, LOG_RETENTION_MAX_DAYS] }
+        )
+      }
+      updateData[field] = days
+    }
+
+    if (isAdminSettingsScope(scope)) {
+      updateData = pickScopeSettings(scope, updateData)
     }
 
     if (!settings) {

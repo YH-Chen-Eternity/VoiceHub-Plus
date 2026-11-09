@@ -7,24 +7,9 @@ import {
   getAggregateOAuthLoginTypesOrDefault,
   isSafeAggregateOAuthUrl
 } from '~~/server/utils/oauth-providers'
+import { recordAdminAudit } from '~~/server/utils/admin-audit'
 
 export default defineEventHandler(async (event) => {
-  const user = event.context.user
-
-  if (!user) {
-    throw createError({
-      statusCode: 401,
-      message: '未授权访问'
-    })
-  }
-
-  if (!['ADMIN', 'SUPER_ADMIN'].includes(user.role)) {
-    throw createError({
-      statusCode: 403,
-      message: '只有管理员才能导入环境配置'
-    })
-  }
-
   const body = await readBody(event)
   const provider = typeof body.provider === 'string' ? body.provider : ''
 
@@ -113,6 +98,12 @@ export default defineEventHandler(async (event) => {
       .returning()
     settings = updated[0]
   }
+
+  // 导入的是环境变量里的凭据，审计只记录提供方与字段名
+  await recordAdminAudit(event, 'settings.env-oauth-import', {
+    targetType: 'system-settings',
+    summary: { provider, fields: Object.keys(updateData) }
+  })
 
   return maskSystemSettingsSecrets(settings)
 })

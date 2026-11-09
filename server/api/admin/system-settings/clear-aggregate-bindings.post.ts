@@ -1,22 +1,9 @@
 import { db, users, userIdentities } from '~/drizzle/db'
 import { eq, or, like, inArray } from 'drizzle-orm'
-import { createApiError } from '~~/server/utils/apiError'
 import { resolveAvatarSource } from '~~/server/utils/user-avatar'
+import { recordAdminAudit } from '~~/server/utils/admin-audit'
 
 export default defineEventHandler(async (event) => {
-  const user = event.context.user
-
-  if (!user) {
-    throw createApiError(401, 'AUTH_UNAUTHORIZED_ACCESS', '未授权访问')
-  }
-
-  if (!['ADMIN', 'SUPER_ADMIN'].includes(user.role)) {
-    throw createError({
-      statusCode: 403,
-      message: '只有管理员才能清除聚合登录绑定'
-    })
-  }
-
   const result = await db.transaction(async (tx) => {
     // 1. 查询所有聚合登录相关的身份
     const targetIdentities = await tx.query.userIdentities.findMany({
@@ -111,6 +98,12 @@ export default defineEventHandler(async (event) => {
       count: targetIdentities.length,
       usersAffected: affectedUserIds.length
     }
+  })
+
+  await recordAdminAudit(event, 'settings.clear-aggregate-bindings', {
+    targetType: 'user-identity',
+    targetId: `batch:${result.count}`,
+    summary: { count: result.count, usersAffected: result.usersAffected }
   })
 
   return {

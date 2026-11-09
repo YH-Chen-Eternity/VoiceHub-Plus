@@ -1,16 +1,8 @@
 import { db } from '~/drizzle/db'
-import { cardCodes } from '~/drizzle/schema'
+import { cardCodes, users } from '~/drizzle/schema'
 import { and, count, desc, eq, ilike, or } from 'drizzle-orm'
 
 export default defineEventHandler(async (event) => {
-  const user = event.context.user
-  if (!user) {
-    throw createError({ statusCode: 401, message: '未授权访问' })
-  }
-  if (!['SONG_ADMIN', 'ADMIN', 'SUPER_ADMIN'].includes(user.role)) {
-    throw createError({ statusCode: 403, message: '权限不足' })
-  }
-
   try {
     const query = getQuery(event)
     const status = typeof query.status === 'string' ? query.status.trim().toUpperCase() : ''
@@ -41,16 +33,40 @@ export default defineEventHandler(async (event) => {
     }
 
     const [result, totalResult, statsRows] = await Promise.all([
-      queryBuilder.orderBy(desc(cardCodes.createdAt)).limit(limit).offset(offset),
-      countQueryBuilder,
+      db
+        .select({
+          id: cardCodes.id,
+          code: cardCodes.code,
+          status: cardCodes.status,
+          note: cardCodes.note,
+          createdAt: cardCodes.createdAt,
+          updatedAt: cardCodes.updatedAt,
+          lockedBy: cardCodes.lockedBy,
+          lockedAt: cardCodes.lockedAt,
+          redeemedBy: cardCodes.redeemedBy,
+          redeemedAt: cardCodes.redeemedAt,
+          assignedTo: cardCodes.assignedTo,
+          assignedAt: cardCodes.assignedAt,
+          // 持有人展示名，便于管理员识别券的归属
+          assigneeName: users.name,
+          assigneeUsername: users.username
+        })
+        .from(cardCodes)
+        .leftJoin(users, eq(cardCodes.assignedTo, users.id))
+        .where(whereClause)
+        .orderBy(desc(cardCodes.createdAt))
+        .limit(limit)
+        .offset(offset),
+      db.select({ count: count() }).from(cardCodes).where(whereClause),
       db.select({ status: cardCodes.status, count: count() }).from(cardCodes).groupBy(cardCodes.status)
     ])
 
-    const stats = { total: 0, available: 0, locked: 0, redeemed: 0 }
+    const stats = { total: 0, available: 0, assigned: 0, locked: 0, redeemed: 0 }
     for (const row of statsRows) {
       const value = Number(row.count || 0)
       stats.total += value
       if (row.status === 'AVAILABLE') stats.available = value
+      if (row.status === 'ASSIGNED') stats.assigned = value
       if (row.status === 'LOCKED') stats.locked = value
       if (row.status === 'REDEEMED') stats.redeemed = value
     }

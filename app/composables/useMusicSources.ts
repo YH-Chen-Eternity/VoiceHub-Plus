@@ -17,8 +17,10 @@ import {
   type SourceStatus
 } from '~/utils/musicSources'
 import { getBilibiliTrackUrl, searchBilibili, parseBilibiliId } from '~/utils/bilibiliSource'
-import { evaluateLyricDataMatch } from '~/utils/lyric/lyricMatchQuality'
+import { evaluateLyricDataMatch, hasWordTiming } from '~/utils/lyric/lyricMatchQuality'
 import { isPlaybackUrlInvalid } from '~/utils/invalidPlaybackUrls'
+import { getNeteaseCatalogResult } from '~/utils/neteaseCatalog'
+import { getNeteaseQualityLevel } from './useAudioQuality'
 import { useLyricSettings } from './useLyricSettings'
 import { usePlatformConfig } from './usePlatformConfig'
 import { useServerErrors } from './useLocaleText'
@@ -30,6 +32,23 @@ import { getPluginId, getPluginQuality, isPluginPlatform } from '~/utils/pluginP
 const lyricCache = new Map<string, Promise<any>>()
 const lyricProgressSubscribers = new Map<string, Set<LyricProgressCallback>>()
 const LYRIC_CACHE_TTL = 60 * 1000
+
+/** AMLL 官方 TTML 接口：按平台 ID 或内部 ID 查询，返回 JSON 中的 lyrics 文本 */
+const AMLL_OFFICIAL_API = 'https://api.amll.dev/v1/lyrics/get'
+
+/** AMLL 官方 TTML 搜索接口：按歌名返回候选条目，仅官方提供，镜像为静态文件服务不含搜索 */
+const AMLL_SEARCH_API = 'https://api.amll.dev/v1/lyrics/search'
+
+/** 解析官方接口响应，取 data.lyrics；格式异常或未收录时返回空串 */
+const parseOfficialAmllResponse = (raw: unknown): string => {
+  if (typeof raw !== 'string' || !raw.trim()) return ''
+  try {
+    const lyrics = JSON.parse(raw)?.data?.lyrics
+    return typeof lyrics === 'string' ? lyrics : ''
+  } catch {
+    return ''
+  }
+}
 
 // 服务器位置检测（模块级单例，避免多次实例化导致重复请求）
 const globalIsServerInChina = ref<boolean | null>(null)
@@ -559,6 +578,8 @@ export const useMusicSources = () => {
         if (
           upgraded.data.yrc &&
           LYRIC_FORMAT_RANK.yrc < currentRank &&
+          // 平台偶尔会回传仅有行级时间戳的 YRC/QRC，归入 LRC 同级，不占真逐字的升级窗口
+          hasWordTiming(upgraded.data.yrc) &&
           tryAccept({ yrc: upgraded.data.yrc }, 'yrc')
         ) {
           currentData.yrc = upgraded.data.yrc
@@ -702,27 +723,87 @@ export const useMusicSources = () => {
         const fetchAMLL = async () => {
           // 锁定 TTML 来源时无视总开关
           if (!settings.enableOnlineTTMLLyric.value && priority !== 'ttml') return
+          if (platform !== 'netease' && platform !== 'tencent') return
 
-          try {
+          // 配置镜像模板时走镜像（%s 为歌曲 ID，%p 可选，替换为平台目录），留空走官方接口
+          const mirror = settings.amllDbServer.value?.trim() || ''
+          // 模板缺 %s 时无法拼出地址，视为未配置
+          const useMirror = mirror.includes('%s')
+          const official = !useMirror
+
+          // 按平台 ID 查询 TTML，命中返回正文，未命中返回空串
+          const fetchTtmlById = async (): Promise<string> => {
             let url: string
-            if (platform === 'tencent') {
-              url = `https://amlldb.bikonoo.com/lyrics/qq-lyrics/${id}`
-            } else if (platform === 'netease') {
-              const serverUrl = settings.amllDbServer.value
-              if (!serverUrl) return
-              url = serverUrl.replace('%s', id.toString())
+            if (useMirror) {
+              const dir = platform === 'netease' ? 'ncm-lyrics' : 'qq-lyrics'
+              url = mirror.replace('%p', dir).replace('%s', encodeURIComponent(id.toString()))
             } else {
-              return
+              const key = platform === 'netease' ? 'ncmMusicId' : 'qqMusicId'
+              url = `${AMLL_OFFICIAL_API}?${key}=${encodeURIComponent(id.toString())}`
             }
 
-            const ttml = await $fetch(url, { responseType: 'text' })
-            if (ttml && typeof ttml === 'string' && ttml.includes('<tt')) {
-              if ((resultData.lrc || resultData.yrc) && !validateTtml(ttml)) return
-              resultData.ttml = ttml
-              hasResult = true
-              if (!progressive || ttmlValidated) emitProgress('amll')
+            try {
+              const raw = await $fetch<string>(url, { responseType: 'text', timeout: 8000 })
+              const ttml = official ? parseOfficialAmllResponse(raw) : raw
+              return ttml && ttml.includes('<tt') ? ttml : ''
+            } catch (error: any) {
+              // 未收录返回 404，按无歌词处理，不当作异常
+              const status = error?.statusCode ?? error?.response?.status
+              if (status !== 404) {
+                console.warn('[getLyrics] AMLL TTML 按 ID 获取失败:', error?.message || error)
+              }
+              return ''
             }
-          } catch {}
+          }
+
+          // 官方接口下 ID 未命中时按歌名搜索兜底，覆盖 AMLL 库以另一 ID 收录同曲的情况
+          const searchTtmlByTitle = async (): Promise<string> => {
+            const title = (meta?.title || '').trim()
+            if (!title) return ''
+            try {
+              const query = new URLSearchParams({ musicName: title, pageSize: '50' })
+              const searchRaw = await $fetch<string>(`${AMLL_SEARCH_API}?${query}`, {
+                responseType: 'text',
+                timeout: 8000
+              })
+              const items = JSON.parse(searchRaw)?.data?.items
+              if (!Array.isArray(items) || items.length === 0) return ''
+              // 每个曲名作为独立候选，交由现有权威比对函数按标题/歌手/专辑/版本标记筛选
+              const candidates = items.flatMap((item: any) =>
+                (item.musicNames || []).map((name: string) => ({
+                  title: name,
+                  artist: (item.artistNames || []).join('&'),
+                  album: (item.albumNames || [])[0] || '',
+                  _amllId: item.id
+                }))
+              )
+              const best = pickBestLyricCandidate(candidates, {
+                title: meta?.title,
+                artist: meta?.artist,
+                album: meta?.album,
+                duration: meta?.duration
+              })
+              if (!best?._amllId) return ''
+              const lyricRaw = await $fetch<string>(`${AMLL_OFFICIAL_API}?id=${best._amllId}`, {
+                responseType: 'text',
+                timeout: 8000
+              })
+              const ttml = parseOfficialAmllResponse(lyricRaw)
+              return ttml && ttml.includes('<tt') ? ttml : ''
+            } catch (error: any) {
+              console.warn('[getLyrics] AMLL TTML 按歌名搜索失败:', error?.message || error)
+              return ''
+            }
+          }
+
+          let ttml = await fetchTtmlById()
+          if (!ttml && official) ttml = await searchTtmlByTitle()
+          if (ttml) {
+            if ((resultData.lrc || resultData.yrc) && !validateTtml(ttml)) return
+            resultData.ttml = ttml
+            hasResult = true
+            if (!progressive || ttmlValidated) emitProgress('amll')
+          }
         }
 
         const fetchQM = async () => {
@@ -1708,6 +1789,8 @@ export const useMusicSources = () => {
       }
     } else if (source.id === 'ygking-qq') {
       throw new Error('Ygking QQ 音乐仅支持播放链接获取')
+    } else if (source.id === 'netease-ikun') {
+      throw new Error('ikun 网易云仅支持播放链接获取')
     } else {
       // 网易云备用API
       url = `${source.baseUrl}/song/detail?ids=${ids}`
@@ -1782,25 +1865,7 @@ export const useMusicSources = () => {
   /**
    * 将VoiceHub音质数值映射到网易云API的level参数
    */
-  const mapQualityToLevel = (quality: number): string => {
-    // 根据网易云API文档映射音质等级
-    switch (quality) {
-      case 2:
-        return 'standard' // 标准 (128k)
-      case 3:
-        return 'higher' // 较高 (192k)
-      case 4:
-        return 'exhigh' // HQ极高 (320k)
-      case 5:
-        return 'lossless' // SQ无损
-      case 6:
-        return 'hires' // Hi-Res
-      case 9:
-        return 'jymaster' // 超清母带
-      default:
-        return 'exhigh' // 默认极高音质
-    }
-  }
+  const mapQualityToLevel = getNeteaseQualityLevel
 
   /**
    * 获取歌曲播放URL
@@ -1821,6 +1886,7 @@ export const useMusicSources = () => {
     success: boolean
     url?: string
     source?: string
+    actualQuality?: string | null
     error?: string
   }> => {
     // 特殊处理 netease-podcast 平台：使用网易云逻辑但禁用 unblock
@@ -1940,8 +2006,9 @@ export const useMusicSources = () => {
         // 网易云音乐平台（默认）
         const neteaseSource = enabledSources.find((source) => source.id.includes('netease-backup'))
         const gdStudioSource = enabledSources.find((source) => source.id === 'netease-gdstudio')
+        const ikunSource = enabledSources.find((source) => source.id === 'netease-ikun')
 
-        const orderedSources = [neteaseSource, gdStudioSource]
+        const orderedSources = [neteaseSource, gdStudioSource, ikunSource]
 
         for (const source of orderedSources) {
           if (source) {
@@ -1962,6 +2029,7 @@ export const useMusicSources = () => {
 
         try {
           let url: string | null = null
+          let actualQuality: string | null | undefined
 
           if (source.id === 'bilibili') {
             const result = await getBilibiliTrackUrl(idParam, options?.bilibiliCid)
@@ -1998,6 +2066,17 @@ export const useMusicSources = () => {
               timeout: source.timeout || 10000
             })
             if (response?.url) {
+              url = String(response.url)
+            }
+          } else if (source.id === 'netease-ikun') {
+            // 上游未开放浏览器跨域，统一经后端代理取链
+            const level = mapQualityToLevel(Number.isNaN(requestedQuality) ? 4 : requestedQuality)
+            const response: any = await $fetch(source.baseUrl, {
+              method: 'POST',
+              body: { musicId: idParam, level },
+              timeout: source.timeout || 10000
+            })
+            if (response?.success && response.url) {
               url = String(response.url)
             }
           } else if (source.id.startsWith('meting-')) {
@@ -2128,9 +2207,9 @@ export const useMusicSources = () => {
               timeout: source.timeout || 8000
             })
 
-            if (response?.code === 200 && Array.isArray(response.data) && response.data[0]?.url) {
-              url = response.data[0].url as string
-            }
+            const result = getNeteaseCatalogResult(response, idParam)
+            url = result?.url || null
+            actualQuality = result?.actualQuality
           }
 
           if (url) {
@@ -2147,7 +2226,7 @@ export const useMusicSources = () => {
               const validation = await validatePlayUrl(url)
 
               if (validation.valid) {
-                return { success: true, url, source: source.id }
+                return { success: true, url, source: source.id, actualQuality }
               } else {
                 // 继续尝试下一个音源
               }

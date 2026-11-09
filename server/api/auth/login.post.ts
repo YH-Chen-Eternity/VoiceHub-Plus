@@ -19,7 +19,8 @@ import {
 } from '../../services/securityService'
 import { getBeijingTime } from '~/utils/timeUtils'
 import { getClientIP } from '~~/server/utils/ip-utils'
-import { resolveRequirePasswordChange } from '~~/server/utils/system-settings-helper'
+import { getRolePermissionTemplatesCached, resolveRequirePasswordChange } from '~~/server/utils/system-settings-helper'
+import { resolveEffectivePermissions } from '~~/app/utils/admin-permissions'
 import { verifyEsaCaptchaPass } from '~~/server/utils/esa-captcha-pass'
 import { getPasswordSetupState } from '~~/server/utils/initial-password-policy'
 
@@ -142,7 +143,8 @@ export default defineEventHandler(async (event) => {
         tokenVersion: users.tokenVersion,
         status: users.status,
         email: users.email,
-        emailVerified: users.emailVerified
+        emailVerified: users.emailVerified,
+        permissions: users.permissions
       })
       .from(users)
       .where(eq(users.username, body.username))
@@ -186,8 +188,6 @@ export default defineEventHandler(async (event) => {
       )
     } else if (user.status === 'graduate') {
       throw createApiError(403, 'AUTH_ACCOUNT_GRADUATED', '该账号已毕业，限制访问')
-    } else if (user.status === 'banned') {
-      throw createApiError(403, 'AUTH_ACCOUNT_BANNED', '该账号已被封禁')
     } else if (user.status === 'pending') {
       throw createApiError(403, 'AUTH_USER_PENDING_APPROVAL', '账号待管理员审核，请耐心等待')
     } else if (user.status === 'rejected') {
@@ -287,6 +287,7 @@ export default defineEventHandler(async (event) => {
 
     const requirePasswordChange = await resolveRequirePasswordChange(user)
     const passwordSetupState = getPasswordSetupState(user, requirePasswordChange)
+    const perms = resolveEffectivePermissions(user, await getRolePermissionTemplatesCached())
 
     return {
       success: true,
@@ -299,6 +300,7 @@ export default defineEventHandler(async (event) => {
         grade: user.grade,
         class: user.class,
         role: user.role,
+        perms,
         email: user.email,
         emailVerified: user.emailVerified,
         forcePasswordChange: user.forcePasswordChange,

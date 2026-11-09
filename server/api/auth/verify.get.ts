@@ -4,9 +4,10 @@ import { db } from '~/drizzle/db'
 import { users } from '~/drizzle/schema'
 import { eq } from 'drizzle-orm'
 import { createApiError } from '~~/server/utils/apiError'
-import { resolveRequirePasswordChange } from '~~/server/utils/system-settings-helper'
+import { getRolePermissionTemplatesCached, resolveRequirePasswordChange } from '~~/server/utils/system-settings-helper'
 import { getPasswordSetupState } from '~~/server/utils/initial-password-policy'
 import { resolveAvatarSource } from '~~/server/utils/user-avatar'
+import { resolveEffectivePermissions } from '~~/app/utils/admin-permissions'
 
 export default defineEventHandler(async (event) => {
   const authUser = event.context.user
@@ -34,6 +35,7 @@ export default defineEventHandler(async (event) => {
       avatarProviderUserId: true,
       email: true,
       emailVerified: true
+      permissions: true
     },
     with: {
       identities: {
@@ -58,6 +60,7 @@ export default defineEventHandler(async (event) => {
   const requirePasswordChange = await resolveRequirePasswordChange(dbUser)
 
   const passwordSetupState = getPasswordSetupState(dbUser, requirePasswordChange)
+  const perms = resolveEffectivePermissions(dbUser, await getRolePermissionTemplatesCached())
 
   // 构建返回的用户对象，只包含需要的字段
   const avatarSource = resolveAvatarSource(dbUser, dbUser.identities || [])
@@ -68,6 +71,7 @@ export default defineEventHandler(async (event) => {
     grade: dbUser.grade,
     class: dbUser.class,
     role: dbUser.role,
+    perms,
     forcePasswordChange: dbUser.forcePasswordChange,
     forceUsernameChange: dbUser.forceUsernameChange,
     passwordChangedAt: dbUser.passwordChangedAt,

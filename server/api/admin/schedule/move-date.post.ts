@@ -3,6 +3,7 @@ import { db } from '~/drizzle/db'
 import { playTimes, schedules, songs } from '~/drizzle/schema'
 import { createSystemNotification } from '~~/server/services/notificationService'
 import { getServerDate } from '~~/server/utils/serverTime'
+import { assertSchedulePlacement } from '~~/server/utils/schedulePlacementConstraint'
 
 const parsePlayTimeId = (raw: unknown): number | null => {
   if (raw === undefined || raw === null || raw === '') return null
@@ -10,15 +11,8 @@ const parsePlayTimeId = (raw: unknown): number | null => {
   return Number.isInteger(num) && num > 0 ? num : null
 }
 
+import { recordAdminAudit } from '~~/server/utils/admin-audit'
 export default defineEventHandler(async (event) => {
-  const user = event.context.user
-  if (!user || !['SONG_ADMIN', 'ADMIN', 'SUPER_ADMIN'].includes(user.role)) {
-    throw createError({
-      statusCode: 403,
-      message: '需要歌曲管理员及以上权限'
-    })
-  }
-
   const body = await readBody(event)
   const fromDate = typeof body?.fromDate === 'string' ? body.fromDate.trim() : ''
   const toDate = typeof body?.toDate === 'string' ? body.toDate.trim() : ''
@@ -81,6 +75,7 @@ export default defineEventHandler(async (event) => {
           id: schedules.id,
           songId: schedules.songId,
           playTimeId: schedules.playTimeId,
+          replayRequestId: schedules.replayRequestId,
           requesterId: songs.requesterId,
           songTitle: songs.title
         })
@@ -98,6 +93,22 @@ export default defineEventHandler(async (event) => {
       }
 
       const updateTime = getServerDate()
+      // 换时段迁移同样受期望时段硬约束，不得把指定了时段的歌曲挪到其它时段；
+      // 只改日期（保持各歌曲原时段）不改变落位，无需校验
+      if (toPlayTimeId !== null) {
+        await assertSchedulePlacement(
+          {
+            playTimeId: toPlayTimeId,
+            items: sourceSchedules.map((s) => ({
+              songId: s.songId,
+              replayRequestId: s.replayRequestId
+            }))
+          },
+          new Map(sourceSchedules.map((s) => [s.songId, s.songTitle])),
+          tx
+        )
+      }
+
       // 按目标时段分组：toPlayTimeId 指定则统一目标时段，否则保持各歌曲原时段
       const groups = new Map<number | null, typeof sourceSchedules>()
       for (const s of sourceSchedules) {
@@ -165,6 +176,12 @@ export default defineEventHandler(async (event) => {
       })
     }
 
+    await recordAdminAudit(event, 'schedule.move-date', {
+      targetType: 'schedule',
+      targetId: `batch:${moveResult.movedCount}`,
+      summary: { fromDate, toDate, movedCount: moveResult.movedCount, skippedCount: moveResult.skippedCount }
+    })
+
     return {
       success: true,
       fromDate,
@@ -176,6 +193,7 @@ export default defineEventHandler(async (event) => {
     }
   } catch (error: any) {
     console.error('迁移排期日期失败:', error)
+    if (error.statusCode) throw error
     throw createError({
       statusCode: 500,
       message: error.message || '迁移排期日期失败'

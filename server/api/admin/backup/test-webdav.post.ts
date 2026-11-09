@@ -1,7 +1,9 @@
 import { defineEventHandler, readBody } from 'h3'
 import { createApiError } from '~~/server/utils/apiError'
 import { SERVER_ERROR_CODES } from '~~/server/config/constants'
-import { getAutoBackupConfig } from '~~/server/services/autoBackupService'
+import { resolveBackupTestParams } from '~~/server/utils/backup-test-credentials'
+import { assertSafeOutboundUrl, fetchSafeOutbound } from '~~/server/utils/outbound-url'
+import { ADMIN_AUDIT_RESULT, recordAdminAudit } from '~~/server/utils/admin-audit'
 
 /** 规范化路径，去除首尾空格和多余斜杠 */
 function normalizePath(p: string): string {
@@ -9,26 +11,16 @@ function normalizePath(p: string): string {
 }
 
 export default defineEventHandler(async (event) => {
-  const user = event.context.user
-  if (!user || user.role !== 'SUPER_ADMIN') {
-    throw createApiError(403, SERVER_ERROR_CODES.COMMON_INSUFFICIENT_PERMISSION, '只有超级管理员可以测试 WebDAV 连接')
-  }
-
   const body = await readBody(event)
-  let { url, username, password, path: dirPath } = body
-
-  // 密码为空时从已保存配置中获取
-  if (!password) {
-    const config = await getAutoBackupConfig()
-    password = config?.methods?.webdav?.password || ''
-    username = username || config?.methods?.webdav?.username || ''
-    url = url || config?.methods?.webdav?.url || ''
-    dirPath = dirPath || config?.methods?.webdav?.path || ''
-  }
+  // 未提交密码时复用已保存密码，此时 url 必须与已保存配置一致
+  const { url, username, password, path: dirPath } = await resolveBackupTestParams('webdav', body)
 
   if (!url || !username || !password) {
     throw createApiError(400, SERVER_ERROR_CODES.COMMON_INVALID_PARAMS, '缺少必要参数：url, username, password')
   }
+
+  // 防 SSRF：拒绝指向云元数据/内部管理地址的目标（含域名解析后的地址）
+  await assertSafeOutboundUrl(url, 'WebDAV url')
 
   try {
     const baseUrl = url.replace(/\/$/, '')
@@ -41,7 +33,7 @@ export default defineEventHandler(async (event) => {
       let currentPath = baseUrl
       for (const segment of segments) {
         currentPath += `/${segment}`
-        const res = await fetch(currentPath, {
+        const res = await fetchSafeOutbound(currentPath, {
           method: 'MKCOL',
           headers: { Authorization: `Basic ${auth}` }
         })
@@ -54,7 +46,7 @@ export default defineEventHandler(async (event) => {
     const testUrl = dir ? `${baseUrl}/${dir}/.voicehub-test-connection` : `${baseUrl}/.voicehub-test-connection`
 
     // 写入测试文件
-    const putRes = await fetch(testUrl, {
+    const putRes = await fetchSafeOutbound(testUrl, {
       method: 'PUT',
       headers: {
         Authorization: `Basic ${auth}`,
@@ -68,13 +60,24 @@ export default defineEventHandler(async (event) => {
     }
 
     // 清理测试文件
-    await fetch(testUrl, {
+    await fetchSafeOutbound(testUrl, {
       method: 'DELETE',
       headers: { Authorization: `Basic ${auth}` }
     }).catch(() => {})
 
+    // 密码是凭据，审计只记录访问目标
+    await recordAdminAudit(event, 'backup.test-webdav', {
+      targetType: 'backup',
+      summary: { url, dir }
+    })
+
     return { success: true, message: 'WebDAV 连接测试成功' }
   } catch (err: any) {
+    await recordAdminAudit(event, 'backup.test-webdav', {
+      targetType: 'backup',
+      summary: { url, error: err.message || 'WebDAV 连接测试失败' },
+      result: ADMIN_AUDIT_RESULT.FAILURE
+    })
     return { success: false, message: err.message || 'WebDAV 连接测试失败' }
   }
 })

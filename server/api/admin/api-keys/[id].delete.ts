@@ -1,20 +1,12 @@
 import { apiKeyPermissions, apiKeys, db } from '~/drizzle/db'
 import { eq } from 'drizzle-orm'
+import { recordAdminAudit } from '~~/server/utils/admin-audit'
 
 /**
  * 删除API Key
  * DELETE /api/admin/api-keys/[id]
  */
 export default defineEventHandler(async (event) => {
-  // 检查用户权限 - 只有超级管理员可以管理 API Key
-  const user = event.context.user
-  if (!user || user.role !== 'SUPER_ADMIN') {
-    throw createError({
-      statusCode: 403,
-      message: '只有超级管理员可以管理 API Key'
-    })
-  }
-
   const apiKeyId = getRouterParam(event, 'id')
 
   if (!apiKeyId) {
@@ -56,6 +48,12 @@ export default defineEventHandler(async (event) => {
 
       // 删除API Key
       await tx.delete(apiKeys).where(eq(apiKeys.id, apiKeyId))
+    })
+
+    await recordAdminAudit(event, 'api-key.delete', {
+      targetType: 'api-key',
+      targetId: apiKeyId,
+      summary: { name: apiKeyName }
     })
 
     return {

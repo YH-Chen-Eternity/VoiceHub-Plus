@@ -1,3 +1,4 @@
+import { hasAdminPermission } from '~~/app/utils/admin-permissions'
 import { db } from '~/drizzle/db'
 import { cardCodes } from '~/drizzle/schema'
 import { eq } from 'drizzle-orm'
@@ -76,7 +77,7 @@ export default defineEventHandler(async (event) => {
     throw createApiError(400, 'CARD_CODE_REQUIRED', 'Request card is required')
   }
 
-  const isAdmin = user.role === 'SUPER_ADMIN' || user.role === 'ADMIN'
+  const isAdmin = hasAdminPermission(user, 'card-codes:bypass-disabled')
   const settings = await getSystemSettingsCached()
   // 点歌券验证仅在启用点歌券时开放
   const enabled = settings?.enableCardCodeRequests === true
@@ -87,20 +88,39 @@ export default defineEventHandler(async (event) => {
   const rows = await db
     .select({
       id: cardCodes.id,
-      status: cardCodes.status
+      status: cardCodes.status,
+      assignedTo: cardCodes.assignedTo
     })
     .from(cardCodes)
     .where(eq(cardCodes.code, code))
     .limit(1)
 
   const found = rows[0]
-  if (!found || found.status !== 'AVAILABLE') {
+  if (!found) {
+    throw createApiError(400, 'CARD_CODE_INVALID_OR_USED', 'Request card is invalid or already used')
+  }
+
+  // 派发给指定用户的券只能由该用户使用；未派发的券仍按原有规则供任何人使用
+  if (found.status === 'ASSIGNED') {
+    if (found.assignedTo !== user.id) {
+      throw createApiError(400, 'CARD_CODE_INVALID_OR_USED', 'Request card is invalid or already used')
+    }
+    return {
+      valid: true,
+      code: 'CARD_CODE_AVAILABLE',
+      message: 'Request card available',
+      assigned: true
+    }
+  }
+
+  if (found.status !== 'AVAILABLE') {
     throw createApiError(400, 'CARD_CODE_INVALID_OR_USED', 'Request card is invalid or already used')
   }
 
   return {
     valid: true,
     code: 'CARD_CODE_AVAILABLE',
-    message: 'Request card available'
+    message: 'Request card available',
+    assigned: false
   }
 })

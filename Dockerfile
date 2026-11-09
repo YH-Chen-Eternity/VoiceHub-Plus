@@ -34,6 +34,10 @@ COPY . .
 # 构建应用
 RUN pnpm run build
 
+# server 目录不在任何 tsconfig include 中，引用不存在的字段/方法（db.$transaction、
+# users.lastLoginAt 这类）只有运行时才暴露；构建后按白名单闸门检查，新增即让镜像构建失败
+RUN node scripts/typecheck-server.js
+
 # ==========================================
 # 第二阶段：运行阶段
 # ==========================================
@@ -83,6 +87,10 @@ COPY --from=builder /app/app/drizzle ./app/drizzle
 COPY --from=builder /app/server/utils/serverless-runtime.ts ./server/utils/
 COPY --from=builder /app/scripts ./scripts
 
+# .output 内的 esbuild 打包副本是构建平台（amd64）二进制，非 amd64 镜像里目标平台包缺失会导致
+# 运行时生成插件 prelude 失败；运行阶段已按目标架构安装 esbuild，删除副本让其回落到 /app/node_modules
+RUN rm -rf .output/server/node_modules/esbuild .output/server/node_modules/@esbuild
+
 # 环境变量配置
 ENV NODE_ENV=production \
     PORT=3000 \
@@ -96,6 +104,10 @@ USER voicehub
 
 # 暴露端口
 EXPOSE $PORT
+
+# 以非 root 用户运行（node 官方镜像自带 node 用户，无需手动创建）
+RUN chown -R node:node /app
+USER node
 
 # 完成数据库迁移后启动应用，插件配置由服务端读取。
 CMD ["sh", "-c", "node scripts/deploy.js && node .output/server/index.mjs"]

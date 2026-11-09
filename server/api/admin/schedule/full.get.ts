@@ -14,6 +14,7 @@ import {
   buildNameToUsersMap,
   formatDisambiguatedNameFromMap
 } from '~~/server/utils/userDisplayName'
+import { parseScheduleDateQuery } from '~~/server/utils/schedule-date-query'
 
 export default defineEventHandler(async (event) => {
   // 检查用户身份验证和权限
@@ -35,26 +36,15 @@ export default defineEventHandler(async (event) => {
 
   const query = getQuery(event)
   const { date, playTimeId, includeDrafts = 'true' } = query
+  const dateRange = parseScheduleDateQuery(date)
 
   try {
     // 构建查询条件
     const conditions = []
 
     // 日期过滤
-    if (date) {
-      const targetDate = new Date(date as string)
-      const startOfDay = new Date(
-        targetDate.getFullYear(),
-        targetDate.getMonth(),
-        targetDate.getDate()
-      )
-      const endOfDay = new Date(
-        targetDate.getFullYear(),
-        targetDate.getMonth(),
-        targetDate.getDate() + 1
-      )
-
-      conditions.push(and(gte(schedules.playDate, startOfDay), lt(schedules.playDate, endOfDay)))
+    if (dateRange) {
+      conditions.push(and(gte(schedules.playDate, dateRange.startOfDay), lt(schedules.playDate, dateRange.endOfDay)))
     }
 
     // 播放时间过滤
@@ -94,12 +84,15 @@ export default defineEventHandler(async (event) => {
         songMusicPlatform: songs.musicPlatform,
         songMusicId: songs.musicId,
         songDurationSeconds: songs.durationSeconds,
+        songPlayUrl: songs.playUrl,
         songCardCodeId: songs.cardCodeId,
         songSubmissionNote: songs.submissionNote,
         songSubmissionNotePublic: songs.submissionNotePublic,
         songSubmissionNotePublicStatus: songs.submissionNotePublicStatus,
         songSemester: songs.semester,
         songCreatedAt: songs.createdAt,
+        songPreferredPlayTimeId: songs.preferredPlayTimeId,
+        songPreferredPlayDate: songs.preferredPlayDate,
         requesterName: users.name,
         requesterGrade: users.grade,
         requesterClass: users.class,
@@ -352,6 +345,7 @@ export default defineEventHandler(async (event) => {
             musicPlatform: schedule.songMusicPlatform || null,
             musicId: schedule.songMusicId || null,
             durationSeconds: schedule.songDurationSeconds || null,
+            playUrl: schedule.songPlayUrl || null,
             semester: schedule.songSemester || null,
             createdAt: schedule.songCreatedAt,
             submissionNote: hasReplayMeta ? replayMeta.submissionNote : null,
@@ -361,7 +355,12 @@ export default defineEventHandler(async (event) => {
             // 歌曲自身投稿时填写的留言，与重播申请备注相互独立
             originalSubmissionNote: schedule.songSubmissionNote || null,
             originalSubmissionNotePublic: originalNotePublic,
-            preferredPlayTimeId: hasReplayMeta ? replayMeta.preferredPlayTimeId : null,
+            // 期望时段：重播申请指定的时段优先，其次回退到歌曲自身投稿时选择的时段
+            preferredPlayTimeId: hasReplayMeta
+              ? (replayMeta.preferredPlayTimeId ?? schedule.songPreferredPlayTimeId ?? null)
+              : (schedule.songPreferredPlayTimeId ?? null),
+            // 期望播出日期：自动排期命中该日期时优先安排；重播条目不含日期偏好，不沿用原始投稿的日期
+            preferredPlayDate: hasReplayMeta ? null : (schedule.songPreferredPlayDate || null),
             // 重播申请信息
             replayRequestCount: isReplaySong ? replayRequestCount : 0,
             replayRequesters: isReplaySong ? formattedReplayRequesters : [],

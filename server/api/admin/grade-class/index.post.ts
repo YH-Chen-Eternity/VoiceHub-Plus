@@ -3,16 +3,11 @@ import { db } from '~/drizzle/db'
 import { gradeClass } from '~/drizzle/schema'
 import { createApiError } from '~~/server/utils/apiError'
 import { SERVER_ERROR_CODES } from '~~/server/config/constants'
+import { recordAdminAudit } from '~~/server/utils/admin-audit'
 
 const MAX_BATCH_SIZE = 500
 
 export default defineEventHandler(async (event) => {
-  // 检查认证和权限
-  const user = event.context.user
-  if (!user || !['ADMIN', 'SUPER_ADMIN'].includes(user.role)) {
-    throw createApiError(403, SERVER_ERROR_CODES.COMMON_INSUFFICIENT_PERMISSION, '没有权限访问')
-  }
-
   const body = await readBody(event)
 
   // 批量模式：items 数组，已存在的组合跳过，返回新增/跳过数量
@@ -53,6 +48,12 @@ export default defineEventHandler(async (event) => {
       await db.insert(gradeClass).values(toInsert).onConflictDoNothing()
     }
 
+    await recordAdminAudit(event, 'grade-class.batch-create', {
+      targetType: 'grade-class',
+      targetId: `batch:${toInsert.length}`,
+      summary: { added: toInsert.length, skipped }
+    })
+
     return {
       success: true,
       added: toInsert.length,
@@ -77,6 +78,12 @@ export default defineEventHandler(async (event) => {
   if (!inserted) {
     throw createApiError(409, SERVER_ERROR_CODES.GRADE_CLASS_DUPLICATE, '该年级班级组合已存在')
   }
+
+  await recordAdminAudit(event, 'grade-class.create', {
+    targetType: 'grade-class',
+    targetId: inserted.id,
+    summary: { grade, class: studentClass }
+  })
 
   return {
     success: true,

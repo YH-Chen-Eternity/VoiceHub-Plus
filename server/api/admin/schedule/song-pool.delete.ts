@@ -4,12 +4,10 @@ import { scheduleSongPool } from '~/drizzle/schema'
 import { inArray } from 'drizzle-orm'
 import { createApiError } from '~~/server/utils/apiError'
 import { SERVER_ERROR_CODES } from '~~/server/config/constants'
-import { requireSongAdmin } from '~~/server/utils/requireSongAdmin'
 import { fetchPoolCount } from '~~/server/utils/scheduleSongPool'
 
+import { recordAdminAudit } from '~~/server/utils/admin-audit'
 export default defineEventHandler(async (event) => {
-  requireSongAdmin(event)
-
   const query = getQuery(event)
   const songIdsRaw = query.songIds
 
@@ -28,5 +26,11 @@ export default defineEventHandler(async (event) => {
   }
 
   const result = await db.delete(scheduleSongPool).where(inArray(scheduleSongPool.songId, songIds)).returning()
+  await recordAdminAudit(event, 'schedule.pool-remove', {
+    targetType: 'song-pool',
+    targetId: `batch:${result.length}`,
+    summary: { removed: result.length, songIds }
+  })
+
   return { ok: true, removed: result.length, total: await fetchPoolCount() }
 })

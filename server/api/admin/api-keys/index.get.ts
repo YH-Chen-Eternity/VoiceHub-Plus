@@ -1,27 +1,16 @@
 import { apiKeyPermissions, apiKeys, db, users } from '~/drizzle/db'
 import { and, count, desc, eq, inArray, sql } from 'drizzle-orm'
+import { resolvePagination } from '~~/server/utils/pagination'
 
 /**
  * 获取API Key列表
  * GET /api/admin/api-keys
  */
 export default defineEventHandler(async (event) => {
-  // 检查用户权限 - 只有超级管理员可以管理 API Key
-  const user = event.context.user
-  if (!user || user.role !== 'SUPER_ADMIN') {
-    throw createError({
-      statusCode: 403,
-      message: '只有超级管理员可以管理 API Key'
-    })
-  }
-
   const query = getQuery(event)
-  const page = parseInt(query.page as string) || 1
-  const limit = parseInt(query.limit as string) || 20
+  const { page, limit, offset } = resolvePagination(query.page, query.limit, 20, 200)
   const search = (query.search as string) || ''
   const status = query.status as string // 'active', 'inactive', 'expired'
-
-  const offset = (page - 1) * limit
 
   try {
     // 构建查询条件

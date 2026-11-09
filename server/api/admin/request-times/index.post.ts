@@ -1,24 +1,9 @@
 import { db } from '~/drizzle/db'
 import { requestTimes } from '~/drizzle/schema'
 import { and, gt, gte, ilike, lt, lte, or } from 'drizzle-orm'
+import { recordAdminAudit } from '~~/server/utils/admin-audit'
 
 export default defineEventHandler(async (event) => {
-  const user = event.context.user
-
-  if (!user) {
-    throw createError({
-      statusCode: 401,
-      message: '未授权访问'
-    })
-  }
-
-  if (!['SONG_ADMIN', 'ADMIN', 'SUPER_ADMIN'].includes(user.role)) {
-    throw createError({
-      statusCode: 403,
-      message: '只有管理员才能添加投稿开放时段'
-    })
-  }
-
   const body = await readBody(event)
 
   if (!body.name) {
@@ -82,6 +67,17 @@ export default defineEventHandler(async (event) => {
       })
       .returning()
     const newRequestTime = newRequestTimeResult[0]
+
+    await recordAdminAudit(event, 'request-time.create', {
+      targetType: 'request-time',
+      targetId: newRequestTime?.id,
+      summary: {
+        name: newRequestTime?.name,
+        startTime: newRequestTime?.startTime,
+        endTime: newRequestTime?.endTime,
+        enabled: newRequestTime?.enabled
+      }
+    })
 
     return newRequestTime
   } catch (error: any) {

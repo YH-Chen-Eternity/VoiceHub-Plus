@@ -13,27 +13,16 @@ import {
 } from '~~/server/services/cardCodeLifecycleService'
 import {
   fulfillReplayRequestsForSchedule,
+  resolveScheduleReplayBindings,
+  parseScheduleReplayRequestId,
   restoreReplayRequestsToPending
 } from '~~/server/utils/scheduleReplayBinding'
+import { assertSchedulePlacement, loadSongTitleMap } from '~~/server/utils/schedulePlacementConstraint'
 import { getServerDate } from '~~/server/utils/serverTime'
 
+import { recordAdminAudit } from '~~/server/utils/admin-audit'
 export default defineEventHandler(async (event) => {
-  // 检查用户认证和权限
   const user = event.context.user
-
-  if (!user) {
-    throw createError({
-      statusCode: 401,
-      message: '未授权访问'
-    })
-  }
-
-  if (!['SONG_ADMIN', 'ADMIN', 'SUPER_ADMIN'].includes(user.role)) {
-    throw createError({
-      statusCode: 403,
-      message: '只有歌曲管理员及以上权限才能发布排期'
-    })
-  }
 
   const body = await readBody(event)
 
@@ -58,11 +47,11 @@ export default defineEventHandler(async (event) => {
         throw createError({ statusCode: 400, message: `第 ${index + 1} 条排期数据无效` })
       }
       // 管理员拖拽时显式选择的重播申请，发布时优先绑定
-      const replayRequestId = Number(item?.replayRequestId)
+      const replayRequestId = parseScheduleReplayRequestId(item?.replayRequestId)
       return {
         songId,
         sequence,
-        replayRequestId: Number.isInteger(replayRequestId) && replayRequestId > 0 ? replayRequestId : null
+        replayRequestId
       }
     })
 
@@ -141,10 +130,17 @@ export default defineEventHandler(async (event) => {
       // 记录被删除的已发布排期的重播绑定，同歌重发时回写，避免重播标识丢失
       const previousReplayBindings = new Map<number, number>()
       for (const scheduleToDelete of schedulesToDelete) {
-        if (!scheduleToDelete.isDraft && scheduleToDelete.replayRequestId) {
+        if (scheduleToDelete.replayRequestId) {
           previousReplayBindings.set(scheduleToDelete.songId, scheduleToDelete.replayRequestId)
         }
       }
+
+      const resolvedItems = await resolveScheduleReplayBindings(tx, scheduleItems, previousReplayBindings)
+      await assertSchedulePlacement(
+        { playTimeId, items: resolvedItems },
+        await loadSongTitleMap(Array.from(new Set(songIds)), tx),
+        tx
+      )
 
       // 3. 删除该时间段内的所有排期（包括草稿和已发布）
       await tx.delete(schedules).where(and(...whereConditions))
@@ -205,7 +201,7 @@ export default defineEventHandler(async (event) => {
       // 4. 插入新的排期并处理通知
       const publishedAt = getServerDate()
 
-      for (const item of scheduleItems) {
+      for (const item of resolvedItems) {
         const song = songMap.get(item.songId)!
 
         // 插入排期
@@ -232,8 +228,7 @@ export default defineEventHandler(async (event) => {
           songId: song.id,
           scheduleId: insertedSchedule.id,
           at: publishedAt,
-          preferredRequestId: item.replayRequestId || undefined,
-          fallbackRequestId: previousReplayBindings.get(song.id) || undefined
+          resolvedRequestId: item.replayRequestId
         })
 
         if (replayBinding) {
@@ -295,6 +290,12 @@ export default defineEventHandler(async (event) => {
 
     console.log(`[Performance] 批量发布排期耗时: ${Date.now() - startTime}ms`)
 
+    await recordAdminAudit(event, 'schedule.bulk-publish', {
+      targetType: 'schedule',
+      targetId: `batch:${body.songs.length}`,
+      summary: { count: body.songs.length, playDate }
+    })
+
     return {
       success: true,
       message: '排期发布成功'
@@ -307,6 +308,7 @@ export default defineEventHandler(async (event) => {
       ip: clientIP
     })
 
+    if (error.statusCode) throw error
     throw createError({
       statusCode: error.statusCode || 500,
       message: error.message || '发布排期失败'

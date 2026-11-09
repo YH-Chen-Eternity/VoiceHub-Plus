@@ -3,9 +3,11 @@ import { db } from '~/drizzle/db'
 import { isServerlessRuntime } from '~~/server/utils/serverless-runtime'
 import { pluginBackupTables } from '~~/server/utils/music-source-plugins/backup'
 import {
+  adminAuditLogs,
   apiKeys,
   apiKeyPermissions,
   apiLogs,
+  cardCodeAssignments,
   cardCodeRedeemLogs,
   cardCodes,
   collaborationLogs,
@@ -31,19 +33,13 @@ import {
 } from '~/drizzle/schema'
 import { inArray } from 'drizzle-orm'
 import { maskSystemSettingsSecrets } from '~~/server/api/admin/system-settings/secretMask'
+import { recordAdminAudit } from '~~/server/utils/admin-audit'
 import { promises as fs } from 'fs'
 import path from 'path'
 
 export default defineEventHandler(async (event) => {
   try {
-    // 验证管理员权限
     const user = event.context.user
-    if (!user || user.role !== 'SUPER_ADMIN') {
-      throw createError({
-        statusCode: 403,
-        message: '只有超级管理员可以导出备份'
-      })
-    }
 
     const body = await readBody(event)
     const { tables = 'all' } = body
@@ -147,6 +143,10 @@ export default defineEventHandler(async (event) => {
           }))
         },
         description: '点歌券数据'
+      },
+      cardCodeAssignments: {
+        query: async () => await db.select().from(cardCodeAssignments),
+        description: '点歌券派发记录'
       },
       cardCodeRedeemLogs: {
         query: async () => {
@@ -402,6 +402,10 @@ export default defineEventHandler(async (event) => {
         query: () => db.select().from(apiKeyPermissions),
         description: 'API密钥权限'
       },
+      adminAuditLogs: {
+        query: () => db.select().from(adminAuditLogs),
+        description: '管理员操作审计日志'
+      },
       apiLogs: {
         query: async () => {
           const logsData = await db.select().from(apiLogs)
@@ -589,6 +593,17 @@ export default defineEventHandler(async (event) => {
 
     // 检测运行环境（与连接池等处共用一份判定）
     const isServerless = isServerlessRuntime()
+
+    await recordAdminAudit(event, 'backup.export', {
+      targetType: 'backup',
+      targetId: filename,
+      summary: {
+        tables,
+        includeSystemData,
+        records: totalRecords,
+        downloadMode: isServerless ? 'direct' : 'file'
+      }
+    })
 
     if (isServerless) {
       // 在无服务器环境中，直接返回备份数据供前端下载

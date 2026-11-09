@@ -4,14 +4,9 @@ import { gradeClass } from '~/drizzle/schema'
 import { eq } from 'drizzle-orm'
 import { createApiError } from '~~/server/utils/apiError'
 import { SERVER_ERROR_CODES } from '~~/server/config/constants'
+import { recordAdminAudit } from '~~/server/utils/admin-audit'
 
 export default defineEventHandler(async (event) => {
-  // 检查认证和权限
-  const user = event.context.user
-  if (!user || !['ADMIN', 'SUPER_ADMIN'].includes(user.role)) {
-    throw createApiError(403, SERVER_ERROR_CODES.COMMON_INSUFFICIENT_PERMISSION, '没有权限访问')
-  }
-
   const id = Number(getRouterParam(event, 'id'))
   if (!Number.isInteger(id) || id <= 0) {
     throw createApiError(400, SERVER_ERROR_CODES.COMMON_INVALID_PARAMS, '无效的配置 ID')
@@ -19,7 +14,7 @@ export default defineEventHandler(async (event) => {
 
   const existing = await db.query.gradeClass.findFirst({
     where: eq(gradeClass.id, id),
-    columns: { id: true }
+    columns: { id: true, grade: true, class: true }
   })
 
   if (!existing) {
@@ -28,6 +23,12 @@ export default defineEventHandler(async (event) => {
 
   // 仅删除配置行，不触碰任何用户数据
   await db.delete(gradeClass).where(eq(gradeClass.id, id))
+
+  await recordAdminAudit(event, 'grade-class.delete', {
+    targetType: 'grade-class',
+    targetId: id,
+    summary: { grade: existing.grade, class: existing.class }
+  })
 
   return {
     success: true,

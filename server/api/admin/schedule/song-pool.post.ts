@@ -5,11 +5,10 @@ import { eq, inArray } from 'drizzle-orm'
 import { getServerDate } from '~~/server/utils/serverTime'
 import { createApiError } from '~~/server/utils/apiError'
 import { SERVER_ERROR_CODES } from '~~/server/config/constants'
-import { requireSongAdmin } from '~~/server/utils/requireSongAdmin'
 import { fetchPoolCount } from '~~/server/utils/scheduleSongPool'
 import { fetchSongDuration } from '~~/server/utils/songDurationFetcher'
+import { recordAdminAudit } from '~~/server/utils/admin-audit'
 export default defineEventHandler(async (event) => {
-  requireSongAdmin(event)
   const user = event.context.user as any
   const body = await readBody(event)
   if (!Array.isArray(body.songIds) || body.songIds.length === 0) {
@@ -98,5 +97,10 @@ export default defineEventHandler(async (event) => {
       }
     }
   }
+  await recordAdminAudit(event, 'schedule.pool-add', {
+    targetType: 'song-pool',
+    summary: { added: added.length, skipped: skipped.length, songIds: added.map((item) => item.songId) }
+  })
+
   return { added, skipped, total: await fetchPoolCount() }
 })

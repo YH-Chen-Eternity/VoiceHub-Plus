@@ -5,20 +5,11 @@ import { db } from '~/drizzle/db'
 import { users } from '~/drizzle/schema'
 import { asc, desc, count, sql } from 'drizzle-orm'
 import { resolveAvatarSource } from '~~/server/utils/user-avatar'
+import { maskIdentitiesSecrets } from '~~/server/utils/identity-secrets'
 import { buildUserFilterConditions } from '~~/server/utils/user-filter'
 
 export default defineEventHandler(async (event) => {
   try {
-    // 检查用户是否为管理员
-    const user = event.context.user
-
-    if (!user || !['ADMIN', 'SUPER_ADMIN'].includes(user.role)) {
-      throw createError({
-        statusCode: 403,
-        message: '只有系统管理员可以访问用户列表'
-      })
-    }
-
     const query = getQuery(event)
     const { grade, class: className, search, page = '1', limit = '50', role, status, sortBy = 'id', sortOrder = 'asc' } = query
 
@@ -101,6 +92,8 @@ export default defineEventHandler(async (event) => {
       const avatarSource = resolveAvatarSource(user, user.identities || [])
       return {
         ...user,
+        // 头像解析完成后清除 TOTP 共享密钥
+        identities: maskIdentitiesSecrets(user.identities),
         avatar: avatarSource?.url ?? null
       }
     })

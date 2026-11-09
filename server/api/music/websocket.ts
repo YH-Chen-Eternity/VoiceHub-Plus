@@ -2,11 +2,13 @@
 
 import { randomUUID } from 'node:crypto'
 import { defineEventHandler, getCookie, getQuery } from 'h3'
+import { createError, defineEventHandler, getQuery } from 'h3'
 import { db, users } from '~/drizzle/db'
 import { eq } from 'drizzle-orm'
 import { JWTEnhanced } from '~~/server/utils/jwt-enhanced'
 import { resolveRequirePasswordChange } from '~~/server/utils/system-settings-helper'
 import { createApiError } from '~~/server/utils/apiError'
+import { isServerlessRuntime } from '~~/server/utils/serverless-runtime'
 
 // 存储WebSocket连接
 const musicConnections = new Map<string, any>()
@@ -113,6 +115,10 @@ export function broadcastSongChange(songInfo: any) {
 
 // WebSocket事件处理器
 export default defineEventHandler(async (event) => {
+  // serverless 实例内存隔离且函数定期回收，SSE 广播不可达，挂连接只会空耗函数时长
+  if (isServerlessRuntime()) {
+    throw createError({ statusCode: 410, message: '当前部署不支持 SSE 长连接' })
+  }
   // 获取查询参数
   const query = getQuery(event)
   // 优先从 auth-token cookie 取令牌：EventSource 同源请求自动携带 cookie。

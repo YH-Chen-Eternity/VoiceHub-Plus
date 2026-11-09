@@ -3,26 +3,13 @@ import { schedules, songs } from '~/drizzle/schema'
 import { and, desc, eq, gte, lte, ne } from 'drizzle-orm'
 import { createSongSelectedNotification, createReplaySongSelectedNotification } from '../../services/notificationService'
 import { redeemCardCodeForSchedule } from '~~/server/services/cardCodeLifecycleService'
-import { fulfillReplayRequestsForSchedule } from '~~/server/utils/scheduleReplayBinding'
+import { fulfillReplayRequestsForSchedule, parseScheduleReplayRequestId, resolveScheduleReplayBindings } from '~~/server/utils/scheduleReplayBinding'
+import { assertSchedulePlacement } from '~~/server/utils/schedulePlacementConstraint'
 import { getServerDate } from '~~/server/utils/serverTime'
 
+import { recordAdminAudit } from '~~/server/utils/admin-audit'
 export default defineEventHandler(async (event) => {
-  // 检查用户认证和权限
   const user = event.context.user
-
-  if (!user) {
-    throw createError({
-      statusCode: 401,
-      message: '未授权访问'
-    })
-  }
-
-  if (!['SONG_ADMIN', 'ADMIN', 'SUPER_ADMIN'].includes(user.role)) {
-    throw createError({
-      statusCode: 403,
-      message: '只有歌曲管理员及以上权限才能创建排期'
-    })
-  }
 
   const body = await readBody(event)
 
@@ -37,10 +24,7 @@ export default defineEventHandler(async (event) => {
   const isDraft = body.isDraft === true
 
   // 前端显式选择的重播申请，发布时优先绑定
-  const preferredReplayRequestId =
-    Number.isInteger(Number(body.replayRequestId)) && Number(body.replayRequestId) > 0
-      ? Number(body.replayRequestId)
-      : null
+  const preferredReplayRequestId = parseScheduleReplayRequestId(body.replayRequestId)
 
   try {
     // 检查歌曲是否存在
@@ -56,6 +40,16 @@ export default defineEventHandler(async (event) => {
     }
 
     const transactionResult = await db.transaction(async (tx) => {
+      const [resolvedItem] = await resolveScheduleReplayBindings(tx, [{
+        songId: song.id,
+        replayRequestId: preferredReplayRequestId
+      }])
+      const playTimeId = body.playTimeId ? Number(body.playTimeId) : null
+      await assertSchedulePlacement(
+        { playTimeId, items: [resolvedItem!] },
+        new Map([[song.id, song.title]]),
+        tx
+      )
       // 获取序号，如果未提供则查找当天最大序号+1
       let sequence = body.sequence || 1
 
@@ -99,7 +93,8 @@ export default defineEventHandler(async (event) => {
           songId: body.songId,
           playDate: playDate,
           sequence: sequence,
-          playTimeId: body.playTimeId || null,
+          playTimeId,
+          replayRequestId: resolvedItem!.replayRequestId,
           // 草稿支持：根据参数决定是否为草稿
           isDraft: isDraft,
           publishedAt: isDraft ? null : getServerDate()
@@ -148,7 +143,7 @@ export default defineEventHandler(async (event) => {
           songId: schedule.song.id,
           scheduleId: createdSchedule.id,
           at: createdSchedule.publishedAt || getServerDate(),
-          preferredRequestId: preferredReplayRequestId || undefined
+          resolvedRequestId: resolvedItem!.replayRequestId
         })
 
         if (replayBinding) {
@@ -200,6 +195,12 @@ export default defineEventHandler(async (event) => {
     }
 
     const schedule = transactionResult.schedule
+
+    await recordAdminAudit(event, isDraft ? 'schedule.draft' : 'schedule.publish', {
+      targetType: 'schedule',
+      targetId: schedule.id,
+      summary: { songId: body.songId, playDate: schedule.playDate, legacy: true }
+    })
 
     return {
       ...schedule,

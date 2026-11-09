@@ -9,6 +9,7 @@ import { getTxSongPlayableInfo, upgradeTxAudioUrl } from '~~/server/utils/native
 import { buildRedisKey, getRedisClient, isRedisConfigured } from '~~/server/utils/redis'
 import { db } from '~/drizzle/db'
 import { songs } from '~/drizzle/schema'
+import { enforceAnonymousMusicResolveRateLimit } from '~~/server/utils/music-resolve-rate-limit'
 import {
   getQqCookieDiagnostic,
   normalizeQqCookie,

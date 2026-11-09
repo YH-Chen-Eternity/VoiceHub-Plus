@@ -1,25 +1,9 @@
 import { db } from '~/drizzle/db'
 import { semesters } from '~/drizzle/schema'
 import { eq } from 'drizzle-orm'
+import { recordAdminAudit } from '~~/server/utils/admin-audit'
 
 export default defineEventHandler(async (event) => {
-  // 检查用户认证和权限
-  const user = event.context.user
-
-  if (!user) {
-    throw createError({
-      statusCode: 401,
-      message: '需要登录才能访问'
-    })
-  }
-
-  if (!['ADMIN', 'SUPER_ADMIN', 'SONG_ADMIN'].includes(user.role)) {
-    throw createError({
-      statusCode: 403,
-      message: '只有管理员才能管理学期'
-    })
-  }
-
   const body = await readBody(event)
 
   if (!body.semesterId) {
@@ -50,6 +34,12 @@ export default defineEventHandler(async (event) => {
 
     // 设置指定学期为活跃
     await tx.update(semesters).set({ isActive: true }).where(eq(semesters.id, body.semesterId))
+  })
+
+  await recordAdminAudit(event, 'semester.set-active', {
+    targetType: 'semester',
+    targetId: body.semesterId,
+    summary: { name: semester[0]?.name }
   })
 
   return { message: '活跃学期设置成功' }

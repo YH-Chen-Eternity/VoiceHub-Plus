@@ -5,6 +5,10 @@ import { createSongPlayedNotifications } from '~~/server/services/notificationSe
 import { songs, songReplayRequests, schedules } from '~/drizzle/schema'
 import { eq, and, inArray, lte, sql } from 'drizzle-orm'
 import { getBeijingTime, getBeijingEndOfDay } from '~/utils/timeUtils'
+import { songs, songReplayRequests } from '~/drizzle/schema'
+import { eq, and, inArray } from 'drizzle-orm'
+import { getServerDate } from '~~/server/utils/serverTime'
+import { redeemCardCodeForSchedule, restoreCardCodeAfterScheduleRemoval } from '~~/server/services/cardCodeLifecycleService'
 import { getClientIP } from '~~/server/utils/ip-utils'
 import { restoreReplayRequestsToPending } from '~~/server/utils/scheduleReplayBinding'
 import { enqueueAstrbotGroupEvent } from '~~/server/services/astrbotGroupService'
@@ -16,6 +20,7 @@ const markPlayedSchema = z.object({
   unmark: z.boolean().optional()
 })
 
+import { recordAdminAudit } from '~~/server/utils/admin-audit'
 export default defineEventHandler(async (event) => {
   // 检查用户认证
   const user = event.context.user
@@ -118,12 +123,17 @@ export default defineEventHandler(async (event) => {
       .update(songs)
       .set({
         played: !isUnmark,
-        playedAt: isUnmark ? null : getBeijingTime()
+        playedAt: isUnmark ? null : getServerDate()
       })
       .where(condition)
-      .returning({ id: songs.id })
+      .returning({ id: songs.id, cardCodeId: songs.cardCodeId })
 
     const updatedSongIds = updatedSongsResult.map((s) => s.id)
+    const operatorId = Number(event.context.user?.id || event.context.apiKey?.createdByUserId)
+    for (const song of updatedSongsResult) {
+      const transition = isUnmark ? restoreCardCodeAfterScheduleRemoval : redeemCardCodeForSchedule
+      await transition(tx, { songId: song.id, cardCodeId: song.cardCodeId, operatorId, at: getServerDate(), cancelPlayback: isUnmark })
+    }
 
     if (updatedSongIds.length > 0) {
       if (!isUnmark) {
@@ -132,7 +142,7 @@ export default defineEventHandler(async (event) => {
           .update(songReplayRequests)
           .set({
             status: 'FULFILLED',
-            updatedAt: new Date()
+            updatedAt: getServerDate()
           })
           .where(
             and(
@@ -150,7 +160,7 @@ export default defineEventHandler(async (event) => {
         const restoredCount = await restoreReplayRequestsToPending({
           tx,
           songIds: updatedSongIds,
-          at: new Date()
+          at: getServerDate()
         })
 
         if (restoredCount > 0) {

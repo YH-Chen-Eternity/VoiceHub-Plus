@@ -4,25 +4,12 @@ import { notifications } from '~/drizzle/schema'
 import { SERVER_ERROR_CODES } from '~~/server/config/constants'
 import { createApiError } from '~~/server/utils/apiError'
 import {
-  canSendSystemNotification,
   NOTIFICATION_SOURCES
 } from '~~/server/utils/important-notification-policy'
 import { resolveNotificationBatchReference } from '~~/server/utils/notification-history-policy'
+import { recordAdminAudit } from '~~/server/utils/admin-audit'
 
 export default defineEventHandler(async (event) => {
-  const user = event.context.user
-  if (!user) {
-    throw createApiError(401, SERVER_ERROR_CODES.NOTIFICATION_AUTH_REQUIRED, '请先登录后删除通知')
-  }
-
-  if (!canSendSystemNotification(user.role)) {
-    throw createApiError(
-      403,
-      SERVER_ERROR_CODES.NOTIFICATION_ADMIN_REQUIRED,
-      '只有管理员可以删除通知'
-    )
-  }
-
   const batchReference = resolveNotificationBatchReference(getRouterParam(event, 'batchId'))
   if (!batchReference) {
     throw createApiError(404, SERVER_ERROR_CODES.NOTIFICATION_NOT_FOUND, '通知不存在')
@@ -56,6 +43,12 @@ export default defineEventHandler(async (event) => {
   if (deletedRows.length === 0) {
     throw createApiError(404, SERVER_ERROR_CODES.NOTIFICATION_NOT_FOUND, '通知不存在')
   }
+
+  await recordAdminAudit(event, 'notification.delete-batch', {
+    targetType: 'notification',
+    targetId: batchReference.batchId ?? batchReference.notificationId,
+    summary: { deletedCount: deletedRows.length }
+  })
 
   return {
     success: true,

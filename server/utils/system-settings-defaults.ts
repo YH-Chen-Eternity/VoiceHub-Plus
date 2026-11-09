@@ -1,4 +1,9 @@
-import { MUSIC_SOURCE_PLATFORMS } from '~~/server/config/constants'
+import {
+  MUSIC_SOURCE_PLATFORMS,
+  DEFAULT_API_LOG_LEVEL,
+  DEFAULT_API_LOG_RETENTION_DAYS,
+  DEFAULT_AUDIT_LOG_RETENTION_DAYS
+} from '~~/server/config/constants'
 import { DEFAULT_ASTRBOT_GROUP_EVENTS, DEFAULT_ASTRBOT_GROUP_THROTTLE } from '~~/server/utils/astrbot-group'
 import { DEFAULT_ASTRBOT_WEEKLY_CONFIG } from '~~/server/utils/astrbot-weekly-config'
 
@@ -19,6 +24,7 @@ export const normalizeScheduleVisibilitySettings = (settings) => {
 export const SYSTEM_SETTINGS_DEFAULTS = {
   telemetryEnabled: true,
   enablePlayTimeSelection: false,
+  playSlotRequired: false,
   siteTitle: 'VoiceHub',
   siteLogoUrl: '/favicon.ico',
   schoolLogoHomeUrl: null,
@@ -110,6 +116,9 @@ export const SYSTEM_SETTINGS_DEFAULTS = {
   // 站点统计代码（任意统计平台 HTML/JS 片段）
   statisticsCodeEnabled: false,
   statisticsCode: null,
+  // 自定义 CSS（全站样式表，注入 <head> 末尾）
+  customCssEnabled: false,
+  customCss: null,
   legalConsentEnabled: false,
   legalConsentDisplayMode: 'modal',
   legalConsentUpdatedDate: null,
@@ -120,6 +129,12 @@ export const SYSTEM_SETTINGS_DEFAULTS = {
   // 平台管理
   enabledPlatforms: JSON.stringify([...MUSIC_SOURCE_PLATFORMS]),
   platformOrder: JSON.stringify([...MUSIC_SOURCE_PLATFORMS]),
+  // 角色权限模板：null 表示使用 app/utils/admin-permissions 内置默认模板
+  rolePermissionTemplates: null,
+  // 日志管理：API 访问日志级别与数据库日志保留天数（0 = 永久保留）
+  apiLogLevel: DEFAULT_API_LOG_LEVEL,
+  apiLogRetentionDays: DEFAULT_API_LOG_RETENTION_DAYS,
+  auditLogRetentionDays: DEFAULT_AUDIT_LOG_RETENTION_DAYS,
 }
 
 export const PUBLIC_SETTINGS_FIELDS = [
@@ -137,6 +152,7 @@ export const PUBLIC_SETTINGS_FIELDS = [
   'gonganNumber',
   'showBeianIcon',
   'enablePlayTimeSelection',
+  'playSlotRequired',
   'enableSubmissionLimit',
   'dailySubmissionLimit',
   'weeklySubmissionLimit',

@@ -334,6 +334,10 @@ export class LogManager {
 
       console.log(`[Log Manager] 清理数据库日志记录: ${result.rowCount || 0} 条`)
     } catch (error: any) {
+      // postgres.js 用 count 表示受影响行数；rowCount 是 pg 驱动的字段名，此处恒为 undefined
+      const deletedCount = Number((result as unknown as { count?: number }).count ?? 0)
+      console.log(`[Log Manager] 清理数据库日志记录: ${deletedCount} 条`)
+    } catch (error) {
       console.error('[Log Manager] 清理数据库日志失败:', error)
     }
   }

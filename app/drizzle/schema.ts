@@ -2,6 +2,7 @@
 
 // Modified by YH-Chen on 2026-10-17
 import {bigint, boolean, index, integer, jsonb, pgEnum, pgTable, primaryKey, serial, text, timestamp, uniqueIndex, uuid, varchar, unique} from 'drizzle-orm/pg-core';
+import {bigint, boolean, check, date, index, integer, jsonb, pgEnum, pgTable, primaryKey, serial, text, timestamp, uniqueIndex, uuid, varchar, unique} from 'drizzle-orm/pg-core';
 import {relations, sql} from 'drizzle-orm';
 
 // 枚举定义
@@ -13,6 +14,7 @@ export const collaboratorStatusEnum = pgEnum('collaborator_status', ['PENDING', 
 export const replayRequestStatusEnum = pgEnum('replay_request_status', ['PENDING', 'FULFILLED', 'REJECTED']);
 export const cardCodeStatusEnum = pgEnum('card_code_status', [
   'AVAILABLE',
+  'ASSIGNED',
   'LOCKED',
   'REDEEMED',
   'INVALID'
@@ -89,16 +91,29 @@ export type AuthSession = typeof authSessions.$inferSelect;
 export type NewAuthSession = typeof authSessions.$inferInsert;
 
 // 播出时段表
-export const playTimes = pgTable('PlayTime', {
-  id: serial('id').primaryKey(),
-  createdAt: timestamp('createdAt').defaultNow().notNull(),
-  updatedAt: timestamp('updatedAt').defaultNow().notNull(),
-  name: text('name').notNull(),
-  startTime: text('startTime'),
-  endTime: text('endTime'),
-  enabled: boolean('enabled').default(true).notNull(),
-  description: text('description'),
-});
+export const playTimes = pgTable(
+  'PlayTime',
+  {
+    id: serial('id').primaryKey(),
+    createdAt: timestamp('createdAt').defaultNow().notNull(),
+    updatedAt: timestamp('updatedAt').defaultNow().notNull(),
+    name: text('name').notNull(),
+    startTime: text('startTime'),
+    endTime: text('endTime'),
+    enabled: boolean('enabled').default(true).notNull(),
+    description: text('description'),
+    // 适用星期（0=周日, 1=周一 … 6=周六）；NULL/空数组 = 每天均可选（兼容历史数据）
+    weekdays: jsonb('weekdays').$type<number[]>(),
+    // 默认播出时段：用户投稿未选择时段时自动预选。同一时间最多一个，
+    // 由下方部分唯一索引在数据库层兜底，不依赖调用方自觉。
+    isDefault: boolean('isDefault').default(false).notNull(),
+  },
+  (table) => [
+    uniqueIndex('play_time_single_default_unique')
+      .on(table.isDefault)
+      .where(sql`${table.isDefault} = true`),
+  ],
+);
 
 // 年级班级配置表（选择器选项来源，优先于从用户提取）
 export const gradeClass = pgTable(
@@ -141,6 +156,8 @@ export const songs = pgTable('Song', {
   // 管理员后台始终可见真实投稿人，便于管理与追溯。
   hitRequestId: integer(),
   cardCodeId: integer('cardCodeId').references(() => cardCodes.id, { onDelete: 'set null' }),
+  // 用户选择的期望播出日期（北京时间 YYYY-MM-DD），与 preferredPlayTimeId 共同构成「日期 + 时段」
+  preferredPlayDate: date('preferredPlayDate', { mode: 'string' }),
 }, (table) => [
   index('song_card_code_id_idx').on(table.cardCodeId),
   index('song_semester_created_at_idx').on(table.semester, table.createdAt),
@@ -330,6 +347,8 @@ export const systemSettings = pgTable('SystemSettings', {
   instanceId: text('instance_id'),
   telemetryEnabled: boolean('telemetryEnabled').default(true).notNull(),
   enablePlayTimeSelection: boolean('enablePlayTimeSelection').default(false).notNull(),
+  // 点歌时播出日期+时段是否强制必选（全局总开关，依赖 enablePlayTimeSelection）
+  playSlotRequired: boolean('playSlotRequired').default(false).notNull(),
   siteTitle: text('siteTitle'),
   siteLogoUrl: text('siteLogoUrl'),
   schoolLogoHomeUrl: text('schoolLogoHomeUrl'),
@@ -483,6 +502,10 @@ export const systemSettings = pgTable('SystemSettings', {
   // 站点统计代码（任意站点统计平台的 HTML/JS 片段，注入 SSR 页面 <head>）
   statisticsCodeEnabled: boolean('statisticsCodeEnabled').default(false).notNull(),
   statisticsCode: text('statisticsCode'),
+
+  // 自定义 CSS（全站样式表，注入 SSR 页面 <head> 末尾，优先级高于内置主题）
+  customCssEnabled: boolean('customCssEnabled').default(false).notNull(),
+  customCss: text('customCss'),
   legalConsentEnabled: boolean('legalConsentEnabled').default(false).notNull(),
   legalConsentDisplayMode: text('legalConsentDisplayMode').default('modal').notNull(),
   legalConsentUpdatedDate: text('legalConsentUpdatedDate'),
@@ -494,6 +517,13 @@ export const systemSettings = pgTable('SystemSettings', {
   // 平台管理配置（仅内置音源；插件音源由插件管理的启用状态与排序控制，不入库）
   enabledPlatforms: text('enabledPlatforms').default('["netease","tencent","bilibili","migu"]'),
   platformOrder: text('platformOrder').default('["netease","tencent","bilibili","migu"]'),
+  // 角色权限模板：按角色存权限码数组，NULL 时使用 app/utils/admin-permissions 内置默认模板
+  rolePermissionTemplates: jsonb('rolePermissionTemplates').$type<Record<string, string[]> | null>(),
+
+  // 日志管理：API 访问日志记录级别（off / errors / all），两类数据库日志保留天数（0 = 永久保留）
+  apiLogLevel: text('apiLogLevel').default('all').notNull(),
+  apiLogRetentionDays: integer('apiLogRetentionDays').default(90).notNull(),
+  auditLogRetentionDays: integer('auditLogRetentionDays').default(180).notNull(),
 });
 
 // 歌曲黑名单表
@@ -548,6 +578,30 @@ export const apiLogs = pgTable('api_logs', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   errorMessage: text('error_message'),
 });
+
+// 管理员操作审计日志表（仅记录后台语义化写操作，控制记录量）
+export const adminAuditLogs = pgTable('admin_audit_logs', {
+  id: serial('id').primaryKey(),
+  // 审计快照：操作者被删除后仍可追溯；长度与 NAME_MAX_LENGTH 对齐
+  actorId: integer('actor_id'),
+  actorName: varchar('actor_name', { length: 255 }),
+  // 语义动作码，如 schedule.publish、user.status、settings.update
+  action: varchar('action', { length: 80 }).notNull(),
+  targetType: varchar('target_type', { length: 50 }),
+  // 单个目标 ID；批量操作写 batch:<数量>，明细放 summary
+  targetId: varchar('target_id', { length: 200 }),
+  // 变更摘要（脱敏后 JSON 字符串）
+  summary: text('summary'),
+  ipAddress: text('ip_address'),
+  userAgent: text('user_agent'),
+  // 取值由 ADMIN_AUDIT_RESULT 保证：SUCCESS / FAILURE
+  result: varchar('result', { length: 10 }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  index('admin_audit_logs_created_idx').on(table.createdAt),
+  index('admin_audit_logs_actor_idx').on(table.actorId, table.createdAt),
+  index('admin_audit_logs_action_idx').on(table.action, table.createdAt),
+]);
 
 // 用户状态变更日志表
 export const userStatusLogs = pgTable('user_status_logs', {
@@ -856,6 +910,8 @@ export type ApiLog = typeof apiLogs.$inferSelect;
 export type NewApiLog = typeof apiLogs.$inferInsert;
 export type UserStatusLog = typeof userStatusLogs.$inferSelect;
 export type NewUserStatusLog = typeof userStatusLogs.$inferInsert;
+export type AdminAuditLog = typeof adminAuditLogs.$inferSelect;
+export type NewAdminAuditLog = typeof adminAuditLogs.$inferInsert;
 export type SongCollaborator = typeof songCollaborators.$inferSelect;
 export type NewSongCollaborator = typeof songCollaborators.$inferInsert;
 export type CollaborationLog = typeof collaborationLogs.$inferSelect;
@@ -878,8 +934,18 @@ export const cardCodes = pgTable('CardCode', {
   lockedAt: timestamp('lockedAt'),
   redeemedBy: integer('redeemedBy').references(() => users.id, { onDelete: 'set null' }),
   redeemedAt: timestamp('redeemedAt'),
+  // 派发给用户后归属的持有人；回收后置空
+  assignedTo: integer('assignedTo').references(() => users.id, { onDelete: 'set null' }),
+  assignedAt: timestamp('assignedAt'),
   note: text('note'),
-});
+}, (table) => [
+  // 用户端「我的点歌券」按持有人 + 活跃状态查询
+  index('card_code_assigned_to_status_idx').on(table.assignedTo, table.status),
+  // 持有权与状态必须自洽：ASSIGNED 一定有持有人，回到可用池/作废一定解除持有人
+  // 用文本比较而非枚举字面量：同一迁移里刚 ADD VALUE 的新枚举值事务内不可引用
+  check('card_code_assigned_status_has_holder', sql`CAST(${table.status} AS text) <> 'ASSIGNED' OR ${table.assignedTo} IS NOT NULL`),
+  check('card_code_unassigned_status_no_holder', sql`CAST(${table.status} AS text) NOT IN ('AVAILABLE', 'INVALID') OR ${table.assignedTo} IS NULL`),
+]);
 
 // 卡密兑换日志表
 export const cardCodeRedeemLogs = pgTable('CardCodeRedeemLog', {
@@ -897,6 +963,58 @@ export const cardCodeRedeemLogs = pgTable('CardCodeRedeemLog', {
 
 export type CardCode = typeof cardCodes.$inferSelect;
 export type NewCardCode = typeof cardCodes.$inferInsert;
+
+// 点歌券派发状态
+export const cardCodeAssignmentStatusEnum = pgEnum('card_code_assignment_status', [
+  'ASSIGNED',   // 已派发给用户，尚未使用
+  'USED',       // 用户已使用
+  'RECYCLED',   // 已被管理员回收
+  'FAILED'      // 派发失败
+]);
+
+// 点歌券派发记录表：记录派发时间、派发人员、接收人、回收与失败原因
+export const cardCodeAssignments = pgTable('CardCodeAssignment', {
+  id: serial('id').primaryKey(),
+  createdAt: timestamp('createdAt').defaultNow().notNull(),
+  updatedAt: timestamp('updatedAt').defaultNow().notNull(),
+  // 删券不销毁审计流水，与 CardCodeRedeemLog 一致靠 codeSnapshot 追溯
+  cardCodeId: integer('cardCodeId').references(() => cardCodes.id, { onDelete: 'set null' }),
+  codeSnapshot: text('codeSnapshot').notNull(),
+  // 接收人（被派发用户）
+  userId: integer('userId').references(() => users.id, { onDelete: 'set null' }),
+  userNameSnapshot: text('userNameSnapshot'),
+  // 派发人员
+  assignedBy: integer('assignedBy').references(() => users.id, { onDelete: 'set null' }),
+  assignedByName: text('assignedByName'),
+  // 派发时间
+  assignedAt: timestamp('assignedAt').defaultNow().notNull(),
+  status: cardCodeAssignmentStatusEnum('status').default('ASSIGNED').notNull(),
+  // 使用时间
+  usedAt: timestamp('usedAt'),
+  // 回收信息
+  recycledAt: timestamp('recycledAt'),
+  recycledBy: integer('recycledBy').references(() => users.id, { onDelete: 'set null' }),
+  recycledByName: text('recycledByName'),
+  recycleReason: text('recycleReason'),
+  // 失败原因（派发过程出错时写入）
+  failureReason: text('failureReason'),
+  // 通知发送结果：SENT 成功 / FAILED 失败 / SKIPPED 未发送
+  notifyStatus: text('notifyStatus').default('SKIPPED').notNull(),
+  notifyError: text('notifyError'),
+  note: text('note')
+}, (table) => [
+  index('card_code_assignment_card_code_id_idx').on(table.cardCodeId),
+  // 一张券同时只能有一条活跃派发记录
+  uniqueIndex('card_code_assignment_active_per_card_unique')
+    .on(table.cardCodeId)
+    .where(sql`${table.status} = 'ASSIGNED'`),
+  index('card_code_assignment_user_status_idx').on(table.userId, table.status),
+  index('card_code_assignment_status_assigned_at_idx').on(table.status, table.assignedAt),
+  index('card_code_assignment_assigned_at_idx').on(table.assignedAt)
+]);
+
+export type CardCodeAssignment = typeof cardCodeAssignments.$inferSelect;
+export type NewCardCodeAssignment = typeof cardCodeAssignments.$inferInsert;
 
 // 自动备份历史记录表
 export const backupHistory = pgTable('BackupHistory', {

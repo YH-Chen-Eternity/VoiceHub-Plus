@@ -2,16 +2,9 @@ import { randomInt } from 'node:crypto'
 import { db } from '~/drizzle/db'
 import { cardCodes } from '~/drizzle/schema'
 import { inArray } from 'drizzle-orm'
+import { recordAdminAudit } from '~~/server/utils/admin-audit'
 
 export default defineEventHandler(async (event) => {
-  const user = event.context.user
-  if (!user) {
-    throw createError({ statusCode: 401, message: '未授权访问' })
-  }
-  if (!['SONG_ADMIN', 'ADMIN', 'SUPER_ADMIN'].includes(user.role)) {
-    throw createError({ statusCode: 403, message: '权限不足' })
-  }
-
   const body = await readBody(event) ?? {}
 
   const rawCodes = Array.isArray(body.codes) ? body.codes : body.codes ? [body.codes] : []
@@ -109,6 +102,18 @@ export default defineEventHandler(async (event) => {
       note: typeof body.note === 'string' ? body.note.trim() || null : null
     }))
     const res = await db.insert(cardCodes).values(inserts).returning()
+    // 券码等同凭据，审计只记数量与生成规则，不记具体码值
+    await recordAdminAudit(event, 'card-code.create', {
+      targetType: 'card-code',
+      targetId: `batch:${res.length}`,
+      summary: {
+        created: res.length,
+        skipped: uniqueCodes.length - insertCodes.length,
+        batchCount,
+        prefix
+      }
+    })
+
     return {
       success: true,
       data: res,

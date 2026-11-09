@@ -4,15 +4,8 @@ import { schedules, songs } from '~/drizzle/schema'
 import { getClientIP } from '~~/server/utils/ip-utils'
 import { getServerDate } from '~~/server/utils/serverTime'
 
+import { recordAdminAudit } from '~~/server/utils/admin-audit'
 export default defineEventHandler(async (event) => {
-  const user = event.context.user
-  if (!user || !['SONG_ADMIN', 'ADMIN', 'SUPER_ADMIN'].includes(user.role)) {
-    throw createError({
-      statusCode: 403,
-      message: '需要歌曲管理员及以上权限'
-    })
-  }
-
   const startTime = Date.now()
   const clientIP = getClientIP(event)
 
@@ -145,14 +138,18 @@ export default defineEventHandler(async (event) => {
 
   console.log(`[Performance] 复制排期耗时: ${Date.now() - startTime}ms`)
 
+  await recordAdminAudit(event, 'schedule.copy', {
+    targetType: 'schedule',
+    targetId: `batch:${copyResult.copiedCount ?? 0}`,
+    summary: { fromDate, toDate, copiedCount: copyResult.copiedCount ?? 0, replacedDrafts: (copyResult.replacedDrafts ?? []).length }
+  })
+
   return {
     success: true,
     fromDate,
     toDate,
     copiedCount: copyResult.copiedCount ?? 0,
     createdScheduleIds: copyResult.createdScheduleIds ?? [],
-    replacedDrafts: copyResult.replacedDrafts ?? [],
-    draftCount: copyResult.draftCount,
-    overwriteDrafts: copyResult.overwriteDrafts
+    replacedDrafts: copyResult.replacedDrafts ?? []
   }
 })

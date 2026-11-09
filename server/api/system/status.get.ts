@@ -1,6 +1,8 @@
 /* Modified by YH-Chen-Eternity on 2026-10-23 */
 
 import { createError, defineEventHandler } from 'h3'
+import { defineEventHandler } from 'h3'
+import { getServerDate } from '~~/server/utils/serverTime'
 import { databaseManager } from '~~/server/utils/database-manager'
 import { getInstanceId } from '~~/server/utils/instance-id'
 import { isTelemetryEnabled } from '~~/server/utils/telemetry'
@@ -34,7 +36,7 @@ export default defineEventHandler(async (event) => {
 
     // 获取系统信息
     const systemInfo = {
-      timestamp: new Date().toISOString(),
+      timestamp: getServerDate().toISOString(),
       uptime: process.uptime(),
       nodeVersion: process.version,
       platform: process.platform,

@@ -3,7 +3,7 @@ import { useAudioQuality } from '~/composables/useAudioQuality'
 import { useLyrics } from '~/composables/useLyrics'
 import { useAudioPlayer } from '~/composables/useAudioPlayer'
 import { useLocale } from '~/utils/locale'
-import type { MusicTrackMeta } from '~/utils/musicUrl'
+import type { MusicUrlResolveOptions } from '~/utils/musicUrl'
 
 /**
  * 音量持久化：仅记录最后一次非 0 音量，静音属于瞬时状态不落盘，
@@ -13,13 +13,17 @@ const VOLUME_STORAGE_KEY = 'voicehub_player_volume'
 
 const clampVolume = (value: number): number => Math.max(0, Math.min(1, value))
 
+/** 响度幂指数：听感每降 10 dB 响度减半，半分位约 -10 dB */
+const VOLUME_LOUDNESS_EXPONENT = 1.66
+
 /** 将感知音量位置转换为线性增益 */
 export const volumePositionToGain = (position: number): number =>
-  Math.max(0, Math.min(1, position)) ** 3
+  // 位置按 1% 取整，避免步进累积的浮点尾差在静音附近留下极小增益
+  (Math.round(clampVolume(position) * 100) / 100) ** VOLUME_LOUDNESS_EXPONENT
 
 /** 将线性增益转换为感知音量位置，保留已有存档的实际响度 */
 export const volumeGainToPosition = (gain: number): number =>
-  Math.cbrt(Math.max(0, Math.min(1, gain)))
+  clampVolume(gain) ** (1 / VOLUME_LOUDNESS_EXPONENT)
 
 const readStoredVolume = (): number => {
   if (!import.meta.client) return 1
@@ -206,7 +210,7 @@ export const useAudioPlayerControl = () => {
     if (!globalAudioPlayer.getPlayingStatus().value) {
       const current = globalAudioPlayer.getCurrentSong().value
       if (current) {
-        globalAudioPlayer.playSong(current)
+        globalAudioPlayer.resumeSong()
       }
     }
   }
@@ -295,9 +299,10 @@ export const useAudioPlayerControl = () => {
             songUrlOrSong.sourceInfo?.type === 'voice' ||
             (songUrlOrSong.sourceInfo?.source === 'netease-backup' &&
               songUrlOrSong.sourceInfo?.type === 'voice')
-          const options: { unblock?: boolean; musicInfo?: MusicTrackMeta } = isPodcast
+          const options: MusicUrlResolveOptions = isPodcast
             ? { unblock: false }
             : {}
+          options.preferPlatformResolve = true
           options.musicInfo = {
             name: songUrlOrSong.title,
             artist: songUrlOrSong.artist,
@@ -386,9 +391,16 @@ export const useAudioPlayerControl = () => {
     // 标记用户已交互
     hasUserInteracted.value = true
 
+    if (globalAudioPlayer.scheduleWaiting.value) {
+      globalAudioPlayer.pauseSong()
+      return true
+    }
     if (isPlaying.value) {
+      globalAudioPlayer.pauseSong()
       return pause()
     } else {
+      if (globalAudioPlayer.scheduleFinished.value) return globalAudioPlayer.resumeSong()
+      globalAudioPlayer.resumeSong()
       return await play()
     }
   }
@@ -480,11 +492,7 @@ export const useAudioPlayerControl = () => {
     platform: string,
     musicId: string,
     playUrl: string | null = null,
-    options?: {
-      unblock?: boolean
-      quality?: number
-      musicInfo?: MusicTrackMeta
-    }
+    options?: MusicUrlResolveOptions
   ): Promise<string | null> => {
     try {
       const { getMusicUrl: coreGetMusicUrl } = await import('~/utils/musicUrl')
@@ -493,9 +501,9 @@ export const useAudioPlayerControl = () => {
     } catch (error: any) {
       console.error('获取音乐URL错误:', error)
       if (error instanceof TypeError && (error as any).message?.includes('fetch')) {
-        throw new Error('网络连接失败，请检查网络连接')
+        throw new Error('网络连接失败，请检查网络连接', { cause: error })
       } else if ((error as any).name === 'AbortError') {
-        throw new Error('请求超时，请稍后重试')
+        throw new Error('请求超时，请稍后重试', { cause: error })
       }
       throw error
     }
@@ -737,6 +745,10 @@ export const useAudioPlayerControl = () => {
   }
 
   const onEnded = () => {
+    if (globalAudioPlayer.handleScheduleEnded(playMode.value)) {
+      isPlaying.value = false
+      return
+    }
     // 根据播放模式处理播放结束事件
     if (playMode.value === 'loopOne') {
       // 单曲循环：重新播放当前歌曲

@@ -1,7 +1,19 @@
+import { SERVER_ERROR_CODES } from '~~/server/config/constants'
+import {
+  SUPER_ADMIN_ROLE,
+  canAssignRole,
+  getRoleTemplateKeys
+} from '~~/app/utils/admin-permissions'
+import {
+  assertAccountPermissionExpansion,
+  withPermissionTransaction
+} from '~~/server/utils/permission-admin'
+import { createApiError } from '~~/server/utils/apiError'
+import { recordAdminAudit } from '~~/server/utils/admin-audit'
 import bcrypt from 'bcryptjs'
 import { db } from '~/drizzle/db'
 import { users } from '~/drizzle/schema'
-import { eq, inArray } from 'drizzle-orm'
+import { inArray } from 'drizzle-orm'
 import { getAdminPasswordViolation } from '~~/server/utils/admin-password-policy'
 
 interface UserData {
@@ -25,14 +37,7 @@ const normalizeOptionalText = (value: unknown) => {
 }
 
 export default defineEventHandler(async (event) => {
-  // 检查认证和权限
   const user = event.context.user
-  if (!user || !['ADMIN', 'SUPER_ADMIN'].includes(user.role)) {
-    throw createError({
-      statusCode: 403,
-      message: '没有权限访问'
-    })
-  }
 
   const body = await readBody(event)
 
@@ -40,6 +45,15 @@ export default defineEventHandler(async (event) => {
     throw createError({
       statusCode: 400,
       message: '无效的用户数据'
+    })
+  }
+
+  // 服务端独立设限：防止单个请求提交任意数量用户打爆内存/连接（前端按 50 条分批，正常不会触达）
+  const MAX_BATCH_SIZE = 500
+  if (body.users.length > MAX_BATCH_SIZE) {
+    throw createError({
+      statusCode: 400,
+      message: `单次最多批量创建 ${MAX_BATCH_SIZE} 个用户`
     })
   }
 
@@ -144,6 +158,17 @@ export default defineEventHandler(async (event) => {
       })
       continue
     }
+    // 超管身份不参与批量导入，需在用户管理中逐个经二次验证提升，避免明文口令表格扩散全站权限
+    if (userData.role === SUPER_ADMIN_ROLE) {
+      results.failed++
+      results.errors.push({
+        index: userData.index,
+        username: userData.username,
+        name: userData.name,
+        reason: '超级管理员不支持批量导入，请在用户管理中单个提升'
+      })
+      continue
+    }
     usersToInsertData.push(userData)
   }
 
@@ -152,9 +177,21 @@ export default defineEventHandler(async (event) => {
   }
 
   try {
-    // 4. 并发加密密码 (由于使用 bcrypt.hash 异步方法，使用 Promise.all 并发处理可以显著提速)
-    const hashedPasswords = await Promise.all(
-      usersToInsertData.map((userData) => bcrypt.hash(userData.password, 10))
+    // 4. 加密密码：bcrypt cost=10 为纯 CPU 计算，全并发会长时间独占事件循环拖慢同进程其他请求，固定并发度分批执行
+    const BCRYPT_CONCURRENCY = 4
+    const hashedPasswords = new Array<string>(usersToInsertData.length)
+    let hashCursor = 0
+    const hashWorker = async () => {
+      while (hashCursor < usersToInsertData.length) {
+        const idx = hashCursor++
+        const item = usersToInsertData[idx]
+        if (item) hashedPasswords[idx] = await bcrypt.hash(item.password, 10)
+      }
+    }
+    await Promise.all(
+      Array.from({ length: Math.min(BCRYPT_CONCURRENCY, usersToInsertData.length) }, () =>
+        hashWorker()
+      )
     )
 
     // 5. 准备批量插入的数据
@@ -170,28 +207,35 @@ export default defineEventHandler(async (event) => {
         if (allowedRoles?.includes(userData.role)) {
           validRole = userData.role
         }
-      }
 
-      // 状态验证
-      let validStatus = 'active'
-      if (userData.status && ['active', 'withdrawn', 'graduate'].includes(userData.status)) {
-        validStatus = userData.status
-      }
+        // 状态验证
+        let validStatus = 'active'
+        if (userData.status && ['active', 'withdrawn', 'graduate'].includes(userData.status)) {
+          validStatus = userData.status
+        }
 
-      return {
-        name: userData.name,
-        username: userData.username,
-        password: hashedPasswords[idx]!,
-        role: validRole,
-        status: validStatus as 'active' | 'withdrawn' | 'graduate',
-        grade: userData.grade,
-        class: userData.class
-      }
+        assertAccountPermissionExpansion(
+          null,
+          { role: validRole, status: validStatus, permissions: null },
+          templates,
+          user.perms ?? []
+        )
+
+        return {
+          name: userData.name,
+          username: userData.username,
+          password: hashedPasswords[idx]!,
+          role: validRole,
+          status: validStatus as 'active' | 'withdrawn' | 'graduate',
+          grade: userData.grade,
+          class: userData.class
+        }
+      })
+
+      // 6. 执行批量插入
+      await tx.insert(users).values(insertValues)
+      results.created += insertValues.length
     })
-
-    // 6. 执行批量插入
-    await db.insert(users).values(insertValues)
-    results.created += insertValues.length
   } catch (error: any) {
     console.error(`批量插入用户失败:`, error)
     // 如果批量插入整体失败，则全部标记为失败
@@ -204,6 +248,22 @@ export default defineEventHandler(async (event) => {
         reason: error.message || '数据库批量写入失败'
       })
     }
+  }
+
+  if (results.created > 0) {
+    await recordAdminAudit(event, 'user.batch-create', {
+      targetType: 'user',
+      summary: {
+        created: results.created,
+        failed: results.failed,
+        // 前端按 50 条分批提交，带上批次标识才能把同一次导入的多条记录归组
+        importBatchId: typeof body.importBatchId === 'string' ? body.importBatchId : null,
+        batchIndex: Number.isInteger(body.batchIndex) ? body.batchIndex : null,
+        batchTotal: Number.isInteger(body.batchTotal) ? body.batchTotal : null,
+        // 摘要数组由审计层截到 20 项，此处同步避免给出错误的完整名单预期
+        usernames: usersToInsertData.map((item) => item.username).slice(0, 20)
+      }
+    })
   }
 
   return results

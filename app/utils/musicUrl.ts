@@ -5,10 +5,12 @@ import { useChkszSource } from '~/composables/useChkszSource'
 import { getVkeysIdParam } from '~/utils/musicSources'
 import { parseBilibiliId } from '~/utils/bilibiliSource'
 import { isPluginPlatform } from '~/utils/pluginPlatform'
+import { PLATFORM_AUTHORIZED_PLATFORMS } from '~/utils/platforms'
 import { isPlaybackUrlInvalid } from '~/utils/invalidPlaybackUrls'
 import { persistQqMusicCookie, clearQqMusicLoginState, QQ_MUSIC_COOKIE_KEY } from '~/utils/qqCookie'
 import { resolvePluginUrl } from '~/utils/pluginResolver'
 import { useServerErrors } from '~/composables/useLocaleText'
+import { shallowReactive } from 'vue'
 
 /**
  * 动态获取音乐播放URL
@@ -24,6 +26,8 @@ export type MusicUrlResolveOptions = {
   mediaId?: string
   excludeSources?: string[]
   ignoreProvidedUrl?: boolean
+  /** 播放链路传入：受授权控制的音源忽略调用方带来的链接，按当前登录态重新取链 */
+  preferPlatformResolve?: boolean
   musicInfo?: MusicTrackMeta
   songId?: number
   selectionToken?: string
@@ -45,6 +49,7 @@ export type MusicUrlResolveResult = {
   source?: string
   normalizedMusicId?: string
   idType?: string
+  actualQuality?: string | null
 }
 
 // QQ 数字 songId → 字母 songmid 的前端解析缓存与并发去重，供水端直连第三方音源（ygking 等）复用
@@ -226,6 +231,7 @@ const fetchXinghaiMiguUrl = async (
 }
 
 const musicUrlSourceCache = new Map<string, string>()
+const musicUrlQualityCache = shallowReactive(new Map<string, string | null | undefined>())
 // 每次解析都会产生新地址（插件代理票据各不相同），需设上限否则长时间播放会无界增长
 const MUSIC_URL_SOURCE_CACHE_SIZE = 200
 
@@ -241,24 +247,34 @@ export const isKnownInvalidQqAudioUrl = (url: string | null | undefined) => {
 }
 
 /** 接受一个解析结果：播放端已确认无效的地址直接丢弃，让链路继续尝试其它来源 */
-const acceptResult = (url: string, source: string): MusicUrlResolveResult | null => {
+const acceptResult = (url: string, source: string, actualQuality?: string | null): MusicUrlResolveResult | null => {
   if (isPlaybackUrlInvalid(url)) {
     console.warn(`[musicUrl] 跳过已知无效地址（来源 ${source}）`)
     return null
   }
-  rememberMusicUrlSource(url, source)
-  return { url, source }
+  rememberMusicUrlSource(url, source, actualQuality)
+  return { url, source, actualQuality }
 }
 
-const rememberMusicUrlSource = (url: string | null | undefined, source?: string) => {
+const rememberMusicUrlSource = (url: string | null | undefined, source?: string, actualQuality?: string | null) => {
   if (!url || !source) return
   musicUrlSourceCache.set(normalizeCacheUrl(url), source)
+  if (import.meta.client) musicUrlQualityCache.set(normalizeCacheUrl(url), actualQuality)
   // 插件代理模式下缓存的是相对地址，而 <audio>.currentSrc 是绝对地址，两者都登记失败回退才找得到来源
   if (import.meta.client && url.startsWith('/')) {
-    musicUrlSourceCache.set(normalizeCacheUrl(new URL(url, window.location.origin).href), source)
+    const absoluteKey = normalizeCacheUrl(new URL(url, window.location.origin).href)
+    musicUrlSourceCache.set(absoluteKey, source)
+    musicUrlQualityCache.set(absoluteKey, actualQuality)
   }
-  while (musicUrlSourceCache.size > MUSIC_URL_SOURCE_CACHE_SIZE) musicUrlSourceCache.delete(musicUrlSourceCache.keys().next().value!)
+  while (musicUrlSourceCache.size > MUSIC_URL_SOURCE_CACHE_SIZE) {
+    const oldest = musicUrlSourceCache.keys().next().value!
+    musicUrlSourceCache.delete(oldest)
+    musicUrlQualityCache.delete(oldest)
+  }
 }
+
+export const getCachedMusicUrlQuality = (url: string | null | undefined) =>
+  url ? musicUrlQualityCache.get(normalizeCacheUrl(url)) : undefined
 
 export const getCachedMusicUrlSource = (url: string | null | undefined) => {
   if (!url) return null
@@ -410,15 +426,17 @@ export async function getMusicUrlResult(
       throw new Error(response?.message || 'QQ音乐播放链接解析失败')
     }
 
-    // 已登录 QQ 音乐：优先用用户 Cookie 走官方链路换取直链（不再限定 VIP），
-    // 失败再降级第三方音源；VIP 仅影响可获取的音质档位
+    // 有登录态就优先后端用用户 Cookie 走官方链路，权限不足时上游会拒绝并继续降级第三方
     if (qqMusicCookie && !excludedSources.has('qq-official')) {
       try {
         return await requestBackendResolve('official-first')
       } catch (error: any) {
         console.warn('[musicUrl] QQ 官方登录态解析失败，降级第三方音源:', error?.message || error)
-        // 登录态过期是官方链路失败的常见原因，复验确认失效时直接清除本地登录态
-        await revalidateQqLoginAfterFailure()
+        // 被限流不是登录态过期，不能因此清除本地登录态；降级链继续尝试前端直连音源
+        const status = error?.statusCode ?? error?.status
+        if (status !== 429) {
+          await revalidateQqLoginAfterFailure()
+        }
       }
     }
 
@@ -533,7 +551,7 @@ export async function getMusicUrlResult(
       }
     }
 
-    // 内置聚合源兜底链，仍属内置，先于导入插件
+    // 内置聚合源兜底链（玉宁熙→HelloWorld），仍属内置，先于导入插件
     try {
       return await requestBackendResolve('aggregator')
     } catch (error: any) {
@@ -606,7 +624,7 @@ export async function getMusicUrlResult(
   // 先使用统一组件的音源选择逻辑
   const backupResult = await getSongUrl(finalMusicId, quality, platform, undefined, extendedOptions)
   if (backupResult.success && backupResult.url) {
-    const accepted = acceptResult(backupResult.url, backupResult.source || 'music-source')
+    const accepted = acceptResult(backupResult.url, backupResult.source || 'music-source', backupResult.actualQuality)
     if (accepted) return accepted
   }
 
@@ -744,6 +762,24 @@ export async function getMusicUrl(
   playUrl?: string,
   options?: MusicUrlResolveOptions
 ): Promise<string | null> {
-  const result = await getMusicUrlResult(platform, musicId, playUrl, options)
-  return result.url
+  const providedUrl = String(playUrl || '').trim()
+  // 播放链路要求按当前登录态重新取链：库里的 playUrl 可能是历史试听或失效链接
+  const resolveFirst =
+    options?.preferPlatformResolve === true &&
+    !options?.ignoreProvidedUrl &&
+    providedUrl !== '' &&
+    PLATFORM_AUTHORIZED_PLATFORMS.includes(platform)
+  try {
+    const result = await getMusicUrlResult(
+      platform,
+      musicId,
+      resolveFirst ? undefined : playUrl,
+      options
+    )
+    if (result.url) return result.url
+  } catch (error) {
+    if (!resolveFirst) throw error
+    console.warn('[musicUrl] 平台取链失败，回退歌曲自带播放链接:', (error as Error)?.message)
+  }
+  return resolveFirst ? providedUrl : null
 }

@@ -1,15 +1,7 @@
 import { db, eq, semesters, songs } from '~/drizzle/db'
+import { recordAdminAudit } from '~~/server/utils/admin-audit'
 
 export default defineEventHandler(async (event) => {
-  // 验证管理员权限
-  const user = event.context.user
-  if (!user || !['ADMIN', 'SUPER_ADMIN', 'SONG_ADMIN'].includes(user.role)) {
-    throw createError({
-      statusCode: 403,
-      message: '需要管理员权限'
-    })
-  }
-
   // 获取学期 ID
   const semesterId = parseInt(getRouterParam(event, 'id') || '0')
   if (!semesterId || isNaN(semesterId)) {
@@ -55,6 +47,12 @@ export default defineEventHandler(async (event) => {
 
   // 删除学期
   await db.delete(semesters).where(eq(semesters.id, semesterId))
+
+  await recordAdminAudit(event, 'semester.delete', {
+    targetType: 'semester',
+    targetId: semesterId,
+    summary: { name: semester.name }
+  })
 
   return {
     success: true,

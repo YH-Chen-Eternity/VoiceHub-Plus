@@ -16,6 +16,7 @@ Modified by YH-Chen on 2026-10-17
       <div class="flex flex-wrap items-center gap-2">
         <button
           class="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2.5 bg-primary-hover hover:bg-primary text-text-primary text-xs font-black rounded-lg transition-all uppercase tracking-widest active:scale-95 shadow-lg shadow-[var(--primary-glow)]"
+          :disabled="!can('users:write')"
           @click="showAddModal = true"
         >
           <UserPlus :size="14" />
@@ -23,6 +24,7 @@ Modified by YH-Chen on 2026-10-17
         </button>
         <button
           class="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2.5 bg-bg-secondary border border-border-secondary text-text-secondary text-xs font-black rounded-lg transition-all uppercase tracking-widest"
+          :disabled="!can('users:write')"
           @click="showImportModal = true"
         >
           <FileSpreadsheet class="text-success" :size="14" />
@@ -30,6 +32,7 @@ Modified by YH-Chen on 2026-10-17
         </button>
         <button
           class="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2.5 bg-bg-secondary border border-border-secondary text-text-secondary text-xs font-black rounded-lg transition-all uppercase tracking-widest"
+          :disabled="!can('users:export')"
           @click="openExportModal"
         >
           <Download class="text-primary" :size="14" />
@@ -37,6 +40,7 @@ Modified by YH-Chen on 2026-10-17
         </button>
         <button
           class="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2.5 bg-bg-secondary border border-border-secondary text-text-secondary text-xs font-black rounded-lg transition-all uppercase tracking-widest"
+          :disabled="!can('users:write')"
           @click="showBatchUpdateModal = true"
         >
           <Layers class="text-info" :size="14" />
@@ -388,7 +392,7 @@ Modified by YH-Chen on 2026-10-17
                     class="flex items-center justify-end gap-1.5 opacity-0 group-hover:opacity-100 transition-all action-buttons"
                   >
                     <button
-                      :disabled="!canManageUser(user)"
+                      :disabled="!canManageUser(user) && !canManageUser(user, 'users:assign-role')"
                       class="flex items-center justify-center p-2 bg-bg-primary border border-border-secondary rounded-xl text-text-tertiary hover:text-primary transition-colors disabled:opacity-20 disabled:cursor-not-allowed action-btn"
                       :title="locale.actions.editUser"
                       @click="editUser(user)"
@@ -396,22 +400,30 @@ Modified by YH-Chen on 2026-10-17
                       <Edit2 :size="13" />
                     </button>
                     <button
-                      v-if="user.status === 'pending'"
+                      v-if="user.status === 'pending' && can('users:approve')"
                       class="p-2 bg-bg-primary border border-border-secondary rounded-xl text-text-tertiary hover:text-info transition-colors action-btn flex items-center justify-center"
                       :title="locale.actions.approve"
                       @click="openApproval(user)"
                     >
                       <ClipboardCheck :size="13" />
                     </button>
-                    <button
-                      class="p-2 bg-bg-primary border border-border-secondary rounded-xl text-text-tertiary hover:text-info transition-colors action-btn flex items-center justify-center"
+                    <button :disabled="!can('users:read-songs')"
+                      class="p-2 bg-bg-primary border border-border-secondary rounded-xl text-text-tertiary hover:text-info transition-colors action-btn flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed"
                       :title="locale.actions.viewSongs"
                       @click="viewUserSongs(user)"
                     >
                       <Music :size="13" />
                     </button>
                     <button
-                      :disabled="!canManageUser(user)"
+                      v-if="canGrantPermissions && !isSelf(user) && (isSuperAdmin || user.role !== 'SUPER_ADMIN')"
+                      class="p-2 bg-bg-primary border border-border-secondary rounded-xl text-text-tertiary hover:text-primary transition-colors action-btn flex items-center justify-center"
+                      :title="locale.actions.permissions"
+                      @click="openPermissionsModal(user)"
+                    >
+                      <ShieldCheck :size="13" />
+                    </button>
+                    <button
+                      :disabled="!canManageUser(user, 'users:reset-password')"
                       class="p-2 bg-bg-primary border border-border-secondary rounded-xl text-text-tertiary hover:text-warning transition-colors disabled:opacity-20 disabled:cursor-not-allowed action-btn flex items-center justify-center"
                       :title="locale.actions.resetPassword"
                       @click="resetPassword(user)"
@@ -562,27 +574,27 @@ Modified by YH-Chen on 2026-10-17
 
             <div class="flex gap-2 action-buttons">
               <button
-                :disabled="!canManageUser(user)"
+                :disabled="!canManageUser(user) && !canManageUser(user, 'users:assign-role')"
                 class="flex-1 py-2.5 bg-bg-primary border border-border-secondary rounded-lg text-text-tertiary flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-widest active:bg-primary-hover active:text-text-primary transition-colors disabled:opacity-20 action-btn"
                 @click="editUser(user)"
               >
                 <Edit2 :size="12" /> {{ locale.actions.edit }}
               </button>
               <button
-                v-if="user.status === 'pending'"
+                v-if="user.status === 'pending' && can('users:approve')"
                 class="flex-1 py-2.5 bg-bg-primary border border-border-secondary rounded-lg text-text-tertiary flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-widest active:bg-info active:text-text-primary transition-colors action-btn"
                 @click="openApproval(user)"
               >
                 <ClipboardCheck :size="12" /> {{ locale.actions.approve }}
               </button>
-              <button
-                class="flex-1 py-2.5 bg-bg-primary border border-border-secondary rounded-lg text-text-tertiary flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-widest active:bg-info active:text-text-primary transition-colors action-btn"
+              <button :disabled="!can('users:read-songs')"
+                class="flex-1 py-2.5 bg-bg-primary border border-border-secondary rounded-lg text-text-tertiary flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-widest active:bg-info active:text-text-primary transition-colors action-btn disabled:opacity-50 disabled:cursor-not-allowed"
                 @click="viewUserSongs(user)"
               >
                 <Music :size="12" /> {{ locale.actions.records }}
               </button>
               <button
-                :disabled="!canManageUser(user)"
+                :disabled="!canManageUser(user, 'users:reset-password')"
                 class="flex-1 py-2.5 bg-bg-primary border border-border-secondary rounded-lg text-text-tertiary flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-widest active:bg-warning active:text-text-primary transition-colors disabled:opacity-20 action-btn"
                 @click="resetPassword(user)"
               >
@@ -669,6 +681,7 @@ Modified by YH-Chen on 2026-10-17
                     />
                     <input
                       v-model="userForm.name"
+                      :disabled="!!editingUser && !can('users:write')"
                       autocomplete="off"
                       class="w-full bg-bg-primary border border-border-secondary rounded-2xl pl-11 pr-4 py-3 text-xs focus:outline-none focus:border-primary-30 transition-all text-text-primary"
                       :placeholder="locale.form.namePlaceholder"
@@ -687,6 +700,7 @@ Modified by YH-Chen on 2026-10-17
                     />
                     <input
                       v-model="userForm.username"
+                      :disabled="!!editingUser && !can('users:write')"
                       autocomplete="off"
                       class="w-full bg-bg-primary border border-border-secondary rounded-2xl pl-11 pr-4 py-3 text-xs focus:outline-none focus:border-primary-30 transition-all text-text-primary"
                       :placeholder="locale.form.usernamePlaceholder"
@@ -713,6 +727,7 @@ Modified by YH-Chen on 2026-10-17
                     autocomplete="new-password"
                     class="w-full bg-bg-primary border border-border-secondary rounded-2xl pl-11 pr-4 py-3 text-xs focus:outline-none focus:border-primary-30 transition-all text-text-primary"
                     :placeholder="locale.form.passwordPlaceholder"
+                    :disabled="!!editingUser && (!can('users:reset-password') || !can('users:write'))"
                     type="password"
                   >
                 </div>
@@ -725,11 +740,18 @@ Modified by YH-Chen on 2026-10-17
                   >
                   <CustomSelect
                     v-model="userForm.role"
+                    :disabled="!can('users:assign-role')"
                     :options="availableRoles"
                     label-key="displayName"
                     value-key="name"
                     :placeholder="locale.form.rolePlaceholder"
                   />
+                  <p
+                    v-if="userForm.role === 'SUPER_ADMIN'"
+                    class="text-[10px] text-warning leading-relaxed"
+                  >
+                    {{ formatMessage(locale.form.superAdminHint, superAdminLimit) }}
+                  </p>
                 </div>
                 <div class="space-y-2">
                   <label class="text-[10px] font-black text-text-tertiary uppercase tracking-widest ml-1"
@@ -737,6 +759,7 @@ Modified by YH-Chen on 2026-10-17
                   >
                   <CustomSelect
                     v-model="userForm.status"
+                      :disabled="!!editingUser && !can('users:write')"
                     :options="userStatusOptions"
                     label-key="label"
                     value-key="value"
@@ -757,6 +780,7 @@ Modified by YH-Chen on 2026-10-17
                     />
                     <input
                       v-model="userForm.grade"
+                      :disabled="!!editingUser && !can('users:write')"
                       autocomplete="off"
                       class="w-full bg-bg-primary border border-border-secondary rounded-2xl pl-11 pr-4 py-3 text-xs focus:outline-none focus:border-primary-30 transition-all text-text-primary"
                       :placeholder="locale.form.gradePlaceholder"
@@ -775,6 +799,7 @@ Modified by YH-Chen on 2026-10-17
                     />
                     <input
                       v-model="userForm.class"
+                      :disabled="!!editingUser && !can('users:write')"
                       autocomplete="off"
                       class="w-full bg-bg-primary border border-border-secondary rounded-2xl pl-11 pr-4 py-3 text-xs focus:outline-none focus:border-primary-30 transition-all text-text-primary"
                       :placeholder="locale.form.classPlaceholder"
@@ -1347,6 +1372,22 @@ Modified by YH-Chen on 2026-10-17
       @close="closeUserSongsModal"
     />
 
+    <!-- 用户显式授权模态框 -->
+    <UserPermissionsModal
+      :show="showPermissionsModal"
+      :user="permissionUser"
+      @close="closePermissionsModal"
+      @saved="loadUsers"
+    />
+
+    <!-- 敏感操作二次验证弹窗 -->
+    <StepUpDialog
+      v-model:show="showStepUpDialog"
+      :reason="stepUpReason"
+      @verified="settleStepUp(true)"
+      @cancelled="settleStepUp(false)"
+    />
+
 <!-- 用户注册审核模态框 -->
     <UserApprovalModal
       :show="showApprovalModal"
@@ -1841,6 +1882,13 @@ Modified by YH-Chen on 2026-10-17
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useAuth } from '~/composables/useAuth'
+import { usePermissions } from '~/composables/usePermissions'
+import { STEP_UP_REASON_SUPER_ADMIN, useStepUp } from '~/composables/useStepUp'
+import {
+  MAX_SUPER_ADMIN_ACCOUNTS,
+  canAssignRole,
+  isSuperAdminRoleTransition
+} from '~/utils/admin-permissions'
 import AppSpinner from '~/components/UI/Common/AppSpinner.vue'
 import {
   Check,
@@ -1882,6 +1930,7 @@ import {
   Upload,
   UserCog,
   ShieldAlert,
+  ShieldCheck,
   Calendar,
   Clock3,
   Hash,
@@ -1893,14 +1942,16 @@ import {
 import CustomSelect from '~/components/UI/Common/CustomSelect.vue'
 import Pagination from '~/components/UI/Common/Pagination.vue'
 import UserSongsModal from '~/components/Admin/UserSongsModal.vue'
+import UserPermissionsModal from '~/components/Admin/UserPermissionsModal.vue'
 import OAuthBindingsModal from '~/components/Admin/OAuthBindingsModal.vue'
 import BatchUpdateModal from '~/components/Admin/BatchUpdateModal.vue'
 import ForceUpdateBatchModal from '~/components/Admin/ForceUpdateBatchModal.vue'
 import UserExportModal from '~/components/Admin/UserExportModal.vue'
 import UserApprovalModal from '~/components/Admin/UserApprovalModal.vue'
 import ConfirmDialog from '~/components/UI/ConfirmDialog.vue'
+import StepUpDialog from '~/components/Admin/StepUpDialog.vue'
 import { useLocale } from '~/utils/locale'
-import { useServerErrors } from '~/composables/useLocaleText'
+import { extractErrorCode, useServerErrors } from '~/composables/useLocaleText'
 import { getOAuthProviderName, getAggregateOAuthLoginTypeName, getProviderDisplayName } from '~/utils/oauth'
 import { GRADE_ORDER } from '~/utils/gradeClassWeights'
 import { isArchivedStatus } from '~/utils/user-archive'
@@ -2057,6 +2108,7 @@ const showExportModal = ref(false)
 const exporting = ref(false)
 const gradeOptions = ref([])
 const classOptions = ref([])
+const roleOptions = ref([])
 
 // 删除确认状态
 const showDeleteModal = ref(false)
@@ -2065,6 +2117,9 @@ const deleting = ref(false)
 
 // 用户歌曲模态框状态
 const showUserSongsModal = ref(false)
+// 显式授权弹窗状态
+const showPermissionsModal = ref(false)
+const permissionUser = ref(null)
 const selectedUserId = ref(null)
 
 // 头像加载错误状态管理
@@ -2079,7 +2134,6 @@ const selectedUserDetail = ref(null)
 
 // OAuth 绑定详情模态框状态
 const showOAuthBindingsModal = ref(false)
-
 // 状态变更日志模态框状态
 
 const statusLogs = ref([])
@@ -2110,7 +2164,16 @@ const passwordForm = ref({
 
 // 服务
 const auth = useAuth()
+const { can, canGrantPermissions } = usePermissions()
 const { localize } = useServerErrors()
+// 超管身份变更前的二次验证
+const {
+  show: showStepUpDialog,
+  reason: stepUpReason,
+  requestStepUp,
+  settle: settleStepUp
+} = useStepUp()
+const superAdminLimit = MAX_SUPER_ADMIN_ACCOUNTS
 
 // 判断是否为当前登录用户
 const isSelf = (user) => {
@@ -2122,30 +2185,19 @@ const isSuperAdmin = computed(() => {
   return auth.user.value?.role === 'SUPER_ADMIN'
 })
 
-// 普通管理员身份
-const isAdmin = computed(() => {
-  return auth.user.value?.role === 'ADMIN'
-})
-
 // 是否允许对目标用户执行管理操作（编辑/重置密码/删除），与后端越级保护一致
-const canManageUser = (user) => {
-  if (!user || isSelf(user)) return false
+const canManageUser = (user, action = 'users:write') => {
+  if (!user || user.id === 1 || isSelf(user) || !can(action)) return false
   // 普通管理员不能操作超级管理员
   return isSuperAdmin.value || user.role !== 'SUPER_ADMIN'
 }
 
 const availableRoles = computed(() => {
-  let roles
-  if (isSuperAdmin.value) {
-    // 超级管理员可以分配除自己以外的所有角色
-    roles = allRoles.value.filter((role) => role.name !== 'SUPER_ADMIN')
-  } else if (isAdmin.value) {
-    // 管理员只能分配用户和歌曲管理员角色（与后端用户接口的角色限制一致）
-    roles = allRoles.value.filter((role) => ['USER', 'SONG_ADMIN'].includes(role.name))
-  } else {
-    // 其他角色不能分配角色，返回空数组
-    return []
-  }
+  // 超管候选只出现在现有超管的下拉里，判定口径与后端 canAssignRole 一致
+  let roles = allRoles.value.filter((role) =>
+    role.name === 'USER' ||
+    canAssignRole(auth.user.value, role.name, allRoles.value.map((item) => item.name))
+  )
   // 保留目标用户当前角色，避免当前值不在选项中时下拉显示裸值
   const currentRole = editingUser.value?.role
   if (currentRole && !roles.some((role) => role.name === currentRole)) {
@@ -2412,6 +2464,7 @@ const getStatusDisplayName = (status) => {
 }
 
 const editUser = (user) => {
+  if (!canManageUser(user) && !canManageUser(user, 'users:assign-role')) return
   // 禁止编辑自身
   if (isSelf(user)) {
     if (window.$showNotification) {
@@ -2475,6 +2528,7 @@ const confirmDeleteUser = (user) => {
 }
 
 const viewUserSongs = (user) => {
+  if (!can('users:read-songs')) return
   selectedUserId.value = user.id
   showUserSongsModal.value = true
 }
@@ -2482,6 +2536,16 @@ const viewUserSongs = (user) => {
 const closeUserSongsModal = () => {
   showUserSongsModal.value = false
   selectedUserId.value = null
+}
+
+const openPermissionsModal = (user) => {
+  permissionUser.value = user
+  showPermissionsModal.value = true
+}
+
+const closePermissionsModal = () => {
+  showPermissionsModal.value = false
+  permissionUser.value = null
 }
 
 const showUserDetail = (user, event) => {
@@ -2538,7 +2602,16 @@ const closeDeleteModal = () => {
 }
 
 const confirmDelete = async () => {
+  if (!can('users:delete')) return
   if (!deletingUser.value) return
+
+  // 删除超管账号等于撤销其超管身份，需先通过二次验证
+  if (
+    isSuperAdminRoleTransition(deletingUser.value.role, null) &&
+    !(await requestStepUp(STEP_UP_REASON_SUPER_ADMIN))
+  ) {
+    return
+  }
 
   deleting.value = true
 
@@ -2785,6 +2858,7 @@ const openTreeUser = async (treeUser) => {
 }
 
 const saveUser = async () => {
+  if (!can('users:write') && !(editingUser.value && can('users:assign-role'))) return
   // 保护：禁止保存针对自身的更改
   if (editingUser.value && isSelf(editingUser.value)) {
     formError.value = locale.value.notifications.selfEditForbidden
@@ -2812,6 +2886,11 @@ const saveUser = async () => {
     return
   }
 
+  // 超管身份变更（授予或撤销）需先通过二次验证，取消验证则不提交
+  if (isSuperAdminRoleTransition(editingUser.value?.role ?? null, userForm.value.role)) {
+    if (!(await requestStepUp(STEP_UP_REASON_SUPER_ADMIN))) return
+  }
+
   saving.value = true
   formError.value = ''
 
@@ -2829,18 +2908,30 @@ const saveUser = async () => {
       userData.password = userForm.value.password
     }
 
-    if (editingUser.value) {
-      await $fetch(`/api/admin/users/${editingUser.value.id}`, {
-        method: 'PUT',
-        body: userData,
-        ...auth.getAuthConfig()
-      })
-    } else {
-      await $fetch('/api/admin/users', {
-        method: 'POST',
-        body: userData,
-        ...auth.getAuthConfig()
-      })
+    const sendUserRequest = () =>
+      editingUser.value
+        ? $fetch(`/api/admin/users/${editingUser.value.id}`, {
+            method: 'PUT',
+            body: can('users:write') ? userData : { role: userForm.value.role },
+            ...auth.getAuthConfig()
+          })
+        : $fetch('/api/admin/users', {
+            method: 'POST',
+            body: userData,
+            ...auth.getAuthConfig()
+          })
+
+    try {
+      await sendUserRequest()
+    } catch (error) {
+      // 验证窗口过期：重新验证后只重发一次
+      if (
+        extractErrorCode(error) !== 'PERMISSION_STEP_UP_REQUIRED' ||
+        !(await requestStepUp(STEP_UP_REASON_SUPER_ADMIN))
+      ) {
+        throw error
+      }
+      await sendUserRequest()
     }
 
     // 先缓存是否编辑态：closeModal 会清空 editingUser，通知文案需在清空前判定
@@ -2864,6 +2955,7 @@ const saveUser = async () => {
 }
 
 const confirmResetPassword = async () => {
+  if (!can('users:reset-password')) return
   // 保护：禁止重置自身密码
   if (resetPasswordUser.value && isSelf(resetPasswordUser.value)) {
     passwordError.value = locale.value.notifications.selfResetForbidden
@@ -2961,6 +3053,7 @@ const loadUserTree = async () => {
     // 供导出模态框的年级/班级筛选下拉使用
     gradeOptions.value = response.grades || []
     classOptions.value = response.classes || []
+    roleOptions.value = response.roles || []
     expandDefaultTreeNodes()
   } catch (error) {
     console.error('加载组织结构失败:', error)
@@ -3107,10 +3200,12 @@ const loadXLSX = async () => {
       // SheetJS 已停止向 npm 发布新版本，官方 CDN 为唯一修复版来源（2026-10-23 安全加固）
       const cdnUrls = [
         'https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js',
+      // SheetJS 官方发布源，npm 上的 xlsx 包已停更（停留在 0.18.5）
         'https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js'
       ]
+      // 加载源完整性校验值，来源变更时须同步重算
+      const xlsxIntegrity = 'sha256-zAFRMKqFIefwiPiImOupSczcv7ON8L0Sm0S3Jzw6b0E='
 
-      // 尝试加载第一个CDN
       let loaded = false
       for (const url of cdnUrls) {
         if (loaded) break
@@ -3120,6 +3215,9 @@ const loadXLSX = async () => {
             const script = document.createElement('script')
             script.src = url
             script.async = true
+            // integrity 校验要求 CORS 模式加载
+            script.crossOrigin = 'anonymous'
+            script.integrity = xlsxIntegrity
 
             script.onload = () => {
               xlsxLoaded.value = true
@@ -3221,6 +3319,7 @@ const handleFileUpload = async (event) => {
         importStartRow.value = startRow
 
         const userData = []
+        let skippedSuperAdmin = 0
 
         for (let i = startRow; i < jsonData.length; i++) {
           const row = jsonData[i]
@@ -3228,18 +3327,18 @@ const handleFileUpload = async (event) => {
 
           let role = (row[3]?.toString() || '').toUpperCase()
 
-          // 根据当前用户权限过滤角色
-          if (!isSuperAdmin.value) {
-            // 普通管理员只能导入 USER 和 SONG_ADMIN 角色
-            if (role !== 'USER' && role !== 'SONG_ADMIN') {
-              role = 'USER' // 默认设为普通用户
-            }
-          }
-
           // 确保角色有效
           const validRoles = ['USER', 'ADMIN', 'SONG_ADMIN', 'SUPER_ADMIN']
           if (!validRoles.includes(role)) {
             role = 'USER'
+          } else if (!isSuperAdmin.value && role !== 'USER' && role !== 'SONG_ADMIN') {
+            // 普通管理员只能导入 USER 和 SONG_ADMIN 角色
+            role = 'USER'
+          }
+          // 超管不参与批量导入，跳过该行而不是让整批失败
+          if (role === 'SUPER_ADMIN') {
+            skippedSuperAdmin++
+            continue
           }
 
           userData.push({
@@ -3250,6 +3349,13 @@ const handleFileUpload = async (event) => {
             grade: row[4]?.toString() || '',
             class: row[5]?.toString() || ''
           })
+        }
+
+        if (skippedSuperAdmin > 0 && window.$showNotification) {
+          window.$showNotification(
+            formatMessage(locale.value.importModal.superAdminSkipped, skippedSuperAdmin),
+            'warning'
+          )
         }
 
         if (userData.length === 0) {
@@ -3315,6 +3421,7 @@ const formatImportErrors = (errors) => {
 
 // 批量导入用户
 const importUsers = async () => {
+  if (!can('users:write')) return
   if (previewData.value.length === 0) return
 
   importLoading.value = true
@@ -3328,6 +3435,10 @@ const importUsers = async () => {
   let totalCreated = 0
   let totalFailed = 0
   const allErrors = []
+  // 同一次导入的批次标识：审计日志按分片记录，靠它把多行归组回一次导入
+  const importBatchId = typeof crypto !== 'undefined' && crypto.randomUUID
+    ? crypto.randomUUID()
+    : `import-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
 
   try {
     for (let i = 0; i < dataToImport.length; i += batchSize) {
@@ -3341,7 +3452,10 @@ const importUsers = async () => {
         const result = await $fetch('/api/admin/users/batch', {
           method: 'POST',
           body: {
-            users: batch
+            users: batch,
+            importBatchId,
+            batchIndex: currentBatch,
+            batchTotal: totalBatches
           },
           ...auth.getAuthConfig()
         })

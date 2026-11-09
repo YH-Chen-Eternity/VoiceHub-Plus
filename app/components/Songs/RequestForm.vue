@@ -143,7 +143,7 @@ Modified by YH-Chen on 2026-10-17
           >
             <!-- 超级管理员提示 -->
             <div
-              v-if="user && (user.role === 'SUPER_ADMIN' || user.role === 'ADMIN')"
+              v-if="canBypassLimits"
               class="admin-notice-horizontal"
             >
               <span class="admin-icon">👑</span>
@@ -221,6 +221,23 @@ Modified by YH-Chen on 2026-10-17
                 <span class="status-value">{{ locale.cardCodeBypassesLimit }}</span>
               </div>
             </div>
+          </div>
+
+          <!-- 投稿设置摘要 - 位于投稿限额提示下方，按钮打开投稿选项弹窗 -->
+          <div v-if="submissionOptionsSummary" class="submission-options-summary">
+            <button
+              v-if="submissionOptionsAvailable && user"
+              class="submission-options-trigger"
+              :aria-label="locale.submissionOptions"
+              :title="locale.submissionOptions"
+              type="button"
+              @click="openSubmissionOptions"
+            >
+              <Icon name="settings" :size="13" />
+              <span>{{ locale.submissionOptions }}</span>
+            </button>
+            <Icon v-else :size="12" name="settings" class="shrink-0" />
+            <span>{{ submissionOptionsSummary }}</span>
           </div>
 
           <!-- 音乐平台选择按钮 -->
@@ -753,7 +770,9 @@ Modified by YH-Chen on 2026-10-17
                         <button
                           v-if="canResubmitBilibiliEpisodes(result)"
                           :disabled="
-                            !canSubmitFromSearch || isSongBlockedByRestriction(result) || submitting
+                            !canSubmitFromSearch ||
+                            isSongBlockedByRestriction(result) ||
+                            isResultSubmitting(result)
                           "
                           class="select-btn"
                           @click.stop.prevent="submitSong(result, { replayRequest: true })"
@@ -771,7 +790,9 @@ Modified by YH-Chen on 2026-10-17
                         <span class="similar-text">{{ locale.partialEpisodesSubmitted }}</span>
                         <button
                           :disabled="
-                            !canSubmitFromSearch || isSongBlockedByRestriction(result) || submitting
+                            !canSubmitFromSearch ||
+                            isSongBlockedByRestriction(result) ||
+                            isResultSubmitting(result)
                           "
                           class="select-btn"
                           @click.stop.prevent="submitSong(result)"
@@ -796,19 +817,23 @@ Modified by YH-Chen on 2026-10-17
 
                         <!-- 管理员或未开启重复投稿限制时可直接重复投稿；否则普通用户仅可申请重播已播放歌曲。 -->
                         <button
-                          v-if="auth.isAdmin.value || (siteConfigLoaded && !enableSubmissionRestriction)"
+                          v-if="canBypassLimits || (siteConfigLoaded && !enableSubmissionRestriction)"
                           :disabled="
-                            !canSubmitFromSearch || isSongBlockedByRestriction(result) || submitting
+                            !canSubmitFromSearch ||
+                            isSongBlockedByRestriction(result) ||
+                            isResultSubmitting(result)
                           "
                           class="select-btn"
                           @click.stop.prevent="selectSongForSubmit(result)"
                         >
-                          {{ locale.chooseSubmit }}
+                          {{ isResultSubmitting(result) ? locale.processing : locale.chooseSubmit }}
                         </button>
                         <button
                           v-else-if="getSimilarSong(result)?.played && enableReplayRequests"
                           :disabled="
-                            !canSubmitFromSearch || isSongBlockedByRestriction(result) || submitting
+                            !canSubmitFromSearch ||
+                            isSongBlockedByRestriction(result) ||
+                            isResultSubmitting(result)
                           "
                           class="select-btn"
                           @click.stop.prevent="submitSong(result, { replayRequest: true })"
@@ -879,7 +904,9 @@ Modified by YH-Chen on 2026-10-17
                       <button
                         v-else
                         :disabled="
-                          !canSubmitFromSearch || isSongBlockedByRestriction(result) || submitting
+                          !canSubmitFromSearch ||
+                          isSongBlockedByRestriction(result) ||
+                          isResultSubmitting(result)
                         "
                         :title="
                           isSongBlockedByRestriction(result)
@@ -890,7 +917,7 @@ Modified by YH-Chen on 2026-10-17
                         @click.stop.prevent="selectSongForSubmit(result)"
                       >
                         {{
-                          submitting
+                          isResultSubmitting(result)
                             ? locale.processing
                             : platform === 'netease' && searchType === 1009
                               ? locale.chooseProgram
@@ -1064,115 +1091,6 @@ Modified by YH-Chen on 2026-10-17
       :title="locale.addCollaboratorTitle"
       @select="handleUserSelect"
     />
-
-    <!-- 点歌券输入弹窗 -->
-    <Teleport to="body">
-      <Transition
-        enter-active-class="transition duration-300 ease-out"
-        enter-from-class="opacity-0 scale-95"
-        enter-to-class="opacity-100 scale-100"
-        leave-active-class="transition duration-200 ease-in"
-        leave-from-class="opacity-100 scale-100"
-        leave-to-class="opacity-0 scale-95"
-      >
-        <div
-          v-if="showCardCodeModal"
-          class="fixed inset-0 z-[105] flex items-end justify-center bg-bg-primary-80 p-3 backdrop-blur-sm sm:items-center sm:p-6"
-          @click.self="closeCardCodeModal"
-        >
-          <div
-            class="w-full max-w-md overflow-hidden rounded-2xl border border-border-secondary bg-bg-secondary shadow-2xl"
-            @click.stop
-          >
-            <div
-              class="flex items-center justify-between border-b border-border-secondary-70 px-5 py-4"
-            >
-              <div>
-                <div class="flex items-center gap-2">
-                  <h3 class="text-base font-black text-text-primary">{{ locale.cardCode }}</h3>
-                  <span
-                    :class="[
-                      'rounded-full border px-1.5 py-0.5 text-[9px] font-black',
-                      cardCodeFieldMeta.required
-                        ? 'border-warning-30 bg-warning-10 text-warning-300'
-                        : 'border-border-tertiary bg-bg-tertiary-70 text-text-tertiary'
-                    ]"
-                  >
-                    {{ cardCodeFieldMeta.required ? locale.required : locale.optional }}
-                  </span>
-                </div>
-                <p class="mt-1 text-[11px] text-text-tertiary">{{ cardCodeFieldMeta.helper }}</p>
-              </div>
-              <button
-                class="flex h-9 w-9 items-center justify-center rounded-xl bg-bg-tertiary-60 text-text-tertiary transition-all hover:bg-bg-tertiary hover:text-text-primary"
-                type="button"
-                @click="closeCardCodeModal"
-              >
-                <Icon :size="15" name="close" />
-              </button>
-            </div>
-
-            <div class="px-5 py-5">
-              <label
-                for="card-code-modal"
-                class="px-1 text-[10px] font-black uppercase tracking-widest text-text-disabled"
-              >
-                {{ locale.cardCodeLabel }}
-              </label>
-              <input
-                id="card-code-modal"
-                ref="cardCodeInputRef"
-                v-model="cardCodeDraft"
-                :placeholder="cardCodeFieldMeta.placeholder"
-                class="mt-2 w-full rounded-xl border border-border-secondary bg-bg-primary px-4 py-3 text-sm font-bold text-text-primary placeholder-text-disabled transition-all focus:border-warning-50 focus:outline-none focus:ring-1 focus:ring-warning-10"
-                type="text"
-                @keydown.enter.prevent="saveCardCode"
-              >
-              <p
-                :class="[
-                  'mt-2 px-1 text-[11px]',
-                  cardCodeValidation.valid
-                    ? 'text-success-300'
-                    : cardCodeValidation.valid === false
-                      ? 'text-error-80'
-                      : 'text-text-tertiary'
-                ]"
-              >
-                {{ cardCodeModalHint }}
-              </p>
-            </div>
-
-            <div
-              class="flex flex-col-reverse gap-2 border-t border-border-secondary-70 bg-bg-secondary-70 px-5 py-4 sm:flex-row sm:justify-end"
-            >
-              <button
-                class="rounded-lg px-4 py-2.5 text-xs font-bold text-text-tertiary transition-all hover:text-text-secondary"
-                type="button"
-                @click="closeCardCodeModal"
-              >
-                {{ locale.cancel }}
-              </button>
-              <button
-                v-if="trimmedCardCode"
-                class="rounded-lg border border-border-secondary bg-bg-primary px-4 py-2.5 text-xs font-bold text-text-tertiary transition-all hover:border-error-30 hover:text-error"
-                type="button"
-                @click="clearCardCode"
-              >
-                {{ locale.clear }}
-              </button>
-              <button
-                :disabled="cardCodeValidation.checking"
-                class="rounded-lg bg-warning px-5 py-2.5 text-xs font-black text-text-primary transition-all hover:bg-warning disabled:cursor-not-allowed disabled:opacity-60"
-                type="button"
-                @click="saveCardCode"
-              >
-                {{ cardCodeValidation.checking ? locale.validatingCardCode : locale.save }}
-              </button>
-            </div>
-          </div>
-        </div>
-      </Transition>
-    </Teleport>
 
     <Teleport to="body">
       <Transition
@@ -1581,6 +1499,39 @@ Modified by YH-Chen on 2026-10-17
       type="file"
       @change="handleImportDataQQ"
     >
+
+    <!-- 投稿选项弹窗 -->
+    <SubmissionOptionsModal
+      v-model:show="showSubmissionOptions"
+      v-model:note="submissionNote"
+      v-model:note-public="submissionNotePublic"
+      v-model:note-anonymous="submissionAnonymous"
+      v-model:card-code-draft="cardCodeDraft"
+      :mode="submissionOptionsMode"
+      :slot-enabled="playTimeSelectionEnabled"
+      :slot-required="playSlotRequired"
+      :play-times="enabledPlayTimes"
+      :initial-date="preferredPlayDate"
+      :initial-time-id="preferredPlayTimeId || defaultPlayTimeId"
+      :today="todayPlayDate"
+      :format-label="formatPlayTimeOptionLabel"
+      :show-note="enableSubmissionRemarks"
+      :show-anonymous="allowAnonymousSubmission && !!user"
+      :note-approval-required="submissionNoteRequiresApproval"
+      :show-card-code="cardCodeEnabled"
+      :card-code="cardCode"
+      :card-code-required="requireCardCodeForRequests"
+      :my-card-codes="myCardCodes"
+      :card-code-status="cardCodeStatusText"
+      :card-code-status-tone="cardCodeStatusTone"
+      :card-code-checking="cardCodeValidation.checking"
+      :text="submissionOptionsText"
+      @save-card-code="saveCardCode"
+      @clear-card-code="clearCardCode"
+      @select-my-card-code="selectMyCardCode"
+      @confirm="handlePlaySlotConfirm"
+      @cancel="handlePlaySlotCancel"
+    />
   </div>
 </template>
 
@@ -1593,6 +1544,7 @@ import { useAudioPlayer } from '~/composables/useAudioPlayer'
 import { useAudioPlayerControl } from '~/composables/useAudioPlayerControl'
 import { useSiteConfig } from '~/composables/useSiteConfig'
 import { useAuth } from '~/composables/useAuth'
+import { usePermissions } from '~/composables/usePermissions'
 import { useSemesters } from '~/composables/useSemesters'
 import { useMusicSources } from '~/composables/useMusicSources'
 import { useAudioQuality } from '~/composables/useAudioQuality'
@@ -1600,6 +1552,8 @@ import { usePlatformConfig } from '~/composables/usePlatformConfig'
 import { useLocale } from '~/utils/locale'
 import { useNewUi } from '~/composables/useNewUi'
 import CustomSelect from '~/components/UI/Common/CustomSelect.vue'
+import { getBeijingDateString, getBeijingWeekday } from '~/utils/timeUtils'
+import SubmissionOptionsModal from '~/components/Songs/SubmissionOptionsModal.vue'
 import AppSpinner from '~/components/UI/Common/AppSpinner.vue'
 import Icon from '../UI/Icon.vue'
 import { convertToHttps, validateUrl } from '~/utils/url'
@@ -1657,6 +1611,8 @@ const renderedGuidelines = computed(() => renderMarkdown(submissionGuidelines.va
 
 // 用户认证
 const auth = useAuth()
+const { can } = usePermissions()
+const canBypassLimits = computed(() => can('songs:bypass-limits'))
 const user = computed(() => auth.user.value)
 
 // 学期管理
@@ -1677,8 +1633,8 @@ const submissionNotePublic = ref(true)
 const submissionAnonymous = ref(false)
 const cardCode = ref('')
 const cardCodeDraft = ref('')
-const showCardCodeModal = ref(false)
-const cardCodeInputRef = ref(null)
+// 派发到当前用户名下的点歌券（用于投稿选项弹窗的下拉选择）
+const myCardCodes = ref([])
 const cardCodeValidation = ref({
   checking: false,
   valid: null,
@@ -1688,6 +1644,9 @@ const error = ref('')
 const success = ref('')
 const submitting = ref(false)
 const voting = ref(false)
+// 正在投稿的搜索结果标识：投稿被播出时段弹窗拦下时 submitting 尚未置位，
+// 用它让卡片按钮从点击起就保持「处理中」
+const submittingSongKey = ref('')
 
 // 搜索结果点赞署名：ASK=每次询问（默认）/ ANONYMOUS / REVEAL
 const likeRevealMode = ref('ASK')
@@ -1763,10 +1722,25 @@ const openPlaylistModal = (platform) => {
 const showUserSearchModal = ref(false)
 const collaborators = ref([])
 
-const songService = useSongs()
+const songService = useSongs({ compact: true })
 const playTimes = ref([])
 const playTimeSelectionEnabled = ref(false)
+// 默认播出时段是否已处理：只在首次加载时预选一次，避免用户主动清空后被刷新填回
+const defaultSlotApplied = ref(false)
+// 后台配置的默认播出时段 id：必选模式下用于预填「选时段」弹窗（不直接写入选中值）
+const defaultPlayTimeId = ref('')
 const loadingPlayTimes = ref(false)
+// 播出日期 + 时段选择：日期可选，时段在后台上开启「时段必选」时必选
+const preferredPlayDate = ref('')
+// 后台「时段必选」总开关：仅约束网页投稿，日期始终可留空
+const playSlotRequired = ref(false)
+const playSlotError = ref('')
+// 投稿选项弹窗（留言 / 点歌券 / 播出时段）
+const showSubmissionOptions = ref(false)
+// 弹窗模式：options = 用户主动打开仅保存选项；required = 强制选择时段，确认后继续投稿
+const submissionOptionsMode = ref('options')
+// 弹窗确认后待真正提交的歌曲与上下文
+const pendingPlaySlotSubmit = ref(null)
 
 const cardCodeEnabled = computed(
   () => enableCardCodeRequests.value || requireCardCodeForRequests.value
@@ -1800,21 +1774,13 @@ const cardCodeStatusText = computed(() => {
     ? locale.value.cardCodeRequiredStatus
     : locale.value.cardCodeOptionalStatus
 })
-const mobileCardCodeLabel = computed(() => {
-  if (cardCodeValidation.value.checking) return locale.value.validatingShort
-  if (trimmedCardCode.value) {
-    if (cardCodeValidation.value.valid === false) return locale.value.cardCodeInvalid
-    if (cardCodeValidation.value.valid) return locale.value.cardCodeAvailable
-    return locale.value.cardCodeFilled
-  }
-  return cardCodeFieldMeta.value.required
-    ? locale.value.cardCodeRequiredShort
-    : locale.value.cardCodeOptionalShort
-})
-const cardCodeModalHint = computed(() => {
-  if (cardCodeValidation.value.checking) return locale.value.validatingCardCode
-  if (cardCodeValidation.value.message) return cardCodeValidation.value.message
-  return locale.value.cardCodeSaveHint
+/** 点歌券状态语义色：验证中 / 可用 / 无效 / 必填未填 */
+const cardCodeStatusTone = computed(() => {
+  if (cardCodeValidation.value.checking) return 'idle'
+  if (cardCodeValidation.value.valid === true) return 'ok'
+  if (cardCodeValidation.value.valid === false) return 'error'
+  if (trimmedCardCode.value) return 'idle'
+  return cardCodeFieldMeta.value.required ? 'warn' : 'idle'
 })
 
 const resetCardCodeValidation = () => {
@@ -1822,22 +1788,6 @@ const resetCardCodeValidation = () => {
     checking: false,
     valid: null,
     message: ''
-  }
-}
-
-const openCardCodeModal = async () => {
-  cardCodeDraft.value = cardCode.value
-  showCardCodeModal.value = true
-  await nextTick()
-  cardCodeInputRef.value?.focus()
-}
-
-const closeCardCodeModal = () => {
-  const draftChanged = cardCodeDraft.value.trim() !== cardCode.value.trim()
-  showCardCodeModal.value = false
-  cardCodeDraft.value = cardCode.value
-  if (draftChanged) {
-    resetCardCodeValidation()
   }
 }
 
@@ -1900,14 +1850,44 @@ const saveCardCode = async () => {
   }
 
   cardCode.value = draft
-  showCardCodeModal.value = false
+  cardCodeDraft.value = draft
 }
 
 const clearCardCode = () => {
   cardCode.value = ''
   cardCodeDraft.value = ''
-  showCardCodeModal.value = false
   resetCardCodeValidation()
+}
+
+/** 拉取当前用户的派发券。 */
+const fetchMyCardCodes = async () => {
+  if (!user.value || !cardCodeEnabled.value) {
+    myCardCodes.value = []
+    return
+  }
+  try {
+    const response = await $fetch('/api/card-codes/mine', {
+      ...auth.getAuthConfig()
+    })
+    myCardCodes.value = Array.isArray(response?.data) ? response.data : []
+  } catch (error) {
+    console.error('获取我的点歌券失败', error)
+    myCardCodes.value = []
+  }
+}
+
+/** 从下拉中选取已派发的点歌券：走与手动输入相同的校验链路 */
+const selectMyCardCode = async (code) => {
+  const normalized = String(code || '').trim().toUpperCase()
+  if (!normalized) {
+    clearCardCode()
+    return
+  }
+  if (!(await validateCardCode(normalized))) {
+    return
+  }
+  cardCode.value = normalized
+  cardCodeDraft.value = normalized
 }
 
 const ensureCardCodeForSubmit = async () => {
@@ -1920,7 +1900,8 @@ const ensureCardCodeForSubmit = async () => {
       return true
     }
 
-    await openCardCodeModal()
+    // 必填点歌券未填写：打开投稿选项弹窗，让用户就地补填
+    openSubmissionOptions()
     if (window.$showNotification) {
       window.$showNotification(locale.value.cardCodeRequiredWarning, 'warning')
     }
@@ -2373,7 +2354,7 @@ const handleImportSuccess = async () => {
   // showImportSongsModal.value = false
   // 刷新歌曲列表以便检查相似歌曲
   try {
-    await songService.fetchSongs(true, currentSemester.value?.name, true)
+    await songService.fetchSongs({ silent: true, semester: currentSemester.value?.name, forceRefresh: true })
   } catch (error) {
     console.error('刷新歌曲列表失败:', error)
   }
@@ -2404,6 +2385,22 @@ const fetchPlayTimes = async () => {
       const data = await response.json()
       playTimes.value = data.playTimes || []
       playTimeSelectionEnabled.value = data.enabled || false
+      playSlotRequired.value = data.required || false
+
+      // 记录默认时段 id，供「必选」弹窗预填
+      defaultPlayTimeId.value = data.defaultPlayTimeId ? String(data.defaultPlayTimeId) : ''
+
+      // 默认播出时段仅在时段为「可选」时自动预选一次（写入 preferredPlayTimeId）。
+      // 开启「必选」时不预选，留给强制弹窗预填，保证用户仍需主动确认时段。
+      // 不覆盖用户已有的选择，也不在用户主动清空后重新填回。
+      if (!defaultSlotApplied.value) {
+        defaultSlotApplied.value = true
+        if (data.enabled && !data.required && data.defaultPlayTimeId && !preferredPlayTimeId.value) {
+          const defaultId = String(data.defaultPlayTimeId)
+          const exists = (data.playTimes || []).some((pt) => String(pt.id) === defaultId)
+          if (exists) preferredPlayTimeId.value = defaultId
+        }
+      }
     }
   } catch (err) {
     console.error('获取播出时段失败:', err)
@@ -2778,7 +2775,7 @@ onMounted(async () => {
   if (auth.isAuthenticated.value) {
     try {
       const currentSemesterName = currentSemester.value?.name
-      await songService.fetchSongs(false, currentSemesterName)
+      await songService.fetchSongs({ semester: currentSemesterName })
     } catch (error) {
       console.error('加载歌曲列表失败:', error)
     }
@@ -2807,13 +2804,11 @@ const enabledPlayTimes = computed(() => {
   return playTimes.value.filter((pt) => pt.enabled)
 })
 
-const formattedPlayTimes = computed(() => {
-  const options = enabledPlayTimes.value.map((pt) => ({
-    ...pt,
-    displayName: pt.startTime || pt.endTime ? `${pt.name} (${formatPlayTimeRange(pt)})` : pt.name
-  }))
-  return [{ id: '', displayName: locale.value.choosePlayTime }, ...options]
-})
+// 日期串（YYYY-MM-DD）→ 星期（0=周日…6=周六），由 timeUtils 统一按北京时间计算
+const getWeekdayFromDateString = (dateString) => getBeijingWeekday(dateString)
+
+// 北京日期作为日期选择下限，打开弹窗时刷新
+const todayPlayDate = ref(getBeijingDateString())
 
 // 格式化播出时段时间范围
 const formatPlayTimeRange = (playTime) => {
@@ -2828,6 +2823,219 @@ const formatPlayTimeRange = (playTime) => {
   }
 
   return locale.value.choosePlayTime
+}
+
+// 播出时段下拉选项文案：名称 + 时间范围
+const formatPlayTimeOptionLabel = (playTime) => {
+  const range = formatPlayTimeRange(playTime)
+  if (!playTime?.name) return range
+  if (!range || range === locale.value.choosePlayTime) return playTime.name
+  return `${playTime.name} (${range})`
+}
+
+// 校验日期与时段。
+const validatePlaySlotSelection = (enforceRequired = true) => {
+  if (!playTimeSelectionEnabled.value) return true
+
+  if (enforceRequired && playSlotRequired.value && !preferredPlayTimeId.value) {
+    playSlotError.value = locale.value.playSlotTimeRequiredError || '请选择期望播出时段'
+    error.value = playSlotError.value
+    if (window.$showNotification) {
+      window.$showNotification(playSlotError.value, 'error')
+    }
+    return false
+  }
+
+  // 时段为可选项且未选择时，无需继续校验
+  if (!preferredPlayTimeId.value) {
+    playSlotError.value = ''
+    return true
+  }
+
+  // 指定日期时校验时段在该日期星期是否开放（与弹窗内的即时过滤保持一致）
+  if (preferredPlayDate.value && preferredPlayTimeId.value) {
+    const slot = enabledPlayTimes.value.find(
+      (pt) => String(pt.id) === String(preferredPlayTimeId.value)
+    )
+    if (slot) {
+      const weekday = getWeekdayFromDateString(preferredPlayDate.value)
+      if (weekday !== null) {
+        const days = Array.isArray(slot.weekdays) && slot.weekdays.length > 0 ? slot.weekdays : null
+        const applies = days === null || days.includes(weekday)
+        if (!applies) {
+          playSlotError.value =
+            locale.value.playSlotNotOpenOnDate || '所选播出时段在该日期不开放，请重新选择'
+          error.value = playSlotError.value
+          if (window.$showNotification) {
+            window.$showNotification(playSlotError.value, 'error')
+          }
+          return false
+        }
+      }
+    }
+  }
+
+  playSlotError.value = ''
+  return true
+}
+
+/** 弹窗内是否有可配置的内容（决定「更多选项」按钮是否出现） */
+const submissionOptionsAvailable = computed(
+  () =>
+    playTimeSelectionEnabled.value ||
+    enableSubmissionRemarks.value ||
+    (allowAnonymousSubmission.value && !!user.value) ||
+    cardCodeEnabled.value
+)
+
+/** 生成投稿设置摘要。 */
+const submissionOptionsSummary = computed(() => {
+  // 读取 locale 文案。
+  const text = (key, fallback) => {
+    const value = locale.value?.[key]
+    if (typeof value === 'function') return String(value)
+    if (typeof value === 'string') return value
+    return fallback
+  }
+
+  const items = []
+  if (playTimeSelectionEnabled.value) {
+    items.push(text('submissionOptionItemSlot', '播出安排'))
+  }
+  if (enableSubmissionRemarks.value) {
+    items.push(text('submissionOptionItemNote', '投稿留言'))
+  }
+  if (allowAnonymousSubmission.value && !!user.value) {
+    items.push(text('submissionOptionItemAnonymous', '匿名投稿'))
+  }
+  if (cardCodeEnabled.value) {
+    items.push(text('submissionOptionItemCardCode', '点歌券'))
+  }
+  if (!items.length) return ''
+
+  const joined = items.join('、')
+  const template = locale.value?.submissionOptionsSummary
+  // 正常走 locale 的 {0} 占位符；缺失时退回内置文案
+  if (typeof template === 'function') return template(joined)
+  if (typeof template === 'string') return template.replace('{0}', joined)
+  return `投稿设置包含：${joined}`
+})
+
+/** 用户主动打开投稿选项弹窗：只保存选项，不触发投稿 */
+const openSubmissionOptions = () => {
+  todayPlayDate.value = getBeijingDateString()
+  submissionOptionsMode.value = 'options'
+  showSubmissionOptions.value = true
+  // 打开弹窗时刷新已派发券，保证下拉列表是最新的
+  fetchMyCardCodes()
+}
+
+/** 后台开启「时段必选」但尚未选择时段 → 投稿时弹窗收集，确认后继续提交 */
+const requiresSlotSelection = computed(
+  () => playTimeSelectionEnabled.value && playSlotRequired.value && !preferredPlayTimeId.value
+)
+
+const openRequiredSlotOptions = (pending) => {
+  todayPlayDate.value = getBeijingDateString()
+  pendingPlaySlotSubmit.value = pending
+  submissionOptionsMode.value = 'required'
+  showSubmissionOptions.value = true
+}
+
+// 投稿选项弹窗的界面文案
+const submissionOptionsText = computed(() => {
+  const requiredMode = submissionOptionsMode.value === 'required'
+  return {
+    // 标题随模式切换：强制选时段时强调时段，主动打开时强调「选项」
+    title: requiredMode
+      ? locale.value.playSlotModalTitle || '选择播出时段'
+      : locale.value.submissionOptionsTitle || '投稿选项',
+    subtitle: requiredMode
+      ? locale.value.playSlotModalSubtitle ||
+        '时段必选；播出日期可选，留空则由后台排期安排播出日'
+      : locale.value.submissionOptionsSubtitle || '留言与点歌券会随本次投稿一并提交，均为选填',
+    // 播出时段
+    slotSectionTitle: locale.value.playSlotSectionTitle || '播出安排',
+    clearSlot: locale.value.clear || '清除',
+    dateLabel: locale.value.preferredPlayDate || '期望播出日期',
+    timeLabel: locale.value.preferredPlayTime || '期望播出时段',
+    optional: locale.value.optional || '可选',
+    required: locale.value.required || '必选',
+    timePlaceholder: locale.value.choosePlayTime || '请选择播出时段',
+    timeFreeHint: locale.value.playSlotTimeFreeHint || '可选择任一启用的播出时段',
+    timeRestrictedHint: locale.value.playSlotTimeRestrictedHint || '仅显示该日期开放的播出时段',
+    dateOptionalHint:
+      locale.value.playSlotDateOptionalHint || '未指定播出日期，具体播出日由后台排期决定',
+    noSlotsForDate: locale.value.noSlotsForDate || '该日期没有开放的播出时段，请更换日期',
+    timeRequiredError: locale.value.playSlotTimeRequiredError || '请选择期望播出时段',
+    // 投稿留言
+    noteLabel: locale.value.submissionNote || '投稿留言',
+    anonymousLabel: locale.value.anonymousSubmission || '匿名投稿',
+    publicToUsers: locale.value.publicToUsers || '备注留言公开给已登录用户',
+    anonymous: locale.value.anonymousSubmission || '匿名投稿',
+    approvalHint: locale.value.submissionNoteApprovalHint || '公开留言需管理员审核通过后展示',
+    notePlaceholder:
+      locale.value.submissionNotePlaceholder || '想说点什么？（选填，最多 300 字）',
+    // 点歌券
+    cardCodeLabel: locale.value.cardCode || '点歌券',
+    cardCodePlaceholder: locale.value.cardCodePlaceholder || '请输入点歌券',
+    cardCodeHelper: cardCodeFieldMeta.value.helper,
+    // 已派发券下拉选择
+    cardCodeMyCodes: locale.value.cardCodeMyCodes || '我的点歌券',
+    cardCodeSelectLabel: locale.value.cardCodeSelectLabel || '选择点歌券',
+    cardCodeSelectPlaceholder:
+      locale.value.cardCodeSelectPlaceholder || '从我的点歌券中选择，或手动输入券码',
+    cardCodeNoCodes: locale.value.cardCodeNoCodes || '暂无可用的点歌券',
+    cardCodeNoCodesHint:
+      locale.value.cardCodeNoCodesHint ||
+      '暂无可用的点歌券，可在列表中选择「手动输入券码」录入。',
+    cardCodeMyCodesCount: (count) =>
+      typeof locale.value.cardCodeMyCodesCount === 'function'
+        ? locale.value.cardCodeMyCodesCount(count)
+        : `我有 ${count} 张点歌券`,
+    // 手动添加
+    cardCodeAddManually: locale.value.cardCodeAddManually || '添加点歌券',
+    cardCodeManualInput: locale.value.cardCodeManualInput || '手动输入券码',
+    cardCodeManualOption: locale.value.cardCodeManualOption || '手动输入券码',
+    cardCodeManualPlaceholder: locale.value.cardCodeManualPlaceholder || '输入收到的点歌券码',
+    // 操作
+    clear: locale.value.clear || '清除',
+    save: locale.value.save || '保存',
+    validatingShort: locale.value.validatingShort || '验证中',
+    cancel: locale.value.cancel || '取消',
+    confirm: requiredMode ? locale.value.confirmSubmit || '确认投稿' : locale.value.save || '保存',
+    emptyHint: locale.value.submissionOptionsEmptyHint || '当前站点未开放可配置的投稿选项'
+  }
+})
+
+/** 保存弹窗选项并按模式继续投稿。 */
+const handlePlaySlotConfirm = async ({ date, timeId }) => {
+  preferredPlayTimeId.value = timeId ? String(timeId) : ''
+  preferredPlayDate.value = date || ''
+  playSlotError.value = ''
+
+  const pending = pendingPlaySlotSubmit.value
+  pendingPlaySlotSubmit.value = null
+  if (!pending) return
+
+  if (pending.manualForm) {
+    await handleManualSubmit(true)
+    return
+  }
+
+  if (pending.manual) {
+    await handleSubmit(true)
+    return
+  }
+
+  await submitSong(pending.result, { ...(pending.options || {}), fromSlotModal: true })
+}
+
+/** 取消投稿选项弹窗。 */
+const handlePlaySlotCancel = () => {
+  pendingPlaySlotSubmit.value = null
+  submittingSongKey.value = ''
+  playSlotError.value = ''
 }
 
 // 监听用户状态变化，当用户登录后重新获取投稿状态
@@ -3652,6 +3860,12 @@ const resolveSubmissionDuration = async (result, actualMusicPlatform, fallbackUr
   return audioDuration
 }
 
+// 结束一次投稿：卡片投稿由父页完成网络请求，调用本接口（或 resetForm）后才能恢复按钮文案
+const endSubmission = () => {
+  submitting.value = false
+  submittingSongKey.value = ''
+}
+
 // 提交选中的歌曲
 // 选歌 + 确认投稿：写留言与选歌不分先后，选好后点底部「确认投稿」提交
 const selectedSong = ref(null)
@@ -3669,8 +3883,8 @@ const submitSelectedSong = async () => {
 }
 
 const submitSong = async (result, options = {}) => {
-  // 防止重复点击和重复提交
-  if (submitting.value) return
+  // 防止重复点击和重复提交；播出时段弹窗拦下的这次投稿待确认后继续，不在此拦截
+  if (submitting.value && !isResultSubmitting(result)) return
 
   // 如果是播客/电台模式，且是在网易云平台下，且不是具体的单集提交
   if (
@@ -3715,7 +3929,7 @@ const submitSong = async (result, options = {}) => {
   // 重播申请需要定位到本学期内已播放的原歌曲；多P 视频按完整 musicId 精确匹配，其余平台由 getSimilarSong 归一化回退
   if (
     options.replayRequest === true &&
-    !auth.isAdmin.value &&
+    !canBypassLimits.value &&
     auth.isAuthenticated.value &&
     songService.songs.value &&
     songService.songs.value.length > 0 &&
@@ -3739,14 +3953,28 @@ const submitSong = async (result, options = {}) => {
   }
 
   // 能否投稿由服务端预检结论决定（区分本学期查重与排期冷却窗口两种模式，且已随开关关闭放行）
-  if (!auth.isAdmin.value && isSongBlockedByRestriction(result)) {
+  if (!canBypassLimits.value && isSongBlockedByRestriction(result)) {
     if (window.$showNotification) {
       window.$showNotification(getRestrictionMessage(getRestrictionReason(result)), 'warning')
     }
     return
   }
 
+  // 校验投稿日期与时段。
+  if (requiresSlotSelection.value && options.replayRequest !== true && !options.fromSlotModal) {
+    // 记下本次投稿的卡片，弹窗关闭到请求返回期间按钮持续显示「处理中」
+    submittingSongKey.value = getSearchResultKey(result)
+    openRequiredSlotOptions({ result, options })
+    return
+  }
+
+  // 播出日期 + 时段校验（必选模式下未选择则阻止提交）
+  if (!validatePlaySlotSelection(options.replayRequest !== true)) {
+    return
+  }
+
   submitting.value = true
+  submittingSongKey.value = getSearchResultKey(result)
   error.value = ''
 
   title.value = songTitle
@@ -3793,11 +4021,12 @@ const submitSong = async (result, options = {}) => {
       return false
     } finally {
       submitting.value = false
+      submittingSongKey.value = ''
     }
   }
 
   if (!(await ensureCardCodeForSubmit())) {
-    submitting.value = false
+    endSubmission()
     return false
   }
 
@@ -3808,12 +4037,12 @@ const submitSong = async (result, options = {}) => {
     if (window.$showNotification) {
       window.$showNotification(limitCheck.message, 'error')
     }
-    submitting.value = false
+    endSubmission()
     return
   }
 
   // 管理员不受黑名单限制
-  if (!auth.isAdmin.value) {
+  if (!canBypassLimits.value) {
     try {
       // 检查黑名单
       const blacklistCheck = await $fetch('/api/blacklist/check', {
@@ -3832,7 +4061,7 @@ const submitSong = async (result, options = {}) => {
         if (window.$showNotification) {
           window.$showNotification(error.value, 'error')
         }
-        submitting.value = false
+        endSubmission()
         return
       }
     } catch (err) {
@@ -3878,6 +4107,7 @@ const submitSong = async (result, options = {}) => {
       title: title.value,
       artist: artist.value,
       preferredPlayTimeId: preferredPlayTimeId.value ? parseInt(preferredPlayTimeId.value) : null,
+      preferredPlayDate: preferredPlayDate.value || null,
       cover: selectedCover.value,
       musicPlatform: actualMusicPlatform, // 优先使用搜索结果的实际平台来源
       musicId: result.musicId ? String(result.musicId) : null,
@@ -3898,8 +4128,7 @@ const submitSong = async (result, options = {}) => {
     // 只emit事件，让父组件处理实际的API调用
     emit('request', songData)
 
-    // 成功提示由父组件处理，这里只重置表单
-    resetForm()
+    // 投稿状态由父组件在请求结束后通过 endSubmission / resetForm 释放
     return true
   } catch (err) {
     error.value = getErrorMessage(err) || locale.value.notifications.submitFailed
@@ -3907,14 +4136,23 @@ const submitSong = async (result, options = {}) => {
       window.$showNotification(error.value, 'error')
     }
     return false
-  } finally {
-    submitting.value = false
   }
 }
 
-// 直接提交表单
-const handleSubmit = async () => {
+// 直接提交表单（手动投稿）
+const handleSubmit = async (fromSlotModal = false) => {
   if (submitting.value) return
+
+  // 校验手动投稿日期与时段。
+  if (requiresSlotSelection.value && fromSlotModal !== true) {
+    openRequiredSlotOptions({ manual: true })
+    return
+  }
+
+  // 播出日期 + 时段校验（必选模式下未选择则阻止提交）
+  if (!validatePlaySlotSelection()) {
+    return
+  }
 
   if (!(await ensureCardCodeForSubmit())) {
     return
@@ -3931,6 +4169,7 @@ const handleSubmit = async () => {
   }
 
   submitting.value = true
+  submittingSongKey.value = ''
   error.value = ''
 
   try {
@@ -3939,6 +4178,7 @@ const handleSubmit = async () => {
       title: title.value,
       artist: artist.value,
       preferredPlayTimeId: preferredPlayTimeId.value ? parseInt(preferredPlayTimeId.value) : null,
+      preferredPlayDate: preferredPlayDate.value || null,
       cover: selectedCover.value,
       musicPlatform: platform.value,
       musicId: null, // 手动输入时没有musicId
@@ -3954,15 +4194,13 @@ const handleSubmit = async () => {
     // 只emit事件，让父组件处理实际的API调用
     emit('request', songData)
 
-    // 成功提示由父组件处理，这里只重置表单
-    resetForm()
+    // 表单在父组件确认投稿成功后重置，投稿期间保留「提交中」文案
   } catch (err) {
     error.value = getErrorMessage(err) || locale.value.notifications.submitFailed
     if (window.$showNotification) {
       window.$showNotification(error.value, 'error')
     }
-  } finally {
-    submitting.value = false
+    endSubmission()
   }
 }
 
@@ -4251,7 +4489,7 @@ const handlePlaylistPlay = async (song) => {
 }
 
 // 手动输入相关方法
-const handleManualSubmit = async () => {
+const handleManualSubmit = async (fromSlotModal = false) => {
   if (!title.value.trim() || !manualArtist.value.trim()) {
     error.value = locale.value.notifications.completeSongInfoRequired
     if (window.$showNotification) {
@@ -4277,6 +4515,17 @@ const handleManualSubmit = async () => {
     return
   }
 
+  // 播出时段：仅在后台开启「时段必选」且尚未选择时段时弹窗收集，确认后再继续提交
+  if (requiresSlotSelection.value && fromSlotModal !== true) {
+    openRequiredSlotOptions({ manualForm: true })
+    return
+  }
+
+  // 播出日期 + 时段校验（必选模式下未选择则阻止提交）
+  if (!validatePlaySlotSelection()) {
+    return
+  }
+
   if (!(await ensureCardCodeForSubmit())) {
     return
   }
@@ -4292,10 +4541,11 @@ const handleManualSubmit = async () => {
   }
 
   submitting.value = true
+  submittingSongKey.value = ''
   error.value = ''
 
   // 管理员不受黑名单限制
-  if (!auth.isAdmin.value) {
+  if (!canBypassLimits.value) {
     try {
       // 检查黑名单
       const blacklistCheck = await $fetch('/api/blacklist/check', {
@@ -4314,7 +4564,7 @@ const handleManualSubmit = async () => {
         if (window.$showNotification) {
           window.$showNotification(error.value, 'error')
         }
-        submitting.value = false
+        endSubmission()
         return
       }
     } catch (err) {
@@ -4332,6 +4582,7 @@ const handleManualSubmit = async () => {
       title: title.value,
       artist: manualArtist.value,
       preferredPlayTimeId: preferredPlayTimeId.value ? parseInt(preferredPlayTimeId.value) : null,
+      preferredPlayDate: preferredPlayDate.value || null,
       cover: manualCover.value?.trim() || '',
       playUrl: trimmedPlayUrl,
       musicPlatform: hasManualPlayUrl ? null : platform.value,
@@ -4348,16 +4599,13 @@ const handleManualSubmit = async () => {
     // 只emit事件，让父组件处理实际的API调用
     emit('request', songData)
 
-    // 成功提示由父组件处理，这里只重置表单和关闭弹窗
-    resetForm()
-    showManualModal.value = false
+    // 父组件确认投稿成功后统一重置表单并关闭弹窗，投稿期间保留「提交中」文案
   } catch (err) {
     error.value = getErrorMessage(err) || locale.value.notifications.submitFailed
     if (window.$showNotification) {
       window.$showNotification(error.value, 'error')
     }
-  } finally {
-    submitting.value = false
+    endSubmission()
   }
 }
 
@@ -4366,6 +4614,8 @@ const resetForm = () => {
   title.value = ''
   artist.value = ''
   preferredPlayTimeId.value = ''
+  preferredPlayDate.value = ''
+  playSlotError.value = ''
   searchResults.value = []
   restrictionCheckMap.value = new Map()
   selectedCover.value = ''
@@ -4381,8 +4631,15 @@ const resetForm = () => {
   submissionAnonymous.value = false
   cardCode.value = ''
   cardCodeDraft.value = ''
-  showCardCodeModal.value = false
   resetCardCodeValidation()
+  showSubmissionOptions.value = false
+  pendingPlaySlotSubmit.value = null
+  submissionOptionsMode.value = 'options'
+  // 投稿完成后释放卡片按钮的「处理中」状态
+  submitting.value = false
+  submittingSongKey.value = ''
+  // 重置默认时段预选标记，保证下一次投稿仍能重新应用默认时段
+  defaultSlotApplied.value = false
   // 重置URL验证状态
   coverValidation.value = { valid: true, error: '', validating: false }
   playUrlValidation.value = { valid: true, error: '', validating: false }
@@ -4413,7 +4670,7 @@ const fetchSubmissionStatus = async () => {
 // 检查投稿限额
 const checkSubmissionLimit = () => {
   // 超级管理员不受投稿限制
-  if (user.value && (user.value.role === 'SUPER_ADMIN' || user.value.role === 'ADMIN')) {
+  if (canBypassLimits.value) {
     return { canSubmit: true, message: '' }
   }
 
@@ -4549,7 +4806,7 @@ const canSubmitFromSearch = computed(() => {
 })
 
 const isSongBlockedByRestriction = (result) => {
-  if (auth.isAdmin.value) return false
+  if (canBypassLimits.value) return false
   if (restrictionChecking.value) return false
   const songTitle = result.song || result.title
   const songArtist = result.singer || result.artist
@@ -4661,7 +4918,9 @@ const canSubmitManualForm = computed(() => {
 
 // 暴露方法给父组件
 defineExpose({
-  refreshSubmissionStatus: fetchSubmissionStatus
+  refreshSubmissionStatus: fetchSubmissionStatus,
+  resetForm,
+  endSubmission
 })
 </script>
 
@@ -5051,6 +5310,52 @@ defineExpose({
 .login-required-notice .login-link-btn:hover {
   background: var(--primary-35);
   color: var(--text-link-hover);
+}
+
+/* 投稿设置摘要 */
+.submission-options-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.375rem 0.5rem;
+  margin-bottom: 0.5rem;
+  padding: 0.35rem 0.75rem;
+  border: 1px dashed var(--overlay-16);
+  border-radius: 8px;
+  background: var(--surface-card-bg-medium);
+  color: var(--text-tertiary);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.5;
+  text-align: left;
+}
+
+/* 摘要行内的投稿选项入口按钮 */
+.submission-options-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex-shrink: 0;
+  padding: 0.15rem 0.6rem;
+  border: 1px solid var(--overlay-16);
+  border-radius: 999px;
+  background: var(--overlay-10);
+  color: var(--overlay-75);
+  font-family: 'MiSans', sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background 0.2s ease,
+    border-color 0.2s ease,
+    color 0.2s ease;
+}
+
+.submission-options-trigger:hover {
+  border-color: var(--overlay-30);
+  background: var(--overlay-20);
+  color: var(--text-primary);
 }
 
 .submission-status-horizontal {
@@ -7140,80 +7445,6 @@ defineExpose({
   .form-row {
     flex-direction: column;
     gap: 1rem;
-  }
-
-  .submission-meta-row {
-    gap: 0.75rem;
-  }
-
-  .card-code-form-group {
-    margin-bottom: 0;
-  }
-
-  .mobile-hidden-card-code-group {
-    display: none;
-  }
-
-  .desktop-card-code-panel {
-    display: none;
-  }
-
-  .mobile-card-code-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.35rem;
-    min-height: 28px;
-    border-radius: 999px;
-    border: 1px solid var(--requestform-mobile-chip-border);
-    background: var(--requestform-mobile-chip-bg);
-    color: var(--requestform-mobile-chip-text);
-    padding: 0.25rem 0.55rem;
-    font-size: 11px;
-    font-weight: 800;
-    white-space: nowrap;
-  }
-
-  .mobile-card-code-button {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.75rem;
-    width: 100%;
-    min-height: 42px;
-    border-radius: 12px;
-    border: 1px solid var(--requestform-mobile-chip-border-sm);
-    background: var(--panel-bg-overlay);
-    color: var(--requestform-mobile-button-text);
-    padding: 0.65rem 0.85rem;
-    font-size: 13px;
-    font-weight: 800;
-  }
-
-  .mobile-card-code-chip.is-required,
-  .mobile-card-code-button.is-required {
-    border-color: var(--requestform-chip-required-border);
-    background: var(--requestform-chip-required-bg);
-    color: var(--color-warning-light);
-  }
-
-  .mobile-card-code-chip.has-code,
-  .mobile-card-code-button.has-code {
-    border-color: var(--requestform-chip-required-border-sm);
-    color: var(--color-warning-light);
-  }
-
-  .mobile-card-code-chip.is-valid,
-  .mobile-card-code-button.is-valid {
-    border-color: var(--requestform-chip-valid-border);
-    background: var(--success-10);
-    color: var(--color-success-light);
-  }
-
-  .mobile-card-code-chip.is-invalid,
-  .mobile-card-code-button.is-invalid {
-    border-color: var(--requestform-chip-invalid-border);
-    background: var(--requestform-chip-invalid-bg);
-    color: var(--color-error-light);
   }
 
   .form-group label {

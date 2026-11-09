@@ -1,6 +1,7 @@
 import { db } from '~/drizzle/db'
 import { users } from '~/drizzle/schema'
 import { inArray } from 'drizzle-orm'
+import { recordAdminAudit } from '~~/server/utils/admin-audit'
 
 export default defineEventHandler(async (event) => {
   try {
@@ -56,21 +57,6 @@ export default defineEventHandler(async (event) => {
 
     // 使用认证中间件提供的用户信息
     const currentUser = event.context.user
-
-    if (!currentUser) {
-      throw createError({
-        statusCode: 401,
-        message: 'Authentication required'
-      })
-    }
-
-    // 检查权限 - 只有管理员和超级管理员可以执行批量更新
-    if (!['ADMIN', 'SUPER_ADMIN'].includes(currentUser.role)) {
-      throw createError({
-        statusCode: 403,
-        message: 'Insufficient permissions'
-      })
-    }
 
     // 验证用户ID是否存在
     const existingUsers = await db
@@ -162,6 +148,18 @@ export default defineEventHandler(async (event) => {
       console.error('记录操作日志失败:', logError)
       // 日志记录失败不影响主要操作
     }
+
+    await recordAdminAudit(event, 'user.batch-grade-update', {
+      targetType: 'user',
+      targetId: `batch:${uniqueUserIds.length}`,
+      summary: {
+        updated,
+        failed,
+        targetGrade,
+        keepClass,
+        accountStatus: accountStatusFilter || null
+      }
+    })
 
     return {
       success: errors.length === 0 || updated > 0,

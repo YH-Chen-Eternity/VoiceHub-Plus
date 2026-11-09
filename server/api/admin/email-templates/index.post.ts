@@ -1,6 +1,7 @@
 import { db } from '~/drizzle/db'
 import { emailTemplates } from '~/drizzle/schema'
 import { eq } from 'drizzle-orm'
+import { recordAdminAudit } from '~~/server/utils/admin-audit'
 
 export default defineEventHandler(async (event) => {
   if (getMethod(event) !== 'POST') {
@@ -8,9 +9,6 @@ export default defineEventHandler(async (event) => {
   }
   const user = event.context.user
   if (!user) throw createError({ statusCode: 401, message: '未授权访问' })
-  if (!['ADMIN', 'SUPER_ADMIN'].includes(user.role)) {
-    throw createError({ statusCode: 403, message: '需要管理员权限' })
-  }
 
   const body = await readBody(event)
   const { key, name, subject, html } = body || {}
@@ -26,12 +24,24 @@ export default defineEventHandler(async (event) => {
       .set({ name, subject, html, updatedAt: new Date(), updatedByUserId: user.id })
       .where(eq(emailTemplates.key, key))
       .returning()
+    await recordAdminAudit(event, 'email-template.update', {
+      targetType: 'email-template',
+      targetId: key,
+      summary: { key, name, subject, htmlLength: html.length }
+    })
+
     return { success: true, template: res[0] }
   } else {
     const res = await db
       .insert(emailTemplates)
       .values({ key, name, subject, html, updatedByUserId: user.id })
       .returning()
+    await recordAdminAudit(event, 'email-template.create', {
+      targetType: 'email-template',
+      targetId: key,
+      summary: { key, name, subject, htmlLength: html.length }
+    })
+
     return { success: true, template: res[0] }
   }
 })

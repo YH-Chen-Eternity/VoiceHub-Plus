@@ -1,5 +1,8 @@
 import { db } from '~/drizzle/db'
 import { sql } from 'drizzle-orm'
+import { createApiError } from '~~/server/utils/apiError'
+import { SERVER_ERROR_CODES } from '~~/server/config/constants'
+import { ADMIN_AUDIT_RESULT, recordAdminAudit } from '~~/server/utils/admin-audit'
 
 function getFirstRow<T>(result: any): T | undefined {
   return result?.rows?.[0] ?? result?.[0]
@@ -25,7 +28,22 @@ function toRegclass(value: string) {
 }
 
 // 修复单个表的序列
-async function fixTableSequence(table: string, dbTableName: string) {
+type SequenceFixResult = {
+  success: boolean
+  table: string
+  message?: string
+  error?: string
+  data?: {
+    table: string
+    maxId: number
+    oldSequenceValue?: number
+    newSequenceValue: number
+    sequenceName: string
+    skipped: boolean
+  }
+}
+
+async function fixTableSequence(table: string, dbTableName: string): Promise<SequenceFixResult> {
   try {
     // 获取表的最大ID
     const maxIdResult = await db.execute(
@@ -57,30 +75,36 @@ async function fixTableSequence(table: string, dbTableName: string) {
           table: table,
           maxId: 0,
           newSequenceValue: 1,
-          sequenceName: sequenceName
+          sequenceName: sequenceName,
+          skipped: false
         }
       }
     }
 
     const currentSeqResult = await db.execute(
-      sql`SELECT last_value FROM ${toQualifiedIdentifier(sequenceName)}`
+      sql`SELECT last_value, is_called FROM ${toQualifiedIdentifier(sequenceName)}`
     )
-    const currentSeqValue = Number(
-      getFirstRow<{ last_value: number | string }>(currentSeqResult)?.last_value || 0
+    const currentSeqRow = getFirstRow<{ last_value: number | string; is_called: boolean | string }>(
+      currentSeqResult
     )
+    const currentSeqValue = Number(currentSeqRow?.last_value || 0)
+    const isCalled = currentSeqRow?.is_called === true || currentSeqRow?.is_called === 't'
     const newSequenceValue = maxId
     await db.execute(sql`SELECT setval(${toRegclass(sequenceName)}, ${newSequenceValue})`)
 
     return {
       success: true,
-      table: table,
+      table,
       message: `表 ${table} 的序列已成功重置 (${currentSeqValue} → ${newSequenceValue})`,
       data: {
-        table: table,
-        maxId: maxId,
+        table,
+        maxId,
         oldSequenceValue: currentSeqValue,
-        newSequenceValue: newSequenceValue,
-        sequenceName: sequenceName
+        newSequenceValue,
+        sequenceName,
+        // 已取过值且不小于最大 ID 时，下一个 nextval 本就是 maxId+1，setval 无实际效果；
+        // is_called 为 false 时即便数值相同也会重复发放 ID，仍需修复
+        skipped: isCalled && currentSeqValue >= newSequenceValue
       }
     }
   } catch (error: any) {
@@ -94,14 +118,8 @@ async function fixTableSequence(table: string, dbTableName: string) {
 
 export default defineEventHandler(async (event) => {
   try {
-    // 验证管理员权限
     const user = event.context.user
-    if (!user || !['ADMIN', 'SUPER_ADMIN'].includes(user.role)) {
-      throw createError({
-        statusCode: 403,
-        message: '需要管理员权限'
-      })
-    }
+    if (!user) throw createApiError(401, SERVER_ERROR_CODES.AUTH_UNAUTHORIZED, '需要登录')
 
     const body = await readBody(event)
     const { table } = body
@@ -122,7 +140,10 @@ export default defineEventHandler(async (event) => {
       'SongBlacklist',
       'SongReplayRequest',
       'RequestTime',
-      'EmailTemplate'
+      'EmailTemplate',
+      'CardCode',
+      'CardCodeRedeemLog',
+      'CardCodeAssignment'
     ]
 
     // Prisma模型名到数据库表名的映射
@@ -141,7 +162,10 @@ export default defineEventHandler(async (event) => {
       SongBlacklist: 'SongBlacklist',
       SongReplayRequest: 'song_replay_requests',
       RequestTime: 'RequestTime',
-      EmailTemplate: 'EmailTemplate'
+      EmailTemplate: 'EmailTemplate',
+      CardCode: 'CardCode',
+      CardCodeRedeemLog: 'CardCodeRedeemLog',
+      CardCodeAssignment: 'CardCodeAssignment'
     }
 
     // 如果没有指定表名或指定为'all'，则修复所有表
@@ -158,7 +182,7 @@ export default defineEventHandler(async (event) => {
           results.push(result)
 
           if (result.success) {
-            if (result.data?.skipped || result.data?.alreadyCorrect) {
+            if (result.data?.skipped) {
               skippedCount++
             } else {
               fixedCount++
@@ -178,6 +202,18 @@ export default defineEventHandler(async (event) => {
           errorCount++
         }
       }
+
+      await recordAdminAudit(event, 'database.fix-sequence', {
+        targetType: 'database',
+        targetId: 'all',
+        summary: {
+          total: supportedTables.length,
+          fixed: fixedCount,
+          skipped: skippedCount,
+          errors: errorCount
+        },
+        result: hasError ? ADMIN_AUDIT_RESULT.FAILURE : ADMIN_AUDIT_RESULT.SUCCESS
+      })
 
       return {
         success: !hasError,

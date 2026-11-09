@@ -3,17 +3,11 @@ import { promises as fs } from 'fs'
 import path from 'path'
 // @ts-ignore formidable 未随包提供类型声明
 import formidable from 'formidable'
+import { recordAdminAudit } from '~~/server/utils/admin-audit'
 
 export default defineEventHandler(async (event) => {
   try {
-    // 验证管理员权限
     const user = event.context.user
-    if (!user || user.role !== 'SUPER_ADMIN') {
-      throw createError({
-        statusCode: 403,
-        message: '只有超级管理员可以上传备份文件'
-      })
-    }
 
     // 创建备份目录
     const backupDir = path.join(process.cwd(), 'backups')
@@ -111,6 +105,12 @@ export default defineEventHandler(async (event) => {
 
     // 获取文件信息
     const stats = await fs.stat(newFilepath)
+
+    await recordAdminAudit(event, 'backup.upload', {
+      targetType: 'backup',
+      targetId: newFilename,
+      summary: { originalFilename: originalName, size: stats.size }
+    })
 
     return {
       success: true,
