@@ -87,20 +87,21 @@
 
 </details>
 
-## 项目简介
+## <a id="项目简介" name="项目简介"></a>项目简介
 
 VoiceHub 是一个面向校园的广播站点歌系统（Nuxt 4 全栈应用），核心功能包括：歌曲搜索与投稿、点赞与热度统计、自动排期与播出时段管理、公告栏、用户注册与审核、管理后台等。完整功能清单见下方[原项目 README 的「主要功能」](#主要功能)一节。
 
 **为什么有这个分支**：原项目面向通用部署，而本仓库服务于一个真实校园广播站的日常运营，在此过程中沉淀了一批**社区运营/安全/合规方向**的定制——包括完整的管理员操作审计、边缘安全层（防暴力破解/脚本/地域闸）、面向管理员的攻击日志面板、账号合规策略（强制改密/改用户名、邮箱域名白名单）等。这些改动通用性较强，因此以社区版形式开源。
 
-## 主要修改内容（Changelog）
+## <a id="主要修改内容changelog" name="主要修改内容changelog"></a>主要修改内容（Changelog）
 
-> 最新更新：**2026-11-08**。下方为精简速览；各轮完整记录与功能明细已折叠，点击展开查看。
+> 最新更新：**2026-11-09**。下方为精简速览；各轮完整记录与功能明细已折叠，点击展开查看。
 
 **更新速览**
 
 | 日期 | 主题 |
 | --- | --- |
+| 2026-11-09 | 首个正式 Release：UI 统一性、AI 审查工作流修复、依赖治理与发版前复核 |
 | 2026-11-08 | 音乐解析与播放状态、社区图片与评论分页、媒体缓存优化 |
 | 2026-10-31 | 音乐链接解析稳定性与响应速度 |
 | 2026-10-28 | 依赖与运行时基线同步 |
@@ -112,7 +113,32 @@ VoiceHub 是一个面向校园的广播站点歌系统（Nuxt 4 全栈应用）�
 > 逐文件明细见 [`CUSTOM_CHANGES.md`](CUSTOM_CHANGES.md)；10-27 批次见 [`社区增强批次-20261027.md`](社区增强批次-20261027.md)。
 
 <details>
-<summary><b>展开查看完整更新记录与功能明细（2026-10-23 ~ 2026-11-08）</b></summary>
+<summary><b>展开查看完整更新记录与功能明细（2026-10-23 ~ 2026-11-09）</b></summary>
+
+### 2026-11-09 首个正式 Release 与发版前收口
+
+**版本发布**
+
+- 发布首个正式版本 `2026.11.09`：GitHub Release、运行包、飞牛 FPK 与 Docker 多架构镜像同步产出。
+- 发版前完成全套 CI 验证（CodeQL、Docker 多架构构建、Nix CI、数据库迁移测试、FPK 构建）与生产功能验证，均无回归。
+
+**UI 统一性与交互逻辑**
+
+- 歌曲排序选择器接入中英双语：补充 `sortLabel` / `sortPopularity` / `sortDate` 词条，修复英文界面出现中文文案的问题。
+- 移除恒为降序、且无任何入口可修改的 `sortOrder` 死变量；按投稿时间排序固定为降序（最新在前）。
+- 移动端排序选择器由 `max-width: 116px` 调整为 `min-width: 116px` + `max-width: 160px`，避免「按投稿时间」被截断。
+- 复核排序逻辑：`sortBy` 由 computed 响应式重排、切换时回到第一页，`sort()` 只作用于筛选后的新数组，不污染源数据。
+
+**依赖治理与上游同步裁决**
+
+- 逐条复核 AI 代码审查建议后，回退 3 个未经适配的主版本升级：`@vercel/speed-insights` 2.x 的 Nuxt 入口会在构建期引入 `@nuxt/kit` 导致 Docker / Nix 构建失败；`bcryptjs` 3.x 转为纯 ESM 且涉及多处核心认证调用；`@netlify/functions` 跨 4 个大版本且缺回归验证。保留小版本与 GitHub Actions 依赖更新。
+- 上游 1.6.0.6 同步评估结论：重复功能（审计日志、权限矩阵、二次验证、点歌券派发等）一律保留社区版实现；上游新增组件零接线且依赖新增迁移，与现有数据库基线不兼容，故不合并。
+
+**CI 与合规**
+
+- 修复 AI 审查工作流：`max_tokens` 2200 → 4096、送审文件与补丁上限提高，消除审查报告被硬截断，并明确锁文件按体积策略跳过送审，消除「锁文件未提供」误报。
+- 发版前对公开仓库做敏感信息与部署描述复核（1141 个文件、8 条提交信息、60 条 PR 内容），结果无真实泄露与硬生产标识；泛化运维示例中的 SSH 端口配置。
+- 修复 README 目录跳转：为各章节标题补充显式锚点，使目录链接不再依赖不同渲染器的标题 slug 规则。
 
 ### 2026-11-08 音乐解析、社区浏览与媒体缓存优化
 
@@ -268,10 +294,12 @@ VoiceHub 是一个面向校园的广播站点歌系统（Nuxt 4 全栈应用）�
 > 冲突处理原则：**社区版已有功能保持不变**。上游与社区版重叠的匿名投稿 / 热度加权两处，
 > 采用社区版实现；`_journal.json` 采用双方迁移合并（共 63 条），并把上游新增的匿名迁移
 > 改为 `ADD COLUMN IF NOT EXISTS`，避免与社区版同功能迁移重复建列导致启动失败。
+>
+> **2026-11-09 补充**：上游 1.6.0.6 经评估未合入。该版本改动集中在权限重构、日志审计、二次验证与点歌券派发等重复功能，且依赖新增迁移；按「重复功能保留社区版实现」原则关闭同步 PR，同步基线仍为 v1.6.0.5。
 
 </details>
 
-## 安装与使用
+## <a id="安装与使用" name="安装与使用"></a>安装与使用
 
 完整的部署指南、环境变量说明、OAuth 配置、数据库迁移等，**全部保留在下方原项目 README 中**（从「[部署指南](#部署指南)」开始），本分支未改变原有安装流程的主体步骤。
 
@@ -288,7 +316,7 @@ VoiceHub 是一个面向校园的广播站点歌系统（Nuxt 4 全栈应用）�
 | 非 root 运行 | Dockerfile 内置 `voicehub` 非 root 用户，容器不以 root 运行 |
 | 数据库迁移 | 新增多张审计/攻击日志/账号策略表，当前迁移数 72；迁移文件位于 `app/drizzle/migrations/`，升级时正常执行 `drizzle-kit migrate` 即可 |
 
-### 回声社区内容审核服务（可选）
+### <a id="回声社区内容审核服务可选" name="回声社区内容审核服务可选"></a>回声社区内容审核服务（可选）
 
 `moderation-service/` 是独立的 Python/FastAPI 审核服务，用于处理九宫格图文的并发审核、风险聚合与故障降级。VoiceHub 侧只需三个环境变量：
 
@@ -302,7 +330,7 @@ VoiceHub 是一个面向校园的广播站点歌系统（Nuxt 4 全栈应用）�
 
 部署、环境变量、验收 curl 与安全说明见 [`moderation-service/README.md`](moderation-service/README.md)。**生产环境请只在内部网络暴露该服务，不要直接开放公网端口。**
 
-## 开源协议与版权声明
+## <a id="开源协议与版权声明" name="开源协议与版权声明"></a>开源协议与版权声明
 
 - 本项目采用 **[GNU General Public License v3.0（GPL-3.0）](LICENSE)** 协议开源，与原项目一致。
 - **原版版权**：Copyright (C) 原作者 ([laoshuikaixue](https://github.com/laoshuikaixue))
@@ -310,12 +338,12 @@ VoiceHub 是一个面向校园的广播站点歌系统（Nuxt 4 全栈应用）�
 - 根据 GPL-3.0 协议，本修改版**同样以 GPL-3.0 开源**：您可以自由使用、学习、修改和再分发，但基于本项目的衍生作品也必须以 GPL-3.0 开源并提供对应源代码。
 - 原 `LICENSE` 文件及源码中的原始版权与免责声明均**未被删除或修改**。
 
-## 致谢
+## <a id="致谢" name="致谢"></a>致谢
 
 - 感谢 **[laoshuikaixue](https://github.com/laoshuikaixue)** 的开源贡献——本项目正是在 [VoiceHub](https://github.com/laoshuikaixue/VoiceHub) 的基础上才得以诞生。
 - 感谢所有上游贡献者，以及 Nuxt、Vue、Drizzle、PostgreSQL、Redis、Cloudflare 等开源生态。
 
-## 赞赏支持（社区版维护者）
+## <a id="赞赏支持社区版维护者" name="赞赏支持社区版维护者"></a>赞赏支持（社区版维护者）
 
 本分支（VoiceHub-Plus）由 [YH-Chen-Eternity](https://github.com/YH-Chen-Eternity) 。
 
@@ -335,7 +363,7 @@ VoiceHub 是一个面向校园的广播站点歌系统（Nuxt 4 全栈应用）�
 
 以下为**原项目 README**（完整保留，未做删改）：
 
-# VoiceHub - 校园广播站点歌系统
+# <a id="voicehub---校园广播站点歌系统" name="voicehub---校园广播站点歌系统"></a>VoiceHub - 校园广播站点歌系统
 
 这是一个使用Nuxt 4全栈框架开发的现代化校园广播站点歌管理系统。系统提供完整的点歌、投票、排期管理、通知推送、数据分析、权限控制和数据库管理功能，支持多角色权限管理和灵活的系统配置。
 
@@ -345,7 +373,7 @@ VoiceHub 是一个面向校园的广播站点歌系统（Nuxt 4 全栈应用）�
 
 </div>
 
-## 项目截图
+## <a id="项目截图" name="项目截图"></a>项目截图
 
 <img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/fef6970e-95eb-4cab-a11f-db4e71fc87b5" />
 <img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/f76e912c-1263-424b-b379-72321de205f7" />
@@ -353,9 +381,9 @@ VoiceHub 是一个面向校园的广播站点歌系统（Nuxt 4 全栈应用）�
 <img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/05472008-57d5-4586-b7ca-572bff8a30ae" />
 <img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/c30f2e5a-4cc8-48cb-aca2-4d41daeaaaf8" />
 
-## 主要功能
+## <a id="主要功能" name="主要功能"></a>主要功能
 
-### 🎵 核心功能
+### <a id="-核心功能" name="-核心功能"></a>🎵 核心功能
 
 - **智能点歌系统**：用户可以点歌或给已有歌曲投票，支持网易云音乐、QQ音乐和哔哩哔哩搜索，可选择期望播出时段
 - **多平台登录支持**：
@@ -377,7 +405,7 @@ VoiceHub 是一个面向校园的广播站点歌系统（Nuxt 4 全栈应用）�
 - **音乐下载功能**：支持管理员下载歌曲到本地，提供多种音质选择和批量下载
 - **歌曲重播功能**：支持用户对已播放过的歌曲发起重播申请，支持查看申请记录和撤回申请
 
-### 👥 用户管理
+### <a id="-用户管理" name="-用户管理"></a>👥 用户管理
 
 - **用户管理**：管理员添加用户，支持按年级班级分类
 - **账户创建方式**：
@@ -393,7 +421,7 @@ VoiceHub 是一个面向校园的广播站点歌系统（Nuxt 4 全栈应用）�
 - **身份关联**：支持将多个 OAuth 身份绑定到同一账户，实现统一登录
 - **黑名单管理**：支持歌曲和艺术家黑名单，自动过滤不当内容
 
-### 📅 排期管理
+### <a id="-排期管理" name="-排期管理"></a>📅 排期管理
 
 - **排期管理**：管理员可以通过拖拽界面进行歌曲排期和顺序管理
 - **排期草稿**：支持保存排期草稿功能，允许管理员分步完成排期安排
@@ -405,7 +433,7 @@ VoiceHub 是一个面向校园的广播站点歌系统（Nuxt 4 全栈应用）�
 - **学期管理**：管理员可设置当前学期，自动关联点歌记录
 - **公开展示**：公开展示歌曲播放排期，按日期分组展示
 
-### 🔔 通知系统
+### <a id="-通知系统" name="-通知系统"></a>🔔 通知系统
 
 - **实时通知**：歌曲被选中、投票和系统通知
 - **通知设置**：用户可自定义通知偏好，支持独立页面设置
@@ -413,23 +441,23 @@ VoiceHub 是一个面向校园的广播站点歌系统（Nuxt 4 全栈应用）�
 - **社交账号绑定**：支持绑定MeoW等账号，同步推送通知到外部平台
 - **验证码验证**：安全的验证码验证机制，支持动态样式反馈
 
-### 💾 数据管理
+### <a id="-数据管理" name="-数据管理"></a>💾 数据管理
 
 - **数据库备份**：完整的数据库备份和恢复功能
 - **数据库重置**：支持安全的数据库重置操作，可选择性保留用户数据或完全重置
 - **文件导入导出**：支持备份文件的上传、下载和管理
 - **数据库自检**：自动数据库验证和修复机制，确保系统稳定性
 
-### 🎨 用户体验
+### <a id="-用户体验" name="-用户体验"></a>🎨 用户体验
 
 - **现代UI**：响应式设计，深色主题，流畅的动画效果
 - **玻璃态设计**：现代化的视觉效果和交互体验
 - **交互反馈**：hover效果，点击反馈，状态变化动画
 - **移动端优化**：适配支持移动设备访问，触摸友好的交互设计
 
-## 技术栈
+## <a id="技术栈" name="技术栈"></a>技术栈
 
-### 前端技术
+### <a id="前端技术" name="前端技术"></a>前端技术
 
 - **Nuxt 4**：Vue.js全栈框架，提供SSR和SPA支持
 - **Vue 3**：响应式前端框架，使用Composition API
@@ -437,7 +465,7 @@ VoiceHub 是一个面向校园的广播站点歌系统（Nuxt 4 全栈应用）�
 - **UNO CSS**：实用优先的CSS框架，响应式设计
 - **Vue Router**：前端路由管理
 
-### 后端技术
+### <a id="后端技术" name="后端技术"></a>后端技术
 
 - **Nuxt Server API**：服务端API路由，支持中间件和认证
 - **Drizzle ORM**：现代化数据库ORM，提供类型安全的数据库操作和高性能查询
@@ -448,7 +476,7 @@ VoiceHub 是一个面向校园的广播站点歌系统（Nuxt 4 全栈应用）�
 - **bcrypt**：密码加密，安全的哈希算法
 - **Multer**：文件上传处理，支持多种存储方式
 
-## 系统架构
+## <a id="系统架构" name="系统架构"></a>系统架构
 
 系统采用了现代化的 Serverless 全栈架构：
 
@@ -459,9 +487,9 @@ VoiceHub 是一个面向校园的广播站点歌系统（Nuxt 4 全栈应用）�
 - **数据读取**：PostgreSQL 是唯一业务数据源，歌曲、排期和用户状态不使用 Redis 缓存
 - **部署**：支持 Vercel、Netlify、EdgeOne 等 Serverless 平台一键部署，并提供 Docker、Linux 一键脚本及飞牛 FnOS (fpk安装包) 等多种部署方式
 
-## 部署指南
+## <a id="部署指南" name="部署指南"></a>部署指南
 
-### 一键部署
+### <a id="一键部署" name="一键部署"></a>一键部署
 
 本项目可以一键部署到Vercel/Netlify/EdgeOne平台：
 
@@ -474,7 +502,7 @@ VoiceHub 是一个面向校园的广播站点歌系统（Nuxt 4 全栈应用）�
 1. `DATABASE_URL`：PostgreSQL数据库连接地址
 2. `JWT_SECRET`：JWT令牌签名密钥
 
-### Linux 服务器部署
+### <a id="linux-服务器部署" name="linux-服务器部署"></a>Linux 服务器部署
 
 本项目提供了针对 Ubuntu/Debian 服务器的一键部署脚本，支持自动安装 Node.js 22、配置环境变量、安装依赖和构建项目。
 
@@ -490,7 +518,7 @@ bash <(curl -sL https://raw.githubusercontent.com/laoshuikaixue/VoiceHub/main/sh
 bash <(curl -sL https://gh-proxy.com/https://raw.githubusercontent.com/laoshuikaixue/VoiceHub/main/sh/main.sh)
 ```
 
-### Docker 部署
+### <a id="docker-部署" name="docker-部署"></a>Docker 部署
 
 VoiceHub 支持通过 Docker 进行容器化部署，提供了多种部署方式。
 
@@ -596,7 +624,7 @@ docker run -d \
   voicehub
 ```
 
-### Podman 部署
+### <a id="podman-部署" name="podman-部署"></a>Podman 部署
 
 Podman 是一个与 Docker 兼容的容器引擎，无需守护进程，支持 rootless 模式（无需 root 权限）。VoiceHub 的 Docker 配置文件可以直接用于 Podman。
 
@@ -612,14 +640,14 @@ podman compose -f docker-compose.yml up -d
 
 Podman 默认以当前用户身份运行，无需 `sudo`，安全性更高。但容易遇到文件权限问题（特别是挂载卷时）。
 
-### 飞牛 (FnOS) 部署
+### <a id="飞牛-fnos-部署" name="飞牛-fnos-部署"></a>飞牛 (FnOS) 部署
 
 VoiceHub 现已支持飞牛 OS (FnOS) 的 `.fpk` 安装包。
 
 - 从 [GitHub Releases](https://github.com/laoshuikaixue/VoiceHub/releases) 获取最新版本（`.fpk` 随 Release 附带）
 - 或从 [GitHub Actions](https://github.com/laoshuikaixue/VoiceHub/actions/workflows/build-fpk.yml) 获取最新版本
 
-### Nix / NixOS
+### <a id="nix--nixos" name="nix--nixos"></a>Nix / NixOS
 
 VoiceHub 提供了一个 Nix flake，用于构建、开发和在 NixOS 上部署。
 
@@ -731,7 +759,7 @@ journalctl -u voicehub -f
 
 默认监听 `0.0.0.0:3000`，可通过 `services.voicehub.host` 和 `services.voicehub.port` 修改。
 
-#### 使用 Binary Cache 加速构建
+#### <a id="使用-binary-cache-加速构建" name="使用-binary-cache-加速构建"></a>使用 Binary Cache 加速构建
 
 VoiceHub CI 会将构建产物推送到 [Cachix](https://cachix.org) binary cache，
 下游用户可直接下载预构建的 `pnpmDeps` 和 `voicehub` 包，跳过本地构建。
@@ -810,7 +838,7 @@ nix run .#build                # 在项目目录中执行，生成 .output 目�
 
 ---
 
-### 本地开发部署
+### <a id="本地开发部署" name="本地开发部署"></a>本地开发部署
 
 #### 前提条件
 
@@ -899,7 +927,7 @@ pnpm run dev
 
 应用将在 http://localhost:3000 启动。
 
-### 生产环境部署
+### <a id="生产环境部署" name="生产环境部署"></a>生产环境部署
 
 1. 构建生产版本
 
@@ -913,7 +941,7 @@ pnpm run build
 pnpm run start
 ```
 
-### 数据库管理命令
+### <a id="数据库管理命令" name="数据库管理命令"></a>数据库管理命令
 
 ```bash
 # 新的数据库初始化
@@ -938,13 +966,13 @@ pnpm run clear-db
 pnpm run safe-migrate
 ```
 
-### 升级与迁移
+### <a id="升级与迁移" name="升级与迁移"></a>升级与迁移
 
 有关如何升级现有部署和迁移数据，请参阅 [升级指南](UPGRADE.md)。
 
-## 系统配置
+## <a id="系统配置" name="系统配置"></a>系统配置
 
-### 站点配置管理
+### <a id="站点配置管理" name="站点配置管理"></a>站点配置管理
 
 VoiceHub 提供了完整的站点配置管理功能，支持通过管理后台动态配置系统参数：
 
@@ -969,7 +997,7 @@ VoiceHub 提供了完整的站点配置管理功能，支持通过管理后台�
 
 > **AstrBot 群事件投递边界**：群事件 push 仅支持常驻部署。合并窗口到期后的冲刷依赖常驻服务的定时任务；Vercel、Netlify 等按请求冻结实例的 Serverless 环境应在 VoiceHub 与 AstrBot 插件两端均选择 pull 模式，由插件主动领取并回执。切换模式前确认旧队列已处理，避免旧模式遗留条目滞留。
 
-### 数据库备份与恢复
+### <a id="数据库备份与恢复" name="数据库备份与恢复"></a>数据库备份与恢复
 
 系统提供了完整的数据备份和恢复解决方案：
 
@@ -985,7 +1013,7 @@ VoiceHub 提供了完整的站点配置管理功能，支持通过管理后台�
 - **替换模式**：完全替换现有数据（谨慎使用）
 - **数据验证**：恢复前自动验证备份文件完整性
 
-### 权限与角色管理
+### <a id="权限与角色管理" name="权限与角色管理"></a>权限与角色管理
 
 VoiceHub 实现了细粒度的权限控制系统：
 
@@ -1015,7 +1043,7 @@ VoiceHub 实现了细粒度的权限控制系统：
 - 后端API进行严格的权限验证
 - 支持页面级和功能级的权限控制
 
-## 环境变量说明
+## <a id="环境变量说明" name="环境变量说明"></a>环境变量说明
 
 | 变量名                 | 必填 | 说明                                                    | 示例值                                                                                                                                          |
 | ---------------------- | ---- | ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -1030,7 +1058,7 @@ VoiceHub 实现了细粒度的权限控制系统：
 | NUXT_PUBLIC_HOST       | 否   | 显式配置站点外部地址后启用内部 API 的 CORS 来源校验；未配置时仅对回环 Host（反向代理常见场景）跳过，云平台公开 Host 仍校验 | `https://your-app.com` |
 | NUXT_PUBLIC_SEO_CONFIG | 否   | 用于自定义 PWA/SEO 配置的 JSON 字符串                   | `{"title":"VoiceHub校园广播站点歌系统","shortName":"校园广播","description":"校园广播站点歌系统 - 让你的声音被听见","logo":"/images/logo.png"}` |
 
-## OAuth 配置
+## <a id="oauth-配置" name="oauth-配置"></a>OAuth 配置
 
 系统支持通过 OAuth 提供商（如 GitHub、Casdoor、Google 等）快速创建账户和登录：
 
@@ -1067,7 +1095,7 @@ OAuth 运行时配置统一保存在管理员后台数据库中；环境变量�
 - 绑定令牌有 10 分钟有效期
 - 支持账户锁定和风险控制
 
-## 项目结构
+## <a id="项目结构" name="项目结构"></a>项目结构
 
 ```
 VoiceHub/
@@ -1909,7 +1937,7 @@ VoiceHub/
 └── vercel.json            # Vercel部署配置
 ```
 
-### 目录说明
+### <a id="目录说明" name="目录说明"></a>目录说明
 
 #### 核心目录 (app/)
 
@@ -1958,7 +1986,7 @@ VoiceHub/
 - **`public/assets/`**: 不随主题切换的公共资源（如 `logo.png`）
 - **`public/themes/{ClassicDark,ClassicLight,ModernLight}/`**: 随主题切换的 SVG 图片资源（Logo、搜索图标、点赞图标）
 
-### 主题系统
+### <a id="主题系统" name="主题系统"></a>主题系统
 
 VoiceHub 采用 CSS 变量驱动的主题架构，支持深色与亮色两种主题模式，包含经典与现代两种设计风格。主题文件按功能模块组织在 `app/assets/css/themes/` 目录下：
 
@@ -2005,9 +2033,9 @@ app/assets/css/themes/
 4. 在 `app/composables/useTheme.ts` 中将新主题 ID 加入 `Theme` 类型和 `THEMES` 数组
 5. 在 `public/themes/` 下创建对应主题的 SVG 图片文件夹（如 `public/themes/ocean/`），**放入与 `ClassicDark/` 和 `ClassicLight/` 相同的 SVG 图片**，否则使用该主题时组件无法加载主题图片。
 
-## 使用说明
+## <a id="使用说明" name="使用说明"></a>使用说明
 
-### 普通用户
+### <a id="普通用户" name="普通用户"></a>普通用户
 
 1. 访问主页，查看当前排期
 2. 注册/登录账号
@@ -2026,7 +2054,7 @@ app/assets/css/themes/
    - 实时切换音质并保持播放进度
 5. 查看通知中心获取歌曲状态更新
 
-### 管理员
+### <a id="管理员" name="管理员"></a>管理员
 
 1. 使用管理员账号登录（账号：admin，密码：创建管理员时通过 `ADMIN_INITIAL_PASSWORD` 设置的初始密码；首次登录需改密）
 2. 进入管理后台，选择相应功能标签
@@ -2083,9 +2111,9 @@ app/assets/css/themes/
     - 实时显示发送进度和结果
     - 通知历史记录和管理
 
-## 数据库管理
+## <a id="数据库管理" name="数据库管理"></a>数据库管理
 
-### Drizzle ORM + Neon Database
+### <a id="drizzle-orm--neon-database" name="drizzle-orm--neon-database"></a>Drizzle ORM + Neon Database
 
 项目使用 Drizzle ORM 作为数据库 ORM，配合 Neon Database 提供现代化的数据库解决方案。
 
@@ -2096,7 +2124,7 @@ app/assets/css/themes/
 - **`app/drizzle/schema.ts`** - 数据库表结构定义（TypeScript 类型安全）
 - **`app/drizzle/migrations/`** - 数据库迁移脚本目录
 
-### 数据库初始化
+### <a id="数据库初始化" name="数据库初始化"></a>数据库初始化
 
 首次部署时，系统会自动初始化数据库结构。
 
@@ -2152,7 +2180,7 @@ pnpm run db:studio
 pnpm run clear-db
 ```
 
-### 数据库备份与恢复
+### <a id="数据库备份与恢复-1" name="数据库备份与恢复-1"></a>数据库备份与恢复
 
 #### 通过管理后台
 
@@ -2184,15 +2212,15 @@ pg_dump -h localhost -U username -d database_name > backup.sql
 psql -h localhost -U username -d database_name < backup.sql
 ```
 
-### 备份文件格式
+### <a id="备份文件格式" name="备份文件格式"></a>备份文件格式
 
 - **完整备份**：包含所有数据表的 JSON 格式文件
 - **用户备份**：仅包含用户相关数据
 - **元数据**：包含创建时间、创建者、表信息等
 
-## 开发指南
+## <a id="开发指南" name="开发指南"></a>开发指南
 
-### 组合式API
+### <a id="组合式api" name="组合式api"></a>组合式API
 
 项目使用了Vue 3的组合式API，主要包括：
 
@@ -2203,14 +2231,14 @@ psql -h localhost -U username -d database_name < backup.sql
 - `useAudioQuality`: 处理音质管理，包括音质设置和持久化
 - `useSemesters`: 处理学期管理，包括创建学期和设置活跃学期
 
-### 添加新功能
+### <a id="添加新功能" name="添加新功能"></a>添加新功能
 
 1. 在 `server/api` 中添加新的API端点
 2. 在 `app/composables` 中添加相应的组合式函数
 3. 在 `app/components` 中创建UI组件
 4. 在 `app/pages` 中整合组件和功能
 
-### 数据库模型修改
+### <a id="数据库模型修改" name="数据库模型修改"></a>数据库模型修改
 
 如需修改数据库模型：
 
@@ -2220,7 +2248,7 @@ psql -h localhost -U username -d database_name < backup.sql
 4. 确保同时更新 `types/index.ts` 中的TypeScript类型定义
 5. 使用Drizzle Studio查看数据库：`pnpm run db:studio`
 
-### 国际化 (i18n)
+### <a id="国际化-i18n" name="国际化-i18n"></a>国际化 (i18n)
 
 VoiceHub 内置一套无第三方依赖的手写国际化方案，支持 `zh-CN`（简体中文）与 `en-US`（English）两种语言。
 
@@ -2265,7 +2293,7 @@ t('title')
 2. 客户端统一用 `useServerErrors().localize(err, fallback)` 展示错误：按 `err.data.code` 命中 `serverErrors` 词典，用 `data.params` 替换 `{0}`/`{1}`，未命中再回退服务端 `message`。
 3. 新增错误码需在**三处同步**：`SERVER_ERROR_CODES`、`zh-CN.ts` 的 `serverErrors`、`en-US.ts` 的 `serverErrors`（键完全对齐）。
 
-### OAuth 平台扩展指南
+### <a id="oauth-平台扩展指南" name="oauth-平台扩展指南"></a>OAuth 平台扩展指南
 
 VoiceHub 采用配置化与策略模式（Strategy Pattern）相结合的灵活 OAuth 扩展机制，所有 OAuth 提供商及认证设置现均已迁移至管理员后台界面。你可以直接在后台动态配置，无需修改环境变量和重启服务。
 
@@ -2465,7 +2493,7 @@ const confirmUnbind = (provider) => {
 
 ---
 
-### 音源扩展开发指南
+### <a id="音源扩展开发指南" name="音源扩展开发指南"></a>音源扩展开发指南
 
 VoiceHub 采用了模块化的音源架构，支持多音源故障转移和动态扩展。开发者可以在后台录入多个 LX Music 或 MusicFree 插件 JavaScript 直链，提高系统的可用性和音乐资源覆盖率。URL、插件参数、启用状态和优先级只保存在数据库，不再读取音源环境变量或本地目录。
 
@@ -2753,7 +2781,7 @@ const transformMusicApiResponse = (response: any): any[] => {
 }
 ```
 
-## 贡献说明
+## <a id="贡献说明" name="贡献说明"></a>贡献说明
 
 如果您希望为 VoiceHub 贡献代码，请注意以下几点，特别是涉及数据库变更时：
 
@@ -2773,22 +2801,22 @@ const transformMusicApiResponse = (response: any): any[] => {
    - 贡献者署名**仅通过 Git 提交历史体现**；维护者在后续修改时会通过 `Co-authored-by:` trailer 保留你的贡献署名。
    - 你保留自己贡献内容的版权，但请在提交 PR 前移除文件中的个人版权注释行，否则该 PR 无法按当前形式合并。
 
-## 音乐服务免责声明
+## <a id="音乐服务免责声明" name="音乐服务免责声明"></a>音乐服务免责声明
 
 VoiceHub 是一款开源的校园广播站点歌管理系统。本软件遵循 GPLv3 协议开源，但请注意在使用过程中涉及的第三方服务和内容可能受相关法律法规限制。
 
-### 关于音乐内容与版权
+### <a id="关于音乐内容与版权" name="关于音乐内容与版权"></a>关于音乐内容与版权
 
 - 本系统**不存储任何音乐文件**，不拥有任何音乐的版权；
 - 所有音乐资源、播放及下载链接均来自**第三方音乐平台 API**；
 - 音乐内容的版权、著作权归相应版权方及音乐平台所有。
 
-### 关于功能说明
+### <a id="关于功能说明" name="关于功能说明"></a>关于功能说明
 
 - 本系统提供**音乐搜索、播放链接获取、音乐下载辅助**功能；
 - 系统仅做接口调用与工具呈现，不生产、不篡改音乐内容。
 
-### 法律与责任声明
+### <a id="法律与责任声明" name="法律与责任声明"></a>法律与责任声明
 
 - 用户使用本系统进行播放、下载等行为，**须自行遵守所在地区版权法律法规及第三方平台服务协议**；
 - 用户需自行确保对本系统的使用不侵犯第三方权益（如音乐版权方、API提供方等），特别是涉及商业用途时，请务必确认是否获得相应授权；
@@ -2797,15 +2825,15 @@ VoiceHub 是一款开源的校园广播站点歌管理系统。本软件遵循 G
 
 用户使用本系统即表示已阅读、理解并同意以上条款。
 
-## 隐私说明与遥测
+## <a id="隐私说明与遥测" name="隐私说明与遥测"></a>隐私说明与遥测
 
 VoiceHub 内置可选的错误遥测功能，用于帮助开发者快速定位和修复系统问题。
 
-### 遥测默认状态
+### <a id="遥测默认状态" name="遥测默认状态"></a>遥测默认状态
 
 - 遥测功能**默认开启**，但**可在管理员后台随时关闭**（站点配置 → 启用错误追踪与遥测）
 
-### 收集的数据范围
+### <a id="收集的数据范围" name="收集的数据范围"></a>收集的数据范围
 
 系统通过 Sentry 仅收集以下**技术性信息**（不涉及任何个人隐私）：
 
@@ -2816,32 +2844,32 @@ VoiceHub 内置可选的错误遥测功能，用于帮助开发者快速定位�
 - **运行时环境**：运行平台（Vercel/Netlify/自托管）、Node.js 版本、Nitro 预设
 - **前端组件名称**：出错的 Vue 组件名称（仅用于定位前端问题）
 
-### 安全保障
+### <a id="安全保障" name="安全保障"></a>安全保障
 
 - 所有 HTTP 4xx 业务错误（如认证失败、权限不足）**自动忽略**，不会上报 Sentry
 - 前端网络离线状态和浏览器扩展产生的错误**自动过滤**
 - 数据通过加密通道传输至 Sentry
 - 遥测开关变更即时生效，无需重启服务
 
-### 数据接收方
+### <a id="数据接收方" name="数据接收方"></a>数据接收方
 
 错误数据由 [Sentry](https://sentry.io/) 处理，仅用于错误排查与系统稳定性改进。
 
-## 致谢
+## <a id="致谢-1" name="致谢-1"></a>致谢
 
-### UI设计
+### <a id="ui设计" name="ui设计"></a>UI设计
 
 特别感谢 [过客是个铁憨憨](https://github.com/1811304592) 为本项目提供首页UI样式设计
 
 感谢 [Awesome Iwb](https://github.com/awesome-iwb) 项目提供的统一遮罩风格的图标
 
-### 贡献者
+### <a id="贡献者" name="贡献者"></a>贡献者
 
 Thanks goes to these wonderful people:
 
 [![Contributors](https://contrib.rocks/image?repo=laoshuikaixue/VoiceHub&repo=laoshuikaixue/VoiceHub-docs&repo=laoshuikaixue/VoiceHub-hmos)](https://github.com/laoshuikaixue/VoiceHub/graphs/contributors)
 
-### 参考项目
+### <a id="参考项目" name="参考项目"></a>参考项目
 
 本项目在开发过程中参考和使用了以下优秀的开源项目和API服务：
 
@@ -2859,11 +2887,11 @@ Thanks goes to these wonderful people:
 - [MusicAPI-rrvenn](https://music.rrvenn.cn)
 - [qq-music-api](https://github.com/sansenjian/qq-music-api) (QQ音乐歌词获取参考)
 
-## 许可证
+## <a id="许可证" name="许可证"></a>许可证
 
 [GPL-3.0](LICENSE)
 
-## Star History
+## <a id="star-history" name="star-history"></a>Star History
 
 <a href="https://www.star-history.com/?repos=laoshuikaixue%2FVoiceHub&type=date&legend=top-left">
  <picture>
@@ -2873,7 +2901,7 @@ Thanks goes to these wonderful people:
  </picture>
 </a>
 
-## 其他
+## <a id="其他" name="其他"></a>其他
 
 本项目有对应的原生鸿蒙版本：https://github.com/laoshuikaixue/VoiceHub-hmos
 
