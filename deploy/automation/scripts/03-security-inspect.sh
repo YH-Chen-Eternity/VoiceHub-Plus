@@ -74,10 +74,11 @@ done
 f2b=$(fail2ban-client status sshd 2>/dev/null | grep -oP 'Currently banned:\s+\K\d+' || echo "?")
 info "fail2ban 当前封禁 SSH 爆破 IP: ${f2b}"
 echo "--- 网络暴露面 ---"
-# 基线：仅 SSH 高位端口与 Cloudflare 回源 HTTP/HTTPS 允许监听公网。
+# 基线：仅 SSH 端口与 Cloudflare 回源 HTTP/HTTPS 允许监听公网。
 # 应用、rewriter、数据库、缓存只监听 127.0.0.1，不应出现在公网监听列表里；
 # 白名单保持最小集，任何新增的公网监听端口都应被判为异常，不得把测试/内部端口加进来。
-EXPECTED=${VH_EXPECTED_PORTS:-22222|80|443}
+# 未显式配置时回退到标准 SSH 端口 22；自定义端口须通过 VH_EXPECTED_PORTS 指定。
+EXPECTED="${VH_EXPECTED_PORTS:-22|80|443}"
 ports=$(ss -lntp 2>/dev/null | awk 'NR>1{print $4}' | grep -E '^(0\.0\.0\.0|\[::\]|\*):' | sed -E 's/.*:([0-9]+)$/\1/' | sort -un)
 listed=$(printf '%s\n' "$ports" | paste -sd, - | sed 's/^$/无/')
 extra=$(printf '%s\n' "$ports" | grep -vE "^($EXPECTED)$" | grep -c . || true)
