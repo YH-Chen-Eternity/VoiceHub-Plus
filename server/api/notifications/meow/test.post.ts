@@ -2,7 +2,6 @@ import { createError, defineEventHandler } from 'h3'
 import { db } from '~/drizzle/db'
 import { users } from '~/drizzle/schema'
 import { eq } from 'drizzle-orm'
-import { sendMeowNotification } from '~~/server/services/meowNotificationService'
 
 export default defineEventHandler(async (event) => {
   try {
@@ -47,12 +46,28 @@ export default defineEventHandler(async (event) => {
     const message = `这是来自 VoiceHub 的测试通知！您的账号 ${userData.username} 已成功绑定 MeoW。`
     const title = 'VoiceHub 测试通知'
 
-    const result = await sendMeowNotification(userData.meowNickname, title, message)
+    const meowUrl = `https://api.chuckfang.com/${encodeURIComponent(userData.meowNickname)}/${encodeURIComponent(title)}/${encodeURIComponent(message)}`
 
-    if (!result.ok) {
+    const response = await fetch(meowUrl, {
+      method: 'GET',
+      headers: {
+        'User-Agent': 'VoiceHub/1.0'
+      }
+    })
+
+    if (!response.ok) {
       throw createError({
         statusCode: 500,
-        message: result.msg || '发送测试通知失败'
+        message: '发送测试通知失败'
+      })
+    }
+
+    const result = await response.json()
+
+    if (result.status !== 200) {
+      throw createError({
+        statusCode: 500,
+        message: result.message || '发送测试通知失败'
       })
     }
 

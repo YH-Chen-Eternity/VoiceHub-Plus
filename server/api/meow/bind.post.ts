@@ -4,7 +4,6 @@ import { db } from '~/drizzle/db'
 import { users } from '~/drizzle/schema'
 import { and, eq, ne } from 'drizzle-orm'
 import { getServerTimestamp } from '~~/server/utils/serverTime'
-import { sendMeowNotification } from '~~/server/services/meowNotificationService'
 import {
   delStore,
   delStoreIfValue,
@@ -179,10 +178,24 @@ export default defineEventHandler(async (event) => {
       const title = 'VoiceHub 账号绑定'
 
       try {
-        const result = await sendMeowNotification(meowId, title, message)
+        // 使用 GET 请求发送验证码
+        const meowUrl = `https://api.chuckfang.com/${encodeURIComponent(meowId)}/${encodeURIComponent(title)}/${encodeURIComponent(message)}`
 
-        if (!result.ok) {
-          throw new Error(result.msg || '发送失败')
+        const response = await fetch(meowUrl, {
+          method: 'GET',
+          headers: {
+            'User-Agent': 'VoiceHub/1.0'
+          }
+        })
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`)
+        }
+
+        const result = await response.json()
+
+        if (result.status !== 200) {
+          throw new Error(result.message || '发送失败')
         }
 
         return {
