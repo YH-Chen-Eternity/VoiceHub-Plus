@@ -22,7 +22,7 @@ jobs:
       security-events: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: 初始化 CodeQL
         uses: github/codeql-action/init@v4

@@ -34,7 +34,7 @@ jobs:
 
     steps:
       - name: 检出触发代码
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ env.CHECKOUT_REF }}
           fetch-depth: 0
