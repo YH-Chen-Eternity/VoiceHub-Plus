@@ -348,7 +348,9 @@ jobs:
             let used = 0, ctxUsed = 0, truncated = false;
             let fullOk = 0, focused = 0, ctxTruncated = false;
             for (const f of files) {
-              if (f.status === 'removed' || SKIP.test(f.filename)) { skipped++; continue; }
+              // 按体积/状态跳过的文件已在上方共用读取循环计入 skipped，此处不重复累加，
+              // 否则日志与评论会出现「送审 2/3 · 跳过 2」这类自相矛盾的口径。
+              if (f.status === 'removed' || SKIP.test(f.filename)) { continue; }
               const patch = (f.patch || '').slice(0, 4000);
               if (!patch) { skipped++; continue; }
               if (liteChunks.length >= MAX_FILES) { truncated = true; break; }
