@@ -52,12 +52,12 @@
           <div class="mobile-tab-actions">
             <select
               v-model="sortBy"
-              aria-label="歌曲排序方式"
+              :aria-label="locale.sortLabel"
               class="song-sort-select"
-              title="歌曲排序方式"
+              :title="locale.sortLabel"
             >
-              <option value="popularity">按热度</option>
-              <option value="date">按投稿时间</option>
+              <option value="popularity">{{ locale.sortPopularity }}</option>
+              <option value="date">{{ locale.sortDate }}</option>
             </select>
 
             <!-- 学期选择器 -->
@@ -176,12 +176,12 @@
 
           <select
             v-model="sortBy"
-            aria-label="歌曲排序方式"
+            :aria-label="locale.sortLabel"
             class="song-sort-select"
-            title="歌曲排序方式"
+            :title="locale.sortLabel"
           >
-            <option value="popularity">按热度</option>
-            <option value="date">按投稿时间</option>
+            <option value="popularity">{{ locale.sortPopularity }}</option>
+            <option value="date">{{ locale.sortDate }}</option>
           </select>
 
           <!-- 学期选择器 -->
@@ -643,7 +643,6 @@ const locale = computed(() => {
 })
 const { t: callLocale } = useLocaleText(locale)
 const sortBy = ref('popularity')
-const sortOrder = ref('desc') // 'desc' for newest first, 'asc' for oldest first
 const searchQuery = ref('') // 搜索查询
 const activeTab = ref('all') // 默认显示全部投稿
 const auth = useAuth()
@@ -939,7 +938,7 @@ const displayedSongs = computed(() => {
       return songs.sort((a, b) => {
         const dateA = new Date(a.createdAt)
         const dateB = new Date(b.createdAt)
-        return sortOrder.value === 'desc' ? dateB - dateA : dateA - dateB
+        return dateB - dateA // 按投稿时间降序（最新在前）
       })
     }
     return songs
@@ -2741,7 +2740,8 @@ button:disabled {
 
   .song-sort-select {
     min-height: 40px;
-    max-width: 116px;
+    min-width: 116px;
+    max-width: 160px;
     padding-left: 8px;
     padding-right: 22px;
     border-radius: 12px;

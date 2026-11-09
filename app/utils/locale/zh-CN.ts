@@ -2051,6 +2051,9 @@ export const pages = {
     songList: {
       mobileSearchPlaceholder: '搜索点播记录...',
       searchPlaceholder: '输入想要搜索的歌曲',
+      sortLabel: '歌曲排序方式',
+      sortPopularity: '按热度',
+      sortDate: '按投稿时间',
       tabs: {
         all: '全部投稿',
         mine: '我的投稿',

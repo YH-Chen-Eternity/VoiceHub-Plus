@@ -2094,6 +2094,9 @@ export const pages = {
     songList: {
       mobileSearchPlaceholder: 'Search requests...',
       searchPlaceholder: 'Search songs',
+      sortLabel: 'Sort songs by',
+      sortPopularity: 'By popularity',
+      sortDate: 'By submission time',
       tabs: {
         all: 'All Requests',
         mine: 'My Requests',
