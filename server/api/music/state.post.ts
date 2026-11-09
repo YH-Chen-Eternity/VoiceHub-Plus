@@ -23,10 +23,6 @@ const optionalInt = (value: unknown): number | undefined => {
 }
 
 export default defineEventHandler(async (event) => {
-  // serverless 下客户端不会建立 SSE 连接（服务端已 410 拦截），广播只在内存内、必然无接收方，直接空操作
-  if (isServerlessRuntime()) {
-    return { success: true, noop: true }
-  }
   try {
     const limit = await checkDistributedRateLimit(
       `music_state:${getClientIP(event)}`,

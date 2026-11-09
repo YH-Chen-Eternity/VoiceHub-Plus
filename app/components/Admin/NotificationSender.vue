@@ -7,7 +7,7 @@
       </div>
     </div>
 
-    <div v-if="canSend" class="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
       <!-- 左侧：编辑区 -->
       <div class="lg:col-span-7 space-y-6">
         <div class="bg-bg-secondary-30 border border-border-secondary rounded-[2rem] p-8 shadow-xl">
@@ -542,17 +542,14 @@ import CustomSelect from '~/components/UI/Common/CustomSelect.vue'
 import Icon from '~/components/UI/Icon.vue'
 import NotificationHistory from '~/components/Admin/NotificationHistory.vue'
 import { useAuth } from '~/composables/useAuth'
-import { usePermissions } from '~/composables/usePermissions'
 import { useAdmin } from '~/composables/useAdmin'
+import { useUserFilters } from '~/composables/useUserFilters'
 import { useLocale } from '~/utils/locale'
 import { renderMarkdown } from '~/utils/markdown'
 
-const { user: authUser, getAuthConfig } = useAuth()
-const { can } = usePermissions()
-const canSend = computed(() => can('notifications:write'))
+const { user: authUser, isAdmin, getAuthConfig } = useAuth()
 const { sendAdminNotification } = useAdmin()
-const recipientClasses = ref([])
-const { localize: localizeServerError } = useServerErrors()
+const userFilters = useUserFilters()
 const { admin } = useLocale()
 const locale = computed(() => admin.value?.notificationSender || {})
 const { msg: getLocaleMessage, nested: getNestedMessage } = useLocaleText(locale)
@@ -563,18 +560,12 @@ const previewSenderName = computed(
     locale.value.previewSender
 )
 
-onMounted(async () => {
-  if (!canSend.value) return
-  try {
-    const response = await $fetch('/api/auth/grade-class-options')
-    recipientClasses.value = response.classes || []
-  } catch (err) {
-    error.value = localizeServerError(err)
-  }
+onMounted(() => {
+  userFilters.fetchOptions()
 })
 
 const gradeOptions = computed(() => {
-  return [...new Set(recipientClasses.value.map(item => item.grade))].map(g => ({ label: g, value: g }))
+  return userFilters.getAvailableGrades().map(g => ({ label: g, value: g }))
 })
 
 // 表单数据
@@ -598,12 +589,12 @@ const multiClassForm = ref({
 })
 
 const classOptionsForClassScope = computed(() => {
-  const classes = recipientClasses.value.filter(item => item.grade === form.value.classGrade).map(item => item.class)
+  const classes = userFilters.getAvailableClasses(undefined, form.value.classGrade)
   return classes.map(c => ({ label: c, value: c }))
 })
 
 const classOptionsForMultiClassScope = computed(() => {
-  const classes = recipientClasses.value.filter(item => item.grade === multiClassForm.value.grade).map(item => item.class)
+  const classes = userFilters.getAvailableClasses(undefined, multiClassForm.value.grade)
   return classes.map(c => ({ label: c, value: c }))
 })
 
@@ -687,16 +678,17 @@ const searchUsers = async (query) => {
 
   try {
     userSearchLoading.value = true
-    const response = await $fetch('/api/admin/recipients', {
+    const response = await $fetch('/api/admin/users', {
       method: 'GET',
       query: {
-        q: query
+        search: query,
+        limit: 20
       },
       ...getAuthConfig()
     })
 
     if (response.success) {
-      userSearchResults.value = response.data || []
+      userSearchResults.value = response.users || []
       showUserSearchResults.value = true
     }
   } catch (err) {
@@ -805,7 +797,7 @@ const scopeDescription = computed(() => {
 
 // 发送通知
 const sendNotification = async () => {
-  if (!canSend.value) {
+  if (!isAdmin.value) {
     error.value = getNestedMessage('errors', 'adminOnly')
     return
   }

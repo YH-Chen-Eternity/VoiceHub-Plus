@@ -29,8 +29,8 @@ Modified by YH-Chen on 2026-10-17
         </button>
         <button
           v-if="selected"
-          class="flex items-center gap-2 px-6 py-2 bg-primary-hover hover:bg-primary text-text-primary text-[11px] font-bold rounded-xl shadow-lg shadow-[var(--primary-glow)] transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
-          :disabled="(saving) || !can('email-templates:write')"
+          class="flex items-center gap-2 px-6 py-2 bg-primary-hover hover:bg-primary text-text-primary text-[11px] font-bold rounded-xl shadow-lg shadow-[var(--primary-glow)] transition-all active:scale-95"
+          :disabled="saving"
           @click="save"
         >
           <Save :size="14" /> {{ saving ? locale.saving : locale.updateTemplate }}
@@ -163,9 +163,9 @@ Modified by YH-Chen on 2026-10-17
                     >Handlebars</span
                   >
                 </div>
-                <button :disabled="!can('email-templates:delete')"
+                <button
                   v-if="selected.isOverridden"
-                  class="flex items-center gap-1.5 text-[10px] font-bold text-error hover:text-error transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  class="flex items-center gap-1.5 text-[10px] font-bold text-error hover:text-error transition-colors"
                   @click="restore"
                 >
                   <RotateCcw :size="12" /> {{ locale.restoreDefault }}
@@ -232,8 +232,7 @@ Modified by YH-Chen on 2026-10-17
   </div>
 </template>
 
-<script setup>
-import { usePermissions } from '~/composables/usePermissions'
+<script lang="ts" setup>
 import { computed, onMounted, ref } from 'vue'
 import { useToast } from '~/composables/useToast'
 import { useLocale } from '~/utils/locale'
@@ -250,7 +249,6 @@ type TemplateItem = {
 }
 
 const { success, error } = useToast()
-const { localize } = useServerErrors()
 const { admin } = useLocale()
 const locale = computed(() => {
   const base = admin.value?.emailTemplateManager || {}
@@ -260,7 +258,7 @@ const locale = computed(() => {
     errors: { ...(base.errors || {}) }
   }
 })
-const getLocaleText = (section, key, fallback = '') => {
+const getLocaleText = (section: string, key: string, fallback = '') => {
   return locale.value?.[section]?.[key] || fallback
 }
 const templates = ref<TemplateItem[]>([])
@@ -273,8 +271,8 @@ const form = ref<{ key: string; name: string; subject: string; html: string }>({
   html: ''
 })
 const saving = ref(false)
-const previewHtml = ref('')
-const previewSubject = ref('')
+const previewHtml = ref<string>('')
+const previewSubject = ref<string>('')
 
 const selected = computed(() => templates.value.find((t) => t.key === selectedKey.value))
 
@@ -341,9 +339,9 @@ const PREVIEW_SAMPLES: Record<string, Record<string, any>> = {
 }
 
 async function loadList() {
-  const res = await $fetch('/api/admin/email-templates')
+  const res: any = await $fetch('/api/admin/email-templates')
   const list = Array.isArray(res?.templates) ? res.templates : []
-  templates.value = list.map((t) => ({
+  templates.value = list.map((t: any) => ({
     key: String(t.key),
     name: String(t.name),
     subject: String(t.subject),
@@ -355,7 +353,7 @@ async function loadList() {
   if (!selectedKey.value && templates.value.length) select(templates.value[0])
 }
 
-function select(t) {
+function select(t: TemplateItem) {
   selectedKey.value = t.key
   form.value = { key: t.key, name: t.name, subject: t.subject, html: t.html }
   previewHtml.value = ''
@@ -363,21 +361,19 @@ function select(t) {
 }
 
 async function save() {
-  if (!can('email-templates:write')) return
   try {
     saving.value = true
     await $fetch('/api/admin/email-templates', { method: 'POST', body: form.value })
     success(getLocaleText('messages', 'saved', '模板已保存'))
     await loadList()
-  } catch (e) {
-    error(localize(e, getLocaleText('errors', 'saveFailed', '保存失败')))
+  } catch (e: any) {
+    error(e?.data?.message || getLocaleText('errors', 'saveFailed', '保存失败'))
   } finally {
     saving.value = false
   }
 }
 
 async function restore() {
-  if (!can('email-templates:delete')) return
   try {
     saving.value = true
     await $fetch(`/api/admin/email-templates?key=${encodeURIComponent(form.value.key)}`, {
@@ -385,8 +381,8 @@ async function restore() {
     })
     success(getLocaleText('messages', 'restored', '已恢复默认模板'))
     await loadList()
-  } catch (e) {
-    error(localize(e, getLocaleText('errors', 'restoreFailed', '恢复失败')))
+  } catch (e: any) {
+    error(e?.data?.message || getLocaleText('errors', 'restoreFailed', '恢复失败'))
   } finally {
     saving.value = false
   }
@@ -414,13 +410,13 @@ async function doPreview() {
     })
     previewHtml.value = res.html
     previewSubject.value = res.subject
-  } catch (e) {
-    error(localize(e, getLocaleText('errors', 'previewFailed', '预览失败')))
+  } catch (e: any) {
+    error(e?.data?.message || getLocaleText('errors', 'previewFailed', '预览失败'))
   }
 }
 
 onMounted(() => {
-  loadList().catch(err => error(localize(err)))
+  loadList()
 })
 </script>
 

@@ -4,7 +4,6 @@
 import wasm from 'vite-plugin-wasm'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'url'
-import { isServerlessRuntime } from './server/utils/serverless-runtime'
 
 // 解析自定义 SEO 和 PWA 配置
 let customSeoConfig: { title?: string; shortName?: string; description?: string; logo?: string } =
@@ -77,21 +76,6 @@ const absoluteLogo =
 // https://nuxt.com/docs/api/configuration/nuxt-config
 export default defineNuxtConfig({
   compatibilityDate: '2026-01-30',
-  // 注册全局错误处理器：nitro 2.x 的错误处理链是数组，直接配置 nitro.errorHandler
-  // 会把 Nuxt 错误页处理器挤出链外（HTML 错误页回归），因此通过 nitro:init 钩子
-  // 把 server/error.ts unshift 到链首，链变为：
-  //   [server/error.ts, Nuxt 错误页处理器, nitro 默认处理器]
-  hooks: {
-    'nitro:init'(nitro) {
-      const handlers = Array.isArray(nitro.options.errorHandler)
-        ? nitro.options.errorHandler
-        : nitro.options.errorHandler
-          ? [nitro.options.errorHandler]
-          : []
-      handlers.unshift(fileURLToPath(new URL('./server/error.ts', import.meta.url)).replaceAll('\\', '/'))
-      nitro.options.errorHandler = handlers
-    }
-  },
   future: {
     compatibilityVersion: 4
   },
@@ -128,8 +112,6 @@ export default defineNuxtConfig({
         'primary-light': 'var(--primary-light)',
         'primary-border': 'var(--primary-border)',
         // === 语义色 ===
-        // 注意：success/warning/error 及其 hover/light 变体在下方 colorXXX 段定义，
-        // 此处仅保留未被覆盖的 border 变体，避免重复键静默覆盖。
         'success-border': 'var(--success-border)',
         'warning-border': 'var(--warning-border)',
         'error-border': 'var(--error-border)',
@@ -622,8 +604,6 @@ export default defineNuxtConfig({
       siteLogo,
       siteDescription,
       isNetlify: process.env.NETLIFY === 'true',
-      // serverless 部署探测：客户端据此跳过 SSE 长连接与高频状态上报
-      isServerless: isServerlessRuntime(),
       sentry: {
         dsn: process.env.NUXT_PUBLIC_SENTRY_DSN || frontendSentryDsnDefault,
         environment:
@@ -877,7 +857,7 @@ export default defineNuxtConfig({
       ? {
           vercel: {
             functions: {
-              maxDuration: 30
+              maxDuration: 60
             }
           }
         }

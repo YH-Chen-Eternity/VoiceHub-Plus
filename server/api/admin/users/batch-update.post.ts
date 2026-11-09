@@ -1,13 +1,5 @@
-import {
-  assertAccountPermissionExpansion,
-  assertProtectedCodesAfterAccountChange,
-  assertSuperAdminCountAfterAccountChange,
-  withPermissionTransaction
-} from '~~/server/utils/permission-admin'
-import { createApiError } from '~~/server/utils/apiError'
-import { recordAdminAudit } from '~~/server/utils/admin-audit'
-import { SERVER_ERROR_CODES } from '~~/server/config/constants'
-import { getServerDate } from '~~/server/utils/serverTime'
+/* Modified by YH-Chen-Eternity on 2026-10-23 */
+
 import { z } from 'zod'
 import { db } from '~/drizzle/db'
 import { users, userStatusLogs } from '~/drizzle/schema'
@@ -34,6 +26,21 @@ export default defineEventHandler(async (event) => {
   try {
     // 使用认证中间件提供的用户信息
     const currentUser = event.context.user
+
+    if (!currentUser) {
+      throw createError({
+        statusCode: 401,
+        message: 'Authentication required'
+      })
+    }
+
+    // 检查权限 - 只有管理员和超级管理员可以执行批量更新
+    if (!['ADMIN', 'SUPER_ADMIN'].includes(currentUser.role)) {
+      throw createError({
+        statusCode: 403,
+        message: 'Insufficient permissions'
+      })
+    }
 
     // 验证请求体
     const body = await readBody(event)
@@ -157,7 +164,7 @@ export default defineEventHandler(async (event) => {
           const currentUserStatus = existingUsers.find((u) => u.id === update.userId)?.status
           if (update.status !== currentUserStatus) {
             updateData.status = update.status
-            updateData.statusChangedAt = getServerDate()
+            updateData.statusChangedAt = new Date()
             updateData.statusChangedBy = currentUser.id
           }
         }
@@ -170,54 +177,7 @@ export default defineEventHandler(async (event) => {
         let updatedUser
 
         // 使用事务确保更新和日志记录的原子性
-        await withPermissionTransaction(event, async (tx, templates) => {
-          const [freshTarget] = await tx
-            .select()
-            .from(users)
-            .where(eq(users.id, update.userId))
-            .limit(1)
-            .for('update')
-          if (
-            !freshTarget ||
-            freshTarget.id === 1 ||
-            freshTarget.id === currentUser.id ||
-            (freshTarget.role === 'SUPER_ADMIN' && currentUser.role !== 'SUPER_ADMIN')
-          ) {
-            throw createApiError(
-              403,
-              SERVER_ERROR_CODES.COMMON_INSUFFICIENT_PERMISSION,
-              '不能修改此账户'
-            )
-          }
-          if (updateData.status === 'active' && freshTarget.status === 'pending') {
-            throw createApiError(
-              400,
-              SERVER_ERROR_CODES.USER_NOT_PENDING,
-              '待审核用户需通过注册审核流程处理'
-            )
-          }
-          if (updateData.status) {
-            const nextState = { ...freshTarget, status: updateData.status }
-            assertAccountPermissionExpansion(
-              freshTarget,
-              nextState,
-              templates,
-              currentUser.perms ?? []
-            )
-            await assertProtectedCodesAfterAccountChange(
-              freshTarget.id,
-              updateData.status === 'active' ? nextState : null,
-              currentUser.id,
-              tx,
-              templates
-            )
-            // 停用超管同样不得让活跃超管归零
-            await assertSuperAdminCountAfterAccountChange(
-              freshTarget.id,
-              updateData.status === 'active' ? nextState : null,
-              tx
-            )
-          }
+        await db.transaction(async (tx) => {
           // 更新用户信息
           const updatedUserResult = await tx
             .update(users)
@@ -236,14 +196,14 @@ export default defineEventHandler(async (event) => {
 
           // 记录状态变更日志
           if (updateData.status) {
-            const currentUserStatus = freshTarget.status
+            const currentUserStatus = existingUsers.find((u) => u.id === update.userId)?.status
             await tx.insert(userStatusLogs).values({
               userId: update.userId,
               oldStatus: currentUserStatus,
               newStatus: updateData.status,
               reason: `管理员${currentUser.name || currentUser.username}批量更新用户状态`,
               operatorId: currentUser.id,
-              createdAt: getServerDate()
+              createdAt: new Date()
             })
           }
         })
@@ -276,18 +236,6 @@ export default defineEventHandler(async (event) => {
     // 如果有部分失败，调整消息
     if (errors.length > 0) {
       response.message = `批量更新部分完成，成功更新 ${updateResults.length} 个用户，${errors.length} 个用户更新失败`
-    }
-
-    if (updateResults.length > 0) {
-      await recordAdminAudit(event, 'user.batch-update', {
-        targetType: 'user',
-        targetId: `batch:${updateResults.length}`,
-        summary: {
-          success: updateResults.length,
-          failed: errors.length,
-          fields: [...new Set(updates.flatMap((update: any) => Object.keys(update).filter((key) => key !== 'userId')))]
-        }
-      })
     }
 
     return response

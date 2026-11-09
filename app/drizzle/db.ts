@@ -122,14 +122,9 @@ export async function testConnection() {
   }
 }
 
-// postgres.js 的 Sql 上不暴露任何状态属性（client.ended 恒为 undefined），
-// end() 之后实例会永久拒绝新查询（CONNECTION_ENDED），只能用本地标记跟踪
-let clientEnded = false;
-
 // 获取数据库连接状态
 export function getConnectionStatus() {
   const isConnected = !(client as any).ended;
-  const isConnected = !clientEnded;
 
   return {
     isConnected,

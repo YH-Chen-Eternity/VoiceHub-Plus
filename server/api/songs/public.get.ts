@@ -1,4 +1,6 @@
-import { hasAdminPermission } from '~~/app/utils/admin-permissions'
+/* Modified by YH-Chen-Eternity on 2026-10-23 */
+
+// Modified by YH-Chen on 2026-10-17
 import { createError, defineEventHandler, getQuery } from 'h3'
 import { client } from '~/drizzle/db'
 import { formatDateTime, getBeijingTimeISOString } from '~/utils/timeUtils'
@@ -11,7 +13,6 @@ import { maskPublicScheduleData,
 } from '../../utils/studentMask'
 import { verifyUserAuth } from '../../utils/auth'
 import { formatDisambiguatedName, NAME_DISAMBIGUATION_CTES } from '~~/server/utils/userDisplayName'
-import { parseScheduleDateQuery } from '~~/server/utils/schedule-date-query'
 
 const isSchemaCompatibilityError = (error: unknown) => {
   const value = error as { code?: string; cause?: { code?: string } } | null
@@ -20,13 +21,7 @@ const isSchemaCompatibilityError = (error: unknown) => {
 }
 
 // 可选迁移尚未完成时，只依赖初始表结构返回基础排期，避免首页整体不可用。
-const loadBasicSchedules = async (
-  client: any,
-  semester: string,
-  user: any,
-  isAdmin: boolean,
-  dateRange: ReturnType<typeof parseScheduleDateQuery>
-) => {
+const loadBasicSchedules = async (client: any, semester: string, user: any, isAdmin: boolean) => {
   const params: any[] = []
   const conditions: string[] = []
   const scheduleDraftColumn = await client.unsafe(`
@@ -40,10 +35,6 @@ const loadBasicSchedules = async (
   if (scheduleDraftColumn.length > 0) conditions.push('sch."isDraft" = false')
   if (semester) conditions.push('s.semester = $1')
   if (semester) params.push(semester)
-  if (dateRange) {
-    conditions.push(`sch."playDate" >= $${params.length + 1}`, `sch."playDate" < $${params.length + 2}`)
-    params.push(dateRange.startOfDay.toISOString(), dateRange.endOfDay.toISOString())
-  }
   const rows = await client.unsafe(`
     SELECT
       sch.id,
@@ -130,18 +121,17 @@ const loadBasicSchedules = async (
 }
 
 export default defineEventHandler(async (event) => {
-  const query = getQuery(event)
-  const dateRange = parseScheduleDateQuery(query.date)
   let authenticatedUser: any = null
   let authenticatedIsAdmin = false
   try {
+    const query = getQuery(event)
     const semester = String(query.semester || '').trim()
 
     const authResult = event.context.authRejected
       ? { success: false, user: null }
       : await verifyUserAuth(event)
     const user = authResult.success ? authResult.user : null
-    const isAdmin = Boolean(user && hasAdminPermission(user, 'schedule:read'))
+    const isAdmin = Boolean(user && ['ADMIN', 'SUPER_ADMIN', 'SONG_ADMIN'].includes(user.role))
     authenticatedUser = user
     authenticatedIsAdmin = isAdmin
 
@@ -161,10 +151,6 @@ export default defineEventHandler(async (event) => {
     const beforeEnabled = scheduleRangeResult[0]?.scheduleDaysBeforeEnabled === true
     const afterEnabled = scheduleRangeResult[0]?.scheduleDaysAfterEnabled === true
     let dateRangeCondition = ''
-    if (dateRange) {
-      dateRangeCondition += ` AND sch."playDate" >= $${params.length + 1} AND sch."playDate" < $${params.length + 2}`
-      params.push(dateRange.startOfDay.toISOString(), dateRange.endOfDay.toISOString())
-    }
     if (!isAdmin && (beforeEnabled || afterEnabled)) {
       const today = new Date(`${getBeijingTimeISOString().slice(0, 10)}T00:00:00.000Z`)
       if (beforeEnabled) {
@@ -456,8 +442,8 @@ export default defineEventHandler(async (event) => {
     if (shouldHideStudentInfo && !isAdmin) {
       maskPublicScheduleData(formattedSchedules)
     }
-    // 逐条匿名：匿名投稿对所有非管理员统一把投稿人展示为「匿名投稿」
-    applySubmissionAnonymityToSchedules(formattedSchedules, { id: user?.id ?? null, isAdmin, event })
+    // 逐条匿名：匿名投稿对所有非管理员统一显示「匿名投稿」
+    applySubmissionAnonymityToSchedules(formattedSchedules, { id: user?.id ?? null, isAdmin })
     if (!user) {
       stripAnonymousSongIdentifiersFromSchedules(formattedSchedules)
     }
@@ -475,8 +461,6 @@ export default defineEventHandler(async (event) => {
         const fallbackSemester = String(getQuery(event).semester || '').trim()
         return await loadBasicSchedules(client, fallbackSemester, authenticatedUser, authenticatedIsAdmin)
       } catch (fallbackError: any) {
-        return await loadBasicSchedules(client, fallbackSemester, authenticatedUser, authenticatedIsAdmin, dateRange)
-      } catch (fallbackError) {
         console.error('基础排期兜底查询失败:', fallbackError)
       }
     }

@@ -148,18 +148,16 @@
                 >{{ locale.dateRange }}</label
               >
               <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                <AppDatePicker
+                <input
                   v-model="settings.startDate"
-                  size="md"
-                  rounded="lg"
-                  class-name="w-full"
+                  type="date"
+                  class="bg-bg-primary border border-border-secondary rounded-lg px-3 py-2 text-sm text-text-secondary focus:outline-none focus:border-primary-50 transition-colors"
                   max="9999-12-31"
                 />
-                <AppDatePicker
+                <input
                   v-model="settings.endDate"
-                  size="md"
-                  rounded="lg"
-                  class-name="w-full"
+                  type="date"
+                  class="bg-bg-primary border border-border-secondary rounded-lg px-3 py-2 text-sm text-text-secondary focus:outline-none focus:border-primary-50 transition-colors"
                   max="9999-12-31"
                 />
               </div>
@@ -556,7 +554,6 @@ import {
   ListChecks
 } from '@lucide/vue'
 import CustomSelect from '~/components/UI/Common/CustomSelect.vue'
-import AppDatePicker from '~/components/UI/Common/AppDatePicker.vue'
 import { useLocale } from '~/utils/locale'
 
 // 导入子组件
@@ -931,17 +928,7 @@ const loadSchedules = async () => {
       ...getAuthConfig()
     })
     // API直接返回排期数组，不是包装在schedules属性中
-    const list = Array.isArray(data) ? data : []
-    // 打印排期会对外分发，匿名投稿即使管理员视角接口返回真实姓名，也必须以「匿名投稿」呈现，避免泄露投稿人
-    const anonymousLabel = locale.value?.anonymousRequester
-    list.forEach((schedule) => {
-      const song = schedule?.song
-      if (song?.submissionAnonymous === true) {
-        song.requester = anonymousLabel
-        song.collaborators = []
-      }
-    })
-    schedules.value = list
+    schedules.value = Array.isArray(data) ? data : []
 
     // 如果没有数据，显示提示
     if (schedules.value.length === 0) {

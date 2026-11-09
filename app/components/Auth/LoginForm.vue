@@ -327,10 +327,9 @@ Modified by YH-Chen on 2026-10-17
             @input="error = ''"
           />
           <button
-            id="send-email-code-button"
             type="button"
             class="code-btn"
-            :disabled="legalConsentEntryBlocked || sendingCode || codeCountdown > 0"
+            :disabled="loginTermsBlocked || sendingCode || codeCountdown > 0"
             @click="sendEmailCode"
           >
             {{ codeCountdown > 0 ? locale.codeCountdown(codeCountdown) : locale.sendCode }}
@@ -412,8 +411,8 @@ Modified by YH-Chen on 2026-10-17
 
       <button
         id="auth-submit-button"
-        :disabled="loading || captchaPending || legalConsentEntryBlocked"
-        :class="['submit-btn', { 'is-disabled': loading || captchaPending || legalConsentEntryBlocked }]"
+        :disabled="loading || captchaPending || (loginTermsBlocked && legalConsentDisplayMode !== 'modal')"
+        :class="['submit-btn', { 'is-disabled': loading || captchaPending || (loginTermsBlocked && legalConsentDisplayMode !== 'modal') }]"
         type="submit"
       >
         <svg v-if="loading" class="loading-spinner" viewBox="0 0 24 24">
@@ -467,19 +466,19 @@ Modified by YH-Chen on 2026-10-17
       </div>
     </form>
 
-    <AuthOAuthQuickLogin v-if="!isBindMode && !showRegisterMode" :disabled="legalConsentEntryBlocked" />
+    <AuthOAuthQuickLogin v-if="!isBindMode && !showRegisterMode" :disabled="loginTermsBlocked && legalConsentDisplayMode !== 'modal'" />
 
     <div v-if="!isBindMode && !showRegisterMode && isWebAuthnSupported" class="webauthn-section">
       <div class="divider">
         <span>{{ locale.or }}</span>
       </div>
-      <button v-if="isWebAuthnSupported" type="button" class="webauthn-btn" :disabled="loading || legalConsentEntryBlocked" @click="handleWebAuthnLogin">
+      <button type="button" class="webauthn-btn" :disabled="loading || (loginTermsBlocked && legalConsentDisplayMode !== 'modal')" @click="handleWebAuthnLogin">
         <Fingerprint :size="20" class="webauthn-icon" />
         <span>{{ locale.webauthn }}</span>
       </button>
     </div>
 
-    <AuthOAuthButtons v-if="!isBindMode && !showRegisterMode" :disabled="legalConsentEntryBlocked" />
+    <AuthOAuthButtons v-if="!isBindMode && !showRegisterMode" :disabled="loginTermsBlocked && legalConsentDisplayMode !== 'modal'" />
 
     <div class="form-footer">
       <p class="help-text">{{ locale.platformNote }}</p>
@@ -512,7 +511,6 @@ Modified by YH-Chen on 2026-10-17
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useAuth } from '~/composables/useAuth'
-import { usePermissions } from '~/composables/usePermissions'
 import { useSiteConfig } from '~/composables/useSiteConfig'
 import { useLegalConsentPrompt } from '~/composables/useLegalConsentPrompt'
 import { getProviderDisplayName } from '~/utils/oauth'
@@ -569,11 +567,6 @@ const esaVerifyParam = ref('')
 const esaPassToken = ref('')
 const esaCaptchaRef = ref(null)
 const esaButtonSelector = '#auth-submit-button'
-// 注册邮箱发码独立的 ESA 实例：弹窗绑发码按钮，与提交按钮的凭证互不复用
-const esaCodeVerifyParam = ref('')
-const esaCodePassToken = ref('')
-const esaCodeCaptchaRef = ref(null)
-const sendCodeButtonSelector = '#send-email-code-button'
 // 验证码统一走公共验证接口，场景按当前域名解析（不再区分登录/注册）
 // SSR 阶段无域名，仅能命中「任意域名」规则
 const esaSceneId = computed(() =>
@@ -588,8 +581,6 @@ const esaSceneId = computed(() =>
 watch(showRegisterMode, () => {
   esaVerifyParam.value = ''
   esaPassToken.value = ''
-  esaCodeVerifyParam.value = ''
-  esaCodePassToken.value = ''
 })
 
 const showCaptcha = computed(() => {
@@ -629,8 +620,6 @@ const password = ref('')
 const loginTermsAccepted = ref(false)
 const legalConsentActive = computed(() => legalConsentEnabled.value && legalConsentDocuments.value.length > 0 && (!isBindMode.value || showCreateMode.value))
 const loginTermsBlocked = computed(() => legalConsentActive.value && !loginTermsAccepted.value)
-// 认证入口（含发码按钮）的条款拦截：复选框模式未勾选即禁用；弹窗模式改为提交时弹窗确认，不拦截入口
-const legalConsentEntryBlocked = computed(() => loginTermsBlocked.value && legalConsentDisplayMode.value !== 'modal')
 const confirmPassword = ref('')
 const error = ref('')
 const loading = ref(false)
@@ -703,7 +692,6 @@ const passwordStrength = usePasswordStrength(password)
 
 const auth = useAuth()
 const permissions = usePermissions()
-const { canAccessAdmin } = usePermissions()
 const { ensureLegalConsent, ensureLegalConsentForRegister } = useLegalConsentPrompt()
 
 // 只允许站内绝对路径，避免登录参数被用于开放重定向。
@@ -780,7 +768,6 @@ const redirectAfterLogin = async () => {
     return navigateTo('/change-password')
   }
   return navigateTo(getSafeRedirect(permissions.canAccessAdmin.value ? '/dashboard' : '/'))
-  return navigateTo(getSafeRedirect(canAccessAdmin.value ? '/dashboard' : '/'))
 }
 
 const handle2FASuccess = async () => {
@@ -914,27 +901,6 @@ const ensureEsaPassToken = async (purpose) => {
       error.value = localizeServerError(err, locale.value.loginFailed)
     }
     esaCaptchaRef.value?.reset?.()
-    return false
-  }
-}
-
-// 用发码按钮的独立验签参数换取 email_code 凭证；60 秒 TTL，每次发码重新换取
-const ensureEsaCodePassToken = async () => {
-  if (!showCaptcha.value || captchaProvider.value !== 'esa') return true
-  if (esaCodePassToken.value) return true
-  try {
-    const res = await $fetch('/api/captcha/verify', {
-      method: 'POST',
-      headers: { [ESA_CAPTCHA_VERIFY_HEADER]: esaCodeVerifyParam.value },
-      body: { purpose: 'email_code' }
-    })
-    if (res?.required && res?.passToken) esaCodePassToken.value = res.passToken
-    return true
-  } catch (err) {
-    if (!applyEsaCaptchaRejectError(err)) {
-      error.value = localizeServerError(err, locale.value.codeSendFailed)
-    }
-    esaCodeCaptchaRef.value?.reset?.()
     return false
   }
 }
@@ -1245,32 +1211,12 @@ const sendEmailCode = async () => {
     return
   }
 
-  // ESA 发码弹窗：首次点击先触发验证，验证通过回调再次进入本函数
-  if (showCaptcha.value && captchaProvider.value === 'esa' && !esaCodeVerifyParam.value) return
-
   error.value = ''
   sendingCode.value = true
-
   try {
-    // 图形/Turnstile 复用注册表单当前验证码；ESA 用发码按钮的独立实例换取 email_code 凭证
-    const body = { email: emailValue }
-    const headers = {}
-    if (showCaptcha.value) {
-      if (captchaProvider.value === 'turnstile') {
-        body.turnstileToken = turnstileToken.value
-      } else if (captchaProvider.value === 'esa') {
-        if (!(await ensureEsaCodePassToken())) return
-        if (esaCodePassToken.value) headers[ESA_CAPTCHA_PASS_HEADER] = esaCodePassToken.value
-      } else {
-        body.captchaId = captchaId.value
-        body.captchaInput = captchaInput.value.trim()
-      }
-    }
-
     await $fetch('/api/auth/email-code', {
       method: 'POST',
-      body,
-      headers
+      body: { email: emailValue }
     })
     toastSuccess(locale.value.codeSent)
     codeCountdown.value = 60
@@ -1285,22 +1231,8 @@ const sendEmailCode = async () => {
   } catch (err) {
     const apiError = useServerErrors().localize(err, locale.value.codeSendFailed)
     error.value = apiError
-    if (err.data?.data?.captchaRequired) isGraphicCaptchaRequired.value = true
   } finally {
     sendingCode.value = false
-    // 发码消费或失败均需刷新验证码，最终注册提交/重发重新验证
-    if (showCaptcha.value) {
-      await nextTick()
-      if (captchaProvider.value === 'turnstile') {
-        turnstileRef.value?.reset?.()
-      } else if (captchaProvider.value === 'esa') {
-        esaCodeVerifyParam.value = ''
-        esaCodePassToken.value = ''
-        esaCodeCaptchaRef.value?.reset?.()
-      } else {
-        captchaRef.value?.refreshCaptcha?.()
-      }
-    }
   }
 }
 
@@ -1935,13 +1867,6 @@ const handleWebAuthnLogin = async () => {
 
 .webauthn-section {
   width: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.webauthn-section .divider {
-  margin: 20px 0 10px;
 }
 
 .divider {

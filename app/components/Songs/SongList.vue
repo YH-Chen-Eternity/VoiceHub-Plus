@@ -474,9 +474,8 @@
         <Pagination
           v-model:current-page="currentPage"
           :total-pages="totalPages"
-          :total-items="totalItems"
+          :total-items="displayedSongs.length"
           :item-name="locale.itemName"
-          @change="handlePageChange"
         />
 
         <!-- 确认对话框 -->
@@ -622,30 +621,10 @@ const props = defineProps({
   isAdmin: {
     type: Boolean,
     default: false
-  },
-  // 服务端分页信息，仅登录用户生效
-  total: {
-    type: Number,
-    default: 0
-  },
-  totalPages: {
-    type: Number,
-    default: 1
-  },
-  semesters: {
-    type: Array,
-    default: () => []
   }
 })
 
-const emit = defineEmits([
-  'vote',
-  'withdraw',
-  'cancelReplay',
-  'refresh',
-  'semester-change',
-  'list-query-change'
-])
+const emit = defineEmits(['vote', 'withdraw', 'cancelReplay', 'refresh', 'semester-change'])
 const voteInProgress = ref(false)
 const actionInProgress = ref(false)
 const { currentLocale, songs: songsLocale } = useLocale()
@@ -708,40 +687,6 @@ const currentPage = ref(1)
 const pageSize = ref(12) // 每页显示12首歌曲，适合横向布局
 const isMobile = ref(false)
 
-// 登录用户的分页、筛选、搜索与排序均由服务端处理
-const serverPaginated = computed(() => Boolean(isAuthenticated.value))
-
-// 汇总当前列表查询条件
-const buildListQuery = () => ({
-  page: currentPage.value,
-  pageSize: pageSize.value,
-  semester: selectedSemester.value || '',
-  scope: activeTab.value === 'mine' ? 'mine' : activeTab.value === 'replays' ? 'replays' : '',
-  search: searchQuery.value.trim(),
-  sortBy: sortBy.value === 'date' ? 'createdAt' : 'votes',
-  sortOrder: sortOrder.value
-})
-
-let lastEmittedQueryKey = ''
-
-// 仅在查询条件实际变化时通知父组件，避免重复请求
-const emitListQuery = (overrides = {}) => {
-  if (!serverPaginated.value) return
-  const query = { ...buildListQuery(), ...overrides }
-  const key = JSON.stringify(query)
-  if (key === lastEmittedQueryKey) return
-  lastEmittedQueryKey = key
-  emit('list-query-change', query)
-}
-
-const emitListQueryDebounced = debounce((overrides = {}) => {
-  emitListQuery(overrides)
-}, 300)
-
-const handlePageChange = (page) => {
-  emitListQuery({ page })
-}
-
 // 组件初始化状态
 const isComponentInitialized = ref(false)
 const isDataLoading = ref(false)
@@ -755,7 +700,6 @@ const setActiveTab = (tab) => {
   if (activeTab.value === tab) return // 如果点击的是当前标签，不执行切换
   activeTab.value = tab
   currentPage.value = 1 // 重置为第一页
-  emitListQuery({ page: 1 })
 }
 
 // 检测设备是否为移动设备
@@ -772,7 +716,6 @@ const handleSemesterFilterChange = (event) => {
 
   // 重置到第一页
   currentPage.value = 1
-  emitListQuery({ page: 1 })
 
   // 保存到sessionStorage
   if (newSemester) {
@@ -817,9 +760,6 @@ onMounted(async () => {
 
     // 初始化完成后，尝试执行一次默认选择，确保正确的初始状态
     await selectDefaultSemester()
-
-    // 按已确定的学期与筛选条件拉取列表当前页
-    emitListQuery({ page: 1 })
   } catch (error) {
     console.error('组件初始化失败:', error)
   } finally {
@@ -853,10 +793,9 @@ watch(semesterUpdateEvent, async () => {
   }
 })
 
-// 监听搜索查询变化，重置分页并重新请求
+// 监听搜索查询变化，重置分页
 watch(searchQuery, () => {
   currentPage.value = 1
-  emitListQueryDebounced({ page: 1, search: searchQuery.value.trim() })
 })
 
 // 切换排序方式后回到第一页，避免停留在超出新排序结果范围的页码
@@ -951,8 +890,8 @@ const isCollaborator = (song) => {
   return song.collaborators.some((c) => c.id === auth.user.value.id)
 }
 
-// 访客使用公共歌曲数据，在本地完成过滤、排序与分页
-const clientDisplayedSongs = computed(() => {
+// 应用过滤器和搜索
+const displayedSongs = computed(() => {
   if (!props.songs) return []
 
   let result = [...props.songs]
@@ -1010,55 +949,17 @@ const clientDisplayedSongs = computed(() => {
   return [...sortSongs(unscheduledSongs), ...sortSongs(scheduledSongs), ...sortSongs(playedSongs)]
 })
 
-// 登录用户直接渲染服务端返回的当前页
-const displayedSongs = computed(() =>
-  serverPaginated.value ? (Array.isArray(props.songs) ? props.songs : []) : clientDisplayedSongs.value
-)
-
 // 计算总页数
 const totalPages = computed(() => {
-  if (serverPaginated.value) return Math.max(1, Number(props.totalPages) || 1)
-  return Math.max(1, Math.ceil(clientDisplayedSongs.value.length / pageSize.value))
-})
-
-// 总条数
-const totalItems = computed(() => {
-  if (serverPaginated.value) return Math.max(0, Number(props.total) || 0)
-  return clientDisplayedSongs.value.length
+  return Math.max(1, Math.ceil(displayedSongs.value.length / pageSize.value))
 })
 
 // 获取当前页的歌曲
 const paginatedSongs = computed(() => {
-  if (serverPaginated.value) return displayedSongs.value
   const startIndex = (currentPage.value - 1) * pageSize.value
   const endIndex = startIndex + pageSize.value
-  return clientDisplayedSongs.value.slice(startIndex, endIndex)
+  return displayedSongs.value.slice(startIndex, endIndex)
 })
-
-// 学期切换后重新向服务端请求
-watch(selectedSemester, () => {
-  if (!isComponentInitialized.value) return
-  currentPage.value = 1
-  emitListQuery({ page: 1 })
-})
-
-// 登录态恢复后按服务端分页重新拉取
-watch(serverPaginated, (enabled) => {
-  if (enabled) emitListQuery({ page: 1 })
-})
-
-// 当前页超出总页数时回到最后一页（如末页最后一条被删除）
-watch(
-  () => props.totalPages,
-  (pages) => {
-    if (!serverPaginated.value) return
-    const maxPage = Math.max(1, Number(pages) || 1)
-    if (currentPage.value > maxPage) {
-      currentPage.value = maxPage
-      emitListQuery({ page: maxPage })
-    }
-  }
-)
 
 // 计算分页显示的页码
 // 处理投票
@@ -1467,11 +1368,6 @@ const cleanCorruptedText = (text) => {
 
 // 学期相关函数
 const fetchAvailableSemesters = async () => {
-  // 登录用户的学期选项由服务端随分页结果下发
-  if (serverPaginated.value) {
-    return
-  }
-
   // 防止重复请求和并发调用
   if (semesterLoading.value || isFetchingSemesters.value) {
     return
@@ -1678,44 +1574,6 @@ watch(currentSemester, (newVal) => {
     }
   }
 })
-
-// 登录用户使用服务端下发的学期选项（分页后无法从当前页推导完整列表）
-watch(
-  [serverPaginated, () => props.semesters],
-  () => {
-    if (!serverPaginated.value) return
-
-    const list = Array.isArray(props.semesters) ? props.semesters : []
-    const cleaned = list
-      .filter((semester) => semester && !containsCorruptedText(semester))
-      .map((semester) => cleanCorruptedText(semester))
-      .filter((semester) => semester.length > 0)
-    if (cleaned.length === 0) return
-
-    const finalSemesters = [...new Set(cleaned)]
-    // 手动选择的学期即使暂无数据也保留在选项中
-    if (
-      isUserManuallySelected.value &&
-      selectedSemester.value &&
-      !finalSemesters.includes(selectedSemester.value)
-    ) {
-      finalSemesters.push(selectedSemester.value)
-    }
-    finalSemesters.sort().reverse()
-    availableSemesters.value = finalSemesters
-
-    try {
-      sessionStorage.setItem('voicehub_available_semesters', JSON.stringify(finalSemesters))
-    } catch {
-      // 浏览器禁用会话存储时忽略缓存失败
-    }
-
-    if (isComponentInitialized.value) {
-      selectDefaultSemester()
-    }
-  },
-  { immediate: true, deep: true }
-)
 
 const onSemesterChange = (semester) => {
   // 增强的加载状态检查

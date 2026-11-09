@@ -17,26 +17,6 @@ if (!process.env.DATABASE_URL) {
   process.exit(1)
 }
 
-const DEFAULT_ADMIN_PASSWORD = 'admin123'
-
-/**
- * 仍在校验默认口令的超级管理员按临时密码对待，置首次登录强制改密标记。
- * 无密码账号（如 OAuth 创建）与已改密账号不受影响，已标记的不重复写入。
- */
-async function markDefaultPasswordSuperAdmins(accounts) {
-  for (const account of accounts) {
-    if (!account.password || account.forcePasswordChange) continue
-    if (!(await bcrypt.compare(DEFAULT_ADMIN_PASSWORD, account.password))) continue
-    await db
-      .update(users)
-      .set({ forcePasswordChange: true })
-      .where(eq(users.id, account.id))
-    console.warn(
-      `⚠️ 超级管理员 #${account.id}（${account.username}）仍在使用默认口令，已标记首次登录强制修改密码`
-    )
-  }
-}
-
 async function main() {
   try {
     // 检查是否已有超级管理员
@@ -44,9 +24,9 @@ async function main() {
       .select()
       .from(users)
       .where(eq(users.role, 'SUPER_ADMIN'))
+      .limit(1)
 
     if (existingSuperAdmin.length > 0) {
-      await markDefaultPasswordSuperAdmins(existingSuperAdmin)
       console.log('✅ 管理员已存在')
       return existingSuperAdmin[0]
     }
@@ -111,7 +91,6 @@ async function main() {
       .onConflictDoNothing()
 
     console.log('✅ 管理员创建成功 (admin / 你设置的 ADMIN_INITIAL_PASSWORD，首次登录需改密)')
-    console.log('✅ 管理员创建成功 (admin/admin123)，首次登录需设置新密码')
     return admin
   } catch (error) {
     console.error('❌ 创建管理员失败:', error)

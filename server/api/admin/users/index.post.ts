@@ -1,24 +1,12 @@
-import { SERVER_ERROR_CODES } from '~~/server/config/constants'
-import {
-  SUPER_ADMIN_ROLE,
-  canAssignRole,
-  getRoleTemplateKeys
-} from '~~/app/utils/admin-permissions'
-import {
-  assertAccountPermissionExpansion,
-  assertSuperAdminCountInvariant,
-  assertSuperAdminRoleChangeAllowed,
-  recordSuperAdminRoleChange,
-  withPermissionTransaction
-} from '~~/server/utils/permission-admin'
-import { NEW_ACCOUNT_ID } from '~~/server/utils/permission-policy'
+/* Modified by YH-Chen-Eternity on 2026-10-23 */
+
 import bcrypt from 'bcryptjs'
+import { db } from '~/drizzle/db'
 import { users } from '~/drizzle/schema'
 import { eq } from 'drizzle-orm'
 import { createApiError } from '~~/server/utils/apiError'
 import { getAdminPasswordViolation } from '~~/server/utils/admin-password-policy'
 import { validateUsernameFormat } from '~~/server/utils/username-policy'
-import { recordAdminAudit } from '~~/server/utils/admin-audit'
 
 const normalizeRequiredText = (value: unknown) => String(value || '').trim()
 const normalizeOptionalText = (value: unknown) => {
@@ -27,7 +15,14 @@ const normalizeOptionalText = (value: unknown) => {
 }
 
 export default defineEventHandler(async (event) => {
+  // 检查认证和权限
   const user = event.context.user
+  if (!user || !['ADMIN', 'SUPER_ADMIN'].includes(user.role)) {
+    throw createError({
+      statusCode: 403,
+      message: '没有权限访问'
+    })
+  }
 
   const body = await readBody(event)
   const normalizedName = normalizeRequiredText(body.name)
@@ -54,24 +49,23 @@ export default defineEventHandler(async (event) => {
   }
 
   try {
-    const result = await withPermissionTransaction(event, async (tx, templates) => {
-      // 检查用户名是否已存在
-      const existingUserResult = await tx
-        .select()
-        .from(users)
-        .where(eq(users.username, normalizedUsername))
-        .limit(1)
-      const existingUser = existingUserResult[0]
+    // 检查用户名是否已存在
+    const existingUserResult = await db
+      .select()
+      .from(users)
+      .where(eq(users.username, normalizedUsername))
+      .limit(1)
+    const existingUser = existingUserResult[0]
 
-      if (existingUser) {
-        throw createError({
-          statusCode: 400,
-          message: '用户名已存在'
-        })
-      }
+    if (existingUser) {
+      throw createError({
+        statusCode: 400,
+        message: '用户名已存在'
+      })
+    }
 
-      // 加密密码
-      const hashedPassword = await bcrypt.hash(initialPassword, 10)
+    // 加密密码
+    const hashedPassword = await bcrypt.hash(initialPassword, 10)
 
     // 角色权限控制
     let validRole = 'USER'
@@ -80,84 +74,62 @@ export default defineEventHandler(async (event) => {
       if (user.role === 'SUPER_ADMIN') {
         validRole = body.role
       }
-
-      // 状态验证
-      let validStatus = 'active'
-      if (body.status && ['active', 'withdrawn', 'graduate'].includes(body.status)) {
-        validStatus = body.status
+      // 管理员只能创建管理员以下的角色（USER, SONG_ADMIN）
+      else if (user.role === 'ADMIN') {
+        if (['USER', 'SONG_ADMIN'].includes(body.role)) {
+          validRole = body.role
+        } else {
+          throw createError({
+            statusCode: 403,
+            message: '管理员只能创建用户和歌曲管理员角色'
+          })
+        }
       }
-
-      // 创建超管只能由现有超管执行，且需处于二次验证窗口内
-      await assertSuperAdminRoleChangeAllowed(event, user, null, validRole)
-
-      assertAccountPermissionExpansion(
-        null,
-        { role: validRole, status: validStatus, permissions: null },
-        templates,
-        user.perms ?? []
-      )
-
-      await assertSuperAdminCountInvariant(
-        [
-          {
-            targetId: NEW_ACCOUNT_ID,
-            nextRow:
-              validStatus === 'active'
-                ? { id: NEW_ACCOUNT_ID, role: validRole, permissions: null }
-                : null
-          }
-        ],
-        tx
-      )
-
-      // 创建用户
-      const newUserResult = await tx
-        .insert(users)
-        .values({
-          name: normalizedName,
-          username: normalizedUsername,
-          password: hashedPassword,
-          role: validRole,
-          status: validStatus as 'active' | 'withdrawn' | 'graduate',
-          // 超管初始口令必须登录后修改
-          forcePasswordChange: validRole === SUPER_ADMIN_ROLE,
-          grade: normalizeOptionalText(body.grade),
-          class: normalizeOptionalText(body.class)
+      // 其他角色不能创建用户
+      else {
+        throw createError({
+          statusCode: 403,
+          message: '没有权限创建用户'
         })
-        .returning({
-          id: users.id,
-          name: users.name,
-          username: users.username,
-          role: users.role,
-          status: users.status,
-          grade: users.grade,
-          class: users.class,
-          createdAt: users.createdAt,
-          updatedAt: users.updatedAt
-        })
-      const newUser = newUserResult[0]
-
-      return {
-        success: true,
-        user: newUser,
-        grantedSuperAdmin: validRole === SUPER_ADMIN_ROLE
       }
-    })
-
-    // 超管留痕与通知必须在事务提交后执行：内部走全局连接，在事务内会占用不上池
-    if (result.grantedSuperAdmin) {
-      await recordSuperAdminRoleChange(event, user, result.user, true)
     }
 
-    // 审计写入同样放在事务提交之后，避免回滚后留下成功记录
-    const createdUser = result.user
-    await recordAdminAudit(event, 'user.create', {
-      targetType: 'user',
-      targetId: createdUser.id,
-      summary: { username: createdUser.username, role: createdUser.role }
-    })
+    // 状态验证
+    let validStatus = 'active'
+    if (body.status && ['active', 'withdrawn', 'graduate'].includes(body.status)) {
+      validStatus = body.status
+    }
 
-    return { success: true, user: result.user, message: '用户创建成功' }
+    // 创建用户
+    const newUserResult = await db
+      .insert(users)
+      .values({
+        name: normalizedName,
+        username: normalizedUsername,
+        password: hashedPassword,
+        role: validRole,
+        status: validStatus as 'active' | 'withdrawn' | 'graduate',
+        grade: normalizeOptionalText(body.grade),
+        class: normalizeOptionalText(body.class)
+      })
+      .returning({
+        id: users.id,
+        name: users.name,
+        username: users.username,
+        role: users.role,
+        status: users.status,
+        grade: users.grade,
+        class: users.class,
+        createdAt: users.createdAt,
+        updatedAt: users.updatedAt
+      })
+    const newUser = newUserResult[0]
+
+    return {
+      success: true,
+      user: newUser,
+      message: '用户创建成功'
+    }
   } catch (error: any) {
     console.error('创建用户失败:', error)
     if (error?.statusCode) {

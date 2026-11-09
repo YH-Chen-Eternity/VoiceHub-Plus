@@ -5,20 +5,11 @@ import { useAudioPlayer, type PlayableSong } from './useAudioPlayer'
 import { useToast } from './useToast'
 import { useLocale } from '~/utils/locale'
 import type { Song } from '~~/types'
-import { useServerErrors } from './useLocaleText'
-import type { Song } from '~/types'
-
-type SchedulePlaybackContext = {
-  items: Parameters<ReturnType<typeof useAudioPlayer>['playScheduleSong']>[1]
-  source: Parameters<ReturnType<typeof useAudioPlayer>['playScheduleSong']>[2]
-  index: number
-}
 
 export const useSongPlayer = () => {
   const audioPlayer = useAudioPlayer()
   const { showToast } = useToast()
   const { audioPlayer: audioPlayerLocale } = useLocale()
-  const { localize } = useServerErrors()
 
   // 判断歌曲是否可入队（有自定义链接、B站视频或平台ID）
   const isPlayableSong = (s: Song | PlayableSong) => {
@@ -39,23 +30,9 @@ export const useSongPlayer = () => {
     return { queue, index }
   }
 
-  const playSong = async (
-    song: Song | PlayableSong,
-    queueSource?: (Song | PlayableSong)[],
-    context?: SchedulePlaybackContext
-  ) => {
-    const item = context?.items[context.index]
-    if (context && item && audioPlayer.isCurrentScheduleItem(item, context.source)) {
-      if (audioPlayer.getPlayingStatus().value) {
-        audioPlayer.pauseSong()
-      } else {
-        audioPlayer.resumeSong()
-      }
-      return
-    }
-
+  const playSong = async (song: Song | PlayableSong, queueSource?: (Song | PlayableSong)[]) => {
     // 如果是当前选中的歌曲
-    if (!context && !audioPlayer.scheduleSource.value && audioPlayer.isCurrentSong(song.id)) {
+    if (audioPlayer.isCurrentSong(song.id)) {
       // 如果正在播放，则暂停
       if (audioPlayer.getPlayingStatus().value) {
         audioPlayer.pauseSong()
@@ -72,25 +49,15 @@ export const useSongPlayer = () => {
       }
     }
 
-    const request = audioPlayer.beginPlaybackRequest()
-    const startSong = (playableSong: PlayableSong) => {
-      if (!audioPlayer.isPlaybackRequestCurrent(request)) return false
-      if (context) {
-        return audioPlayer.playScheduleSong(
-          playableSong, context.items, context.source, context.index
-        )
-      }
-      const { queue, index } = buildQueue(playableSong, queueSource)
-      return audioPlayer.playSong(playableSong, queue, index)
-    }
-
     try {
       let url = null
 
-      // 平台歌曲按登录态取链，自定义链接由统一解析器兜底。
-      if (!isBilibiliSong(song)) {
+      // 如果有手动填入的 playUrl，优先使用它（统一处理所有平台）
+      if (song.playUrl && song.playUrl.trim()) {
+        url = song.playUrl.trim()
+      } else if (!isBilibiliSong(song)) {
+        // 如果不是哔哩哔哩歌曲且没有手动 playUrl，通过 API 获取 URL
         url = await getMusicUrl(song.musicPlatform, song.musicId, song.playUrl, {
-          preferPlatformResolve: true,
           musicInfo: {
             name: song.title,
             artist: song.artist,
@@ -98,8 +65,6 @@ export const useSongPlayer = () => {
             rawItem: song
           }
         })
-      } else if (song.playUrl && song.playUrl.trim()) {
-        url = song.playUrl.trim()
       }
       // 如果是哔哩哔哩歌曲且没有手动 playUrl，url 保持为 null，播放器会处理
 
@@ -108,11 +73,11 @@ export const useSongPlayer = () => {
         musicUrl: url
       }
 
-      startSong(playableSong)
+      const { queue, index } = buildQueue(playableSong, queueSource)
+      audioPlayer.playSong(playableSong, queue, index)
     } catch (error: any) {
-      if (!audioPlayer.isPlaybackRequestCurrent(request)) return
       console.error('播放失败:', error)
-      const errorMessage = localize(error)
+      const errorMessage = error instanceof Error ? error.message : String(error)
       showToast(audioPlayerLocale.value.playFailed(errorMessage), 'error')
 
       // 即使获取 URL 失败，也应该调用 playSong 以触发播放器的错误处理和弹窗逻辑
@@ -120,7 +85,8 @@ export const useSongPlayer = () => {
         ...song,
         musicUrl: null
       }
-      startSong(playableSong)
+      const { queue, index } = buildQueue(playableSong, queueSource)
+      audioPlayer.playSong(playableSong, queue, index)
     }
   }
 

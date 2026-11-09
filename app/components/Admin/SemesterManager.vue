@@ -8,8 +8,8 @@
           {{ locale.desc }}
         </p>
       </div>
-      <button :disabled="!can('semesters:write')"
-        class="flex items-center gap-2 px-6 py-2.5 bg-primary-hover hover:bg-primary text-text-primary text-xs font-black rounded-xl shadow-lg shadow-[var(--primary-glow)] transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+      <button
+        class="flex items-center gap-2 px-6 py-2.5 bg-primary-hover hover:bg-primary text-text-primary text-xs font-black rounded-xl shadow-lg shadow-[var(--primary-glow)] transition-all active:scale-95"
         @click="openModal"
       >
         <svg
@@ -153,7 +153,7 @@
             <line x1="12" y1="16" x2="12.01" y2="16" />
           </svg>
           <p class="text-sm font-bold text-text-disabled">{{ locale.noCurrent }}</p>
-          <button :disabled="!can('semesters:write')" class="text-xs text-primary font-black hover:underline disabled:opacity-50 disabled:cursor-not-allowed" @click="openModal">
+          <button class="text-xs text-primary font-black hover:underline" @click="openModal">
             {{ locale.createNow }}
           </button>
         </div>
@@ -292,7 +292,7 @@
               </div>
               <button
                 v-else
-                :disabled="(loading) || !can('semesters:write')"
+                :disabled="loading"
                 class="flex items-center gap-2 px-4 py-2 bg-bg-tertiary hover:bg-bg-quaternary text-text-tertiary hover:text-text-primary text-[10px] font-black rounded-xl border border-border-tertiary transition-all uppercase tracking-widest disabled:opacity-50 disabled:cursor-not-allowed"
                 @click="setActive(sem.id)"
               >
@@ -314,7 +314,7 @@
               </button>
 
               <button
-                :disabled="(loading) || !can('semesters:write')"
+                :disabled="loading"
                 class="p-2.5 text-text-secondary hover:text-primary hover:bg-primary-10 rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                 :title="locale.editSemester"
                 @click="openEditModal(sem)"
@@ -336,7 +336,7 @@
 
               <button
                 v-if="!sem.isActive"
-                :disabled="(loading) || !can('semesters:delete')"
+                :disabled="loading"
                 class="p-2.5 text-text-secondary hover:text-error hover:bg-error-10 rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                 :title="locale.deleteSemester"
                 @click="deleteSemester(sem.id)"
@@ -470,7 +470,7 @@
             {{ locale.cancel }}
           </button>
           <button
-            :disabled="(submitting || !semesterForm.name.trim()) || !can('semesters:write')"
+            :disabled="submitting || !semesterForm.name.trim()"
             class="px-8 py-2.5 bg-primary-hover hover:bg-primary disabled:bg-primary-hover disabled:opacity-50 text-text-primary text-xs font-black rounded-xl shadow-lg transition-all active:scale-95"
             @click="handleSubmit"
           >
@@ -496,13 +496,10 @@
 </template>
 
 <script setup>
-import { usePermissions } from '~/composables/usePermissions'
 import { onMounted, ref, computed } from 'vue'
 import ConfirmDialog from '~/components/UI/ConfirmDialog.vue'
 import { useToast } from '~/composables/useToast'
 import { useLocale } from '~/utils/locale'
-
-const { can } = usePermissions()
 
 const { showToast: showNotification } = useToast()
 const { admin } = useLocale()
@@ -561,7 +558,6 @@ const formatDate = (dateString) => {
 
 // 设置活跃学期
 const setActive = async (semesterId) => {
-  if (!can('semesters:write')) return
   try {
     const success = await setActiveSemester(semesterId)
     // 注意：这里需要重新获取error，因为useSemesters内部可能没有正确更新error的响应式引用
@@ -579,7 +575,6 @@ const setActive = async (semesterId) => {
 
 // 准备删除学期
 const deleteSemester = (semesterId) => {
-  if (!can('semesters:delete')) return
   const semester = semesters.value.find((s) => s.id === semesterId)
   if (semester) {
     deleteTargetId.value = semesterId
@@ -590,7 +585,6 @@ const deleteSemester = (semesterId) => {
 
 // 确认删除
 const confirmDelete = async () => {
-  if (!can('semesters:delete')) return
   if (!deleteTargetId.value) return
 
   try {
@@ -611,7 +605,6 @@ const confirmDelete = async () => {
 
 // 处理表单提交
 const handleSubmit = async () => {
-  if (!can('semesters:write')) return
   const normalizedName = semesterForm.value.name.trim()
   if (!normalizedName) return
 
@@ -693,7 +686,6 @@ const getRecommendedName = () => {
 }
 
 const openModal = () => {
-  if (!can('semesters:write')) return
   isEditing.value = false
   editSemesterId.value = null
   semesterForm.value.name = getRecommendedName()
@@ -702,7 +694,6 @@ const openModal = () => {
 }
 
 const openEditModal = (sem) => {
-  if (!can('semesters:write')) return
   isEditing.value = true
   editSemesterId.value = sem.id
   originalSemesterName.value = sem.name

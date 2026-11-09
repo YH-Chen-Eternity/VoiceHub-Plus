@@ -167,7 +167,7 @@ async function main() {
     // 创建管理员账户（初始密码来自 ADMIN_INITIAL_PASSWORD，已在 main() 开头校验）
     const hashedPassword = await bcrypt.hash(initialPassword, 10)
 
-    // 创建超级管理员用户（默认口令按临时密码对待，首次登录强制设置新密码）
+    // 创建超级管理员用户
     const [admin] = await db
       .insert(users)
       .values({
@@ -182,8 +182,6 @@ async function main() {
     console.log('超级管理员账户已创建:')
     console.log('用户名: admin')
     console.log('密码: 你设置的 ADMIN_INITIAL_PASSWORD（首次登录需改密）')
-    console.log('密码: admin123')
-    console.log('首次登录需设置新密码')
     console.log(`管理员ID: ${admin.id}`)
 
     // 调整User表的自增序列，确保下一个用户从admin.id + 1开始

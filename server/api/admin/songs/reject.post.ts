@@ -1,4 +1,3 @@
-import { releaseCardCodeAfterSongWithdrawal } from '~~/server/services/cardCodeLifecycleService'
 import { db } from '~/drizzle/db'
 import { schedules, songBlacklists, songs, votes, requestTimes } from '~/drizzle/schema'
 import { eq, sql } from 'drizzle-orm'
@@ -6,11 +5,16 @@ import {
   insertSongRejectedNotification,
   dispatchSongRejectedChannels
 } from '../../../services/notificationService'
-import { createSongRejectedNotification } from '../../../services/notificationService'
-import { recordAdminAudit } from '~~/server/utils/admin-audit'
 
 export default defineEventHandler(async (event) => {
+  // 检查用户认证和权限
   const user = event.context.user
+  if (!user || !['SONG_ADMIN', 'ADMIN', 'SUPER_ADMIN'].includes(user.role)) {
+    throw createError({
+      statusCode: 403,
+      message: '没有权限访问'
+    })
+  }
 
   const body = await readBody(event)
 
@@ -32,7 +36,7 @@ export default defineEventHandler(async (event) => {
     // 使用事务确保驳回操作的原子性
     const result = await db.transaction(async (tx) => {
       // 在事务中重新检查歌曲是否存在
-      const songResult = await tx.select().from(songs).where(eq(songs.id, body.songId)).limit(1).for('update')
+      const songResult = await tx.select().from(songs).where(eq(songs.id, body.songId)).limit(1)
       const song = songResult[0]
 
       if (!song) {
@@ -64,9 +68,6 @@ export default defineEventHandler(async (event) => {
       await tx.delete(votes).where(eq(votes.songId, body.songId))
       console.log(`删除了投票记录`)
 
-      await releaseCardCodeAfterSongWithdrawal(tx, {
-        songId: song.id, cardCodeId: song.cardCodeId, operatorId: user.id, removeSong: true
-      })
       // 删除歌曲的所有排期
       await tx.delete(schedules).where(eq(schedules.songId, body.songId))
       console.log(`删除了排期记录`)

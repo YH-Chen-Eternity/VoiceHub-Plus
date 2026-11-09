@@ -2,6 +2,7 @@ import { defineEventHandler } from 'h3'
 import { db } from '~/drizzle/db'
 import { songs, scheduleSongPool, users, votes } from '~/drizzle/schema'
 import { inArray, count } from 'drizzle-orm'
+import { requireSongAdmin } from '~~/server/utils/requireSongAdmin'
 
 export default defineEventHandler(async (event) => {
   // 放歌员只读：zz-admin-guard 已限制其只能 GET，这里允许读取备选池
@@ -63,8 +64,6 @@ export default defineEventHandler(async (event) => {
       requesterGrade: requesterUser?.grade || null,
       requesterClass: requesterUser?.class || null,
       preferredPlayTimeId: song.preferredPlayTimeId,
-      // 期望播出日期：自动排期的软偏好，命中当天时提高入选概率，不过滤候选
-      preferredPlayDate: song.preferredPlayDate,
       cover: song.cover,
       semester: song.semester,
       musicId: song.musicId,

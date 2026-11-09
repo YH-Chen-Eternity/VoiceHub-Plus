@@ -254,7 +254,7 @@ const error = ref('')
 const submitting = ref(false)
 const selectedSongId = ref(null)
 
-const songService = useSongs({ compact: true })
+const songService = useSongs()
 const auth = useAuth()
 const { currentSemester, fetchCurrentSemester } = useSemesters()
 const isSuperAdmin = computed(() => auth.user.value?.role === 'SUPER_ADMIN')
@@ -337,7 +337,7 @@ watch(
         songsLoadingForSimilar.value = true
         const currentSemesterName = currentSemester.value?.name
         songService
-          .fetchSongs({ silent: true, semester: currentSemesterName })
+          .fetchSongs(true, currentSemesterName)
           .catch((err) => {
             console.error('加载歌曲列表失败:', err)
           })

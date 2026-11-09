@@ -13,8 +13,6 @@ import { getServerTimestamp } from '~~/server/utils/serverTime'
 import { createApiError } from '~~/server/utils/apiError'
 import { SERVER_ERROR_CODES } from '~~/server/config/constants'
 import { getOAuthBaseConfig } from '~~/server/services/oauthConfigService'
-import { resolveCaptchaSettings, isPasswordLoginCaptchaRequired } from '~~/server/services/securityService'
-import { assertRequestCaptchaPassed } from '~~/server/utils/request-captcha'
 import { publicAddress } from '~~/server/utils/music-source-plugins/network'
 import { assertPasswordTurnstile } from '~~/server/utils/password-turnstile'
 

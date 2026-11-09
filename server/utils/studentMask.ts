@@ -1,5 +1,4 @@
-import type { H3Event } from 'h3'
-import { getCookie } from 'h3'
+// Modified by YH-Chen on 2026-10-17
 import { maskStudentName } from './siteUtils'
 
 /**
@@ -11,8 +10,6 @@ export interface MaskableUser {
   displayName?: string
   grade?: string | null
   class?: string | null
-  /** 重播申请人本人即匿名投稿人时置 true */
-  isAnonymous?: boolean
   [key: string]: any
 }
 
@@ -20,10 +17,6 @@ export interface MaskableUser {
  * 可脱敏的歌曲信息接口
  */
 export interface MaskableSong {
-  /** 逐条投稿的匿名标记（Song.submissionAnonymous） */
-  submissionAnonymous?: boolean
-  /** 当前查看者视角下该投稿为匿名投稿（requester 已被替换为匿名文案） */
-  isAnonymous?: boolean
   requester?: string
   requesterId?: number | null
   requesterGrade?: string | null
@@ -33,15 +26,6 @@ export interface MaskableSong {
   collaborators?: MaskableUser[]
   replayRequesters?: MaskableUser[]
   [key: string]: any
-}
-
-/**
- * 候选人选择场景的姓名脱敏：保留首字，其余字符以星号代替。
- * 用于联合投稿邀请等必须区分同名候选人的接口，不能返回完整姓名。
- */
-export function maskStudentNameForPicker(name: string): string {
-  if (!name) return name
-  return name.length <= 1 ? name : name[0] + '*'.repeat(name.length - 1)
 }
 
 /**
@@ -140,37 +124,16 @@ export interface AnonymityViewer {
   id?: number | null
   /** 管理员视角：不做匿名处理（后台始终可以看到真实投稿人） */
   isAdmin?: boolean
-  /** 匿名文案的展示语言来源；缺省（开放 API、脚本调用等）按中文兜底 */
-  event?: H3Event | null
-}
-
-/** 匿名投稿对外展示的投稿人文案，与词典 pages.songs.songList.anonymousRequester 保持一致 */
-export const ANONYMOUS_REQUESTER_LABELS = {
-  'zh-CN': '匿名投稿',
-  'en-US': 'Anonymous'
-} as const
-
-/**
- * 解析匿名投稿文案的语言。
- * 语言 cookie 由 app/plugins/locale.ts 在 SSR 渲染时写入，因此页面内的接口请求总能取到；
- * 无 cookie 时（开放 API、机器人等外部调用）按中文兜底。
- */
-export function resolveAnonymousRequesterLabel(event?: H3Event | null): string {
-  const locale = event ? getCookie(event, 'voicehub.locale') : undefined
-  return locale === 'en-US' ? ANONYMOUS_REQUESTER_LABELS['en-US'] : ANONYMOUS_REQUESTER_LABELS['zh-CN']
 }
 
 /**
  * 按「逐条投稿的匿名标记」脱敏。
  *
- * 只有 submissionAnonymous === true 的投稿会被处理：
- *   - 管理员：完全跳过（后台始终能看到真实投稿人，便于管理追溯）
- *   - 投稿人本人：跳过（自己的投稿自己可见，便于在列表里辨认）
- *   - 其他登录用户 / 游客：置 isAnonymous=true，并把 requester 直接替换为「匿名投稿」文案；
- *     站内与外部消费方都按 requester 渲染投稿人，清空会显示为空，因此必须回填占位文案；
- *     同时移除年级班级、联合投稿人以及 requesterId / cardCodeId 等可被交叉关联的内部标识
- *
- * 前端仍保留 isAnonymous 判断，按当前界面语言渲染 locale.anonymousRequester。
+ * 只有 Song.submissionAnonymous === true 的投稿会被处理：
+ *   - 管理员：完全跳过（后台始终能看到真实投稿人，便于管理与追溯）
+ *   - 投稿人本人：跳过（自己的投稿自己可见，便于在列表中辨认）
+ *   - 其他登录用户 / 游客：投稿人显示为「匿名」，并移除年级班级、联合投稿人
+ *     以及 requesterId / cardCodeId 等可被交叉关联的内部标识。
  *
  * 注意：本函数必须在 maskSongsInfo 之后调用，否则「匿名」会被姓名脱敏规则覆盖。
  */
@@ -179,8 +142,6 @@ export function applySubmissionAnonymity(
   viewer?: AnonymityViewer | null
 ) {
   if (viewer?.isAdmin) return
-
-  const anonymousLabel = resolveAnonymousRequesterLabel(viewer?.event)
 
   songs.forEach((song) => {
     if (song.submissionAnonymous !== true) return

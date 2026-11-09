@@ -1,4 +1,3 @@
-import { releaseCardCodeAfterSongWithdrawal } from '~~/server/services/cardCodeLifecycleService'
 import { db } from '~/drizzle/db'
 import { schedules, songBlacklists, songs, votes, requestTimes } from '~/drizzle/schema'
 import { and, eq, inArray, sql } from 'drizzle-orm'
@@ -7,15 +6,15 @@ import {
   dispatchSongRejectedChannels
 } from '../../../services/notificationService'
 import { requireSongAdmin } from '~~/server/utils/requireSongAdmin'
-import { createSongRejectedNotification } from '../../../services/notificationService'
 import { createApiError } from '~~/server/utils/apiError'
-import { recordAdminAudit } from '~~/server/utils/admin-audit'
 import { SERVER_ERROR_CODES } from '~~/server/config/constants'
 
 // 单次批量驳回的歌曲数量上限
 const MAX_BATCH_REJECT_COUNT = 1000
 
 export default defineEventHandler(async (event) => {
+  requireSongAdmin(event)
+
   const user = event.context.user
 
   const body = await readBody(event)
@@ -47,12 +46,11 @@ export default defineEventHandler(async (event) => {
   try {
     let rejectedSongs = []
     let notifyList: Array<{ userId: number; title: string; artist: string; message: string }> = []
-    let rejectedSongs: (typeof songs.$inferSelect)[] = []
 
     // 使用事务确保批量驳回操作的原子性
     await db.transaction(async (tx) => {
       // 在事务中重新检查歌曲是否存在
-      const existingSongs = await tx.select().from(songs).where(inArray(songs.id, songIds)).orderBy(songs.id).for('update')
+      const existingSongs = await tx.select().from(songs).where(inArray(songs.id, songIds))
 
       if (existingSongs.length === 0) {
         throw createApiError(404, SERVER_ERROR_CODES.SONG_NOT_FOUND, '歌曲不存在或已被删除')
@@ -89,11 +87,6 @@ export default defineEventHandler(async (event) => {
       await tx.delete(votes).where(inArray(votes.songId, existingIds))
       console.log(`删除了投票记录`)
 
-      for (const song of existingSongs) {
-        await releaseCardCodeAfterSongWithdrawal(tx, {
-          songId: song.id, cardCodeId: song.cardCodeId, operatorId: user.id, removeSong: true
-        })
-      }
       // 批量删除歌曲的所有排期
       await tx.delete(schedules).where(inArray(schedules.songId, existingIds))
       console.log(`删除了排期记录`)
@@ -135,18 +128,6 @@ export default defineEventHandler(async (event) => {
     }
 
     console.log(`批量驳回操作完成，共 ${rejectedSongs.length} 首`)
-
-    await recordAdminAudit(event, 'song.batch-reject', {
-      targetType: 'song',
-      targetId: `batch:${songIds.length}`,
-      summary: {
-        count: rejectedSongs.length,
-        songIds: rejectedSongs.map((song) => song.id),
-        titles: rejectedSongs.map((song) => song.title),
-        reason,
-        addToBlacklist
-      }
-    })
 
     return {
       success: true,

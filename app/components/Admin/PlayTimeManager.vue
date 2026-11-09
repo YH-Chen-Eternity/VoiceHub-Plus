@@ -11,14 +11,14 @@ Modified by YH-Chen on 2026-10-17
           {{ locale.desc }}
         </p>
       </div>
-      <div class="flex flex-wrap items-center gap-3">
+      <div class="flex items-center gap-3">
         <div
           class="bg-bg-secondary-40 border border-border-secondary rounded-xl px-4 py-2 flex items-center gap-3"
         >
           <span class="text-[10px] font-black text-text-tertiary uppercase tracking-widest"
             >{{ locale.enableSelection }}</span
           >
-          <button :disabled="(!(can('play-times:write') || can('system-settings:write'))) || !settingsLoaded"
+          <button
             :class="[
               'relative w-10 h-5 rounded-full transition-colors',
               enablePlayTimeSelection ? 'bg-primary-hover' : 'bg-bg-tertiary'
@@ -33,32 +33,8 @@ Modified by YH-Chen on 2026-10-17
             />
           </button>
         </div>
-        <div
-          class="bg-bg-secondary-40 border border-border-secondary rounded-xl px-4 py-2 flex items-center gap-3"
-          :title="locale.requireSlotDesc"
-        >
-          <span class="text-[10px] font-black text-text-tertiary uppercase tracking-widest"
-            >{{ locale.requireSlot }}</span
-          >
-          <button
-            :class="[
-              'relative w-10 h-5 rounded-full transition-colors',
-              enablePlayTimeSelection ? '' : 'opacity-40 cursor-not-allowed',
-              playSlotRequired ? 'bg-primary-hover' : 'bg-bg-tertiary'
-            ]"
-            :disabled="((!enablePlayTimeSelection) || !(can('play-times:write') || can('system-settings:write'))) || !settingsLoaded"
-            @click="toggleSlotRequired"
-          >
-            <div
-              :class="[
-                'absolute top-1 w-3 h-3 bg-bg-secondary rounded-full transition-all',
-                playSlotRequired ? 'left-6' : 'left-1'
-              ]"
-            />
-          </button>
-        </div>
-        <button :disabled="!(can('play-times:write'))"
-          class="flex items-center gap-2 px-6 py-2.5 bg-primary-hover hover:bg-primary text-text-primary text-xs font-black rounded-lg shadow-lg shadow-[var(--primary-glow)] transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+        <button
+          class="flex items-center gap-2 px-6 py-2.5 bg-primary-hover hover:bg-primary text-text-primary text-xs font-black rounded-lg shadow-lg shadow-[var(--primary-glow)] transition-all active:scale-95"
           @click="openAddForm"
         >
           <Plus :size="14" /> {{ locale.add }}
@@ -134,12 +110,6 @@ Modified by YH-Chen on 2026-10-17
             </div>
             <div class="flex items-center gap-2">
               <span
-                v-if="playTime.isDefault"
-                class="px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest border bg-primary-10 text-primary border-primary-20"
-              >
-                {{ locale.defaultBadge }}
-              </span>
-              <span
                 :class="[
                   'px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest border transition-all',
                   playTime.enabled
@@ -171,22 +141,6 @@ Modified by YH-Chen on 2026-10-17
               </div>
             </div>
 
-            <!-- 适用星期：未配置 = 每天均可选 -->
-            <div class="flex flex-wrap items-center gap-1.5">
-              <span
-                v-for="day in weekdayChips(playTime.weekdays)"
-                :key="day.value"
-                :class="[
-                  'px-1.5 py-0.5 rounded text-[9px] font-black border transition-all',
-                  day.active
-                    ? 'bg-primary-10 text-primary border-primary-20'
-                    : 'bg-bg-tertiary-50 text-text-disabled border-border-tertiary-50'
-                ]"
-              >
-                {{ day.label }}
-              </span>
-            </div>
-
             <p class="text-xs text-text-tertiary font-medium leading-relaxed min-h-[32px] line-clamp-2">
               {{ playTime.description || locale.noDescription }}
             </p>
@@ -194,20 +148,20 @@ Modified by YH-Chen on 2026-10-17
 
           <div class="mt-8 pt-6 border-t border-border-secondary-50 flex items-center justify-between">
             <div class="flex gap-2">
-              <button :disabled="!(can('play-times:write'))"
-                class="flex items-center justify-center p-2.5 bg-bg-primary border border-border-secondary rounded-lg text-text-tertiary hover:text-primary hover:border-primary-30 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              <button
+                class="flex items-center justify-center p-2.5 bg-bg-primary border border-border-secondary rounded-lg text-text-tertiary hover:text-primary hover:border-primary-30 transition-all"
                 @click="editPlayTime(playTime)"
               >
                 <Edit2 :size="14" />
               </button>
-              <button :disabled="!can('play-times:write')"
-                class="flex items-center justify-center p-2.5 bg-bg-primary border border-border-secondary rounded-lg text-text-tertiary hover:text-error hover:border-error-30 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              <button
+                class="flex items-center justify-center p-2.5 bg-bg-primary border border-border-secondary rounded-lg text-text-tertiary hover:text-error hover:border-error-30 transition-all"
                 @click="confirmDelete(playTime)"
               >
                 <Trash2 :size="14" />
               </button>
             </div>
-            <button :disabled="!can('play-times:write')"
+            <button
               :class="[
                 'flex items-center gap-2 px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all',
                 playTime.enabled
@@ -265,51 +219,36 @@ Modified by YH-Chen on 2026-10-17
                   <label class="text-[10px] font-black text-text-disabled uppercase tracking-widest px-1"
                     >{{ locale.startTimeOptional }}</label
                   >
-                  <AppTimePicker
-                    v-model="formData.startTime"
-                    :placeholder="locale.startTimeOptional"
-                    size="md"
-                    rounded="lg"
-                  />
+                  <div class="relative">
+                    <input
+                      v-model="formData.startTime"
+                      type="time"
+                      class="w-full bg-bg-primary border border-border-secondary rounded-lg px-5 py-3.5 text-sm text-text-primary focus:outline-none focus:border-primary-30 appearance-none"
+                    >
+                    <Clock
+                      class="absolute right-4 top-1/2 -translate-y-1/2 text-text-secondary pointer-events-none"
+                      :size="14"
+                    />
+                  </div>
                   <p class="text-[9px] text-text-disabled px-1">{{ locale.startTimeHint }}</p>
                 </div>
                 <div class="space-y-2">
                   <label class="text-[10px] font-black text-text-disabled uppercase tracking-widest px-1"
                     >{{ locale.endTimeOptional }}</label
                   >
-                  <AppTimePicker
-                    v-model="formData.endTime"
-                    :placeholder="locale.endTimeOptional"
-                    size="md"
-                    rounded="lg"
-                  />
+                  <div class="relative">
+                    <input
+                      v-model="formData.endTime"
+                      type="time"
+                      class="w-full bg-bg-primary border border-border-secondary rounded-lg px-5 py-3.5 text-sm text-text-primary focus:outline-none focus:border-primary-30 appearance-none"
+                    >
+                    <Clock
+                      class="absolute right-4 top-1/2 -translate-y-1/2 text-text-secondary pointer-events-none"
+                      :size="14"
+                    />
+                  </div>
                   <p class="text-[9px] text-text-disabled px-1">{{ locale.endTimeHint }}</p>
                 </div>
-              </div>
-
-              <div class="space-y-2">
-                <label
-                  class="text-[10px] font-black text-text-disabled uppercase tracking-widest px-1 flex items-center gap-2"
-                >
-                  <CalendarDays :size="10" /> {{ locale.weekdaysTitle }}
-                </label>
-                <div class="flex flex-wrap gap-2">
-                  <button
-                    v-for="day in weekdayOptions"
-                    :key="day.value"
-                    type="button"
-                    :class="[
-                      'px-3 py-2 rounded-lg text-xs font-black border transition-all',
-                      formData.weekdays.includes(day.value)
-                        ? 'bg-primary-hover-10 text-primary border-primary-30'
-                        : 'bg-bg-primary border-border-secondary text-text-tertiary hover:border-border-tertiary'
-                    ]"
-                    @click="toggleWeekday(day.value)"
-                  >
-                    {{ day.label }}
-                  </button>
-                </div>
-                <p class="text-[9px] text-text-disabled px-1">{{ locale.weekdaysHint }}</p>
               </div>
 
               <div class="space-y-2">
@@ -337,29 +276,6 @@ Modified by YH-Chen on 2026-10-17
                 >
               </label>
 
-              <label
-                :class="[
-                  'flex items-start gap-3 px-1 group',
-                  formData.enabled ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'
-                ]"
-              >
-                <input
-                  v-model="formData.isDefault"
-                  type="checkbox"
-                  class="mt-0.5 w-4 h-4 rounded border-border-secondary bg-bg-primary"
-                  :disabled="!formData.enabled"
-                >
-                <span class="min-w-0">
-                  <span
-                    class="block text-xs font-bold text-text-secondary group-hover:text-primary transition-colors"
-                    >{{ locale.defaultSlot }}</span
-                  >
-                  <span class="mt-1 block text-[10px] leading-relaxed text-text-tertiary">{{
-                    locale.defaultSlotHint
-                  }}</span>
-                </span>
-              </label>
-
               <div
                 v-if="formError"
                 class="bg-error-10 border border-error-20 rounded-lg p-3 text-[11px] text-error"
@@ -377,7 +293,7 @@ Modified by YH-Chen on 2026-10-17
               {{ locale.cancel }}
             </button>
             <button
-              :disabled="(formSubmitting) || !can('play-times:write')"
+              :disabled="formSubmitting"
               class="px-8 py-2.5 bg-primary-hover hover:bg-primary disabled:opacity-50 disabled:cursor-not-allowed text-text-primary text-xs font-black rounded-lg shadow-lg transition-all active:scale-95"
               @click="savePlayTime"
             >
@@ -421,7 +337,7 @@ Modified by YH-Chen on 2026-10-17
                   {{ locale.cancel }}
                 </button>
                 <button
-                  :disabled="(deleteInProgress) || !can('play-times:write')"
+                  :disabled="deleteInProgress"
                   class="flex-1 px-4 py-3 bg-error hover:bg-error disabled:opacity-50 disabled:cursor-not-allowed text-text-primary text-xs font-black rounded-lg shadow-xl shadow-[var(--error-glow-20)] transition-all active:scale-95"
                   @click="deletePlayTime"
                 >
@@ -436,17 +352,13 @@ Modified by YH-Chen on 2026-10-17
   </div>
 </template>
 
-<script setup>
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+<script lang="ts" setup>
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useAuth } from '~/composables/useAuth'
-import { usePermissions } from '~/composables/usePermissions'
 import { useToast } from '~/composables/useToast'
 import { useLocale } from '~/utils/locale'
 import type { PlayTime } from '~~/types'
-import { useServerErrors } from '~/composables/useLocaleText'
-
 import AppSpinner from '~/components/UI/Common/AppSpinner.vue'
-import AppTimePicker from '~/components/UI/Common/AppTimePicker.vue'
 import {
   Plus,
   Clock,
@@ -457,17 +369,11 @@ import {
   Info,
   AlertCircle,
   X,
-  AlignLeft,
-  CalendarDays
+  AlignLeft
 } from '@lucide/vue'
 
-const { getAuthConfig } = useAuth()
-const { can } = usePermissions()
-const canRead = computed(() => can('play-times:read'))
-const canWrite = computed(() => can('play-times:write'))
-const settingsLoaded = ref(false)
+const { getAuthConfig, isAdmin } = useAuth()
 const { showToast: showNotification } = useToast()
-const { localize: localizeServerError } = useServerErrors()
 const { admin } = useLocale()
 const locale = computed(() => {
   const base = admin.value?.playTimeManager || {}
@@ -480,53 +386,23 @@ const locale = computed(() => {
   })
 })
 
-const playTimes = ref([])
+const playTimes = ref<PlayTime[]>([])
 const loading = ref(false)
 const error = ref('')
 const showAddForm = ref(false)
-const editingPlayTime = ref(null)
-const playTimeToDelete = ref(null)
+const editingPlayTime = ref<PlayTime | null>(null)
+const playTimeToDelete = ref<PlayTime | null>(null)
 const showDeleteConfirm = ref(false)
 const formSubmitting = ref(false)
 const deleteInProgress = ref(false)
 const formError = ref('')
 const enablePlayTimeSelection = ref(false)
-// 「点歌时段必选」总开关：开启后用户提交点歌必须选择播出日期与时段
-const playSlotRequired = ref(false)
 const deleteConfirmTitleText = computed(() => {
   const title = locale.value.deleteConfirmTitle
   const name = playTimeToDelete.value?.name || ''
   if (typeof title === 'function') return title(name)
   return (title || '').replace('{0}', name)
 })
-
-// 星期选项（0=周日 … 6=周六）
-const weekdayOptions = computed(() => {
-  const labels = locale.value.weekdaysFull || ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
-  return [0, 1, 2, 3, 4, 5, 6].map((value) => ({ value, label: labels[value] }))
-})
-
-// 卡片上的星期展示：配置了星期则高亮显示，未配置则全部置灰（表示每天均可选）
-const weekdayChips = (weekdays) => {
-  const days = Array.isArray(weekdays) && weekdays.length > 0 ? weekdays : null
-  const labels = locale.value.weekdaysShort || ['日', '一', '二', '三', '四', '五', '六']
-  return [0, 1, 2, 3, 4, 5, 6].map((value) => ({
-    value,
-    label: labels[value],
-    active: days === null || days.includes(value)
-  }))
-}
-
-// 勾选/取消适用星期
-const toggleWeekday = (value) => {
-  const index = formData.weekdays.indexOf(value)
-  if (index >= 0) {
-    formData.weekdays.splice(index, 1)
-  } else {
-    formData.weekdays.push(value)
-    formData.weekdays.sort((a, b) => a - b)
-  }
-}
 
 // 表单数据
 const formData = reactive({
@@ -535,20 +411,8 @@ const formData = reactive({
   startTime: '',
   endTime: '',
   description: '',
-  enabled: true,
-  // 适用星期（0=周日…6=周六），空数组 = 每天均可选
-  weekdays: []            ,
-  // 默认播出时段：用户投稿未选择时段时自动预选
-  isDefault: false
+  enabled: true
 })
-
-// 停用的时段不能作为默认时段：取消启用时同步取消默认勾选
-watch(
-  () => formData.enabled,
-  (enabled) => {
-    if (!enabled) formData.isDefault = false
-  }
-)
 
 // 初始化
 onMounted(async () => {
@@ -558,7 +422,7 @@ onMounted(async () => {
 
 // 获取播出时段列表
 const fetchPlayTimes = async () => {
-  if (!canRead.value) {
+  if (!isAdmin.value) {
     error.value = locale.value.errors.adminOnly
     return
   }
@@ -573,13 +437,8 @@ const fetchPlayTimes = async () => {
     })
 
     // 自定义排序：先按启用状态排序，然后有时间的排在前面，没有时间的排在后面
-    playTimes.value = data.sort((a, b) => {
-      // 默认时段排最前，便于识别
-      if (a.isDefault !== b.isDefault) {
-        return a.isDefault ? -1 : 1
-      }
-
-      // 然后按启用状态排序
+    playTimes.value = data.sort((a: PlayTime, b: PlayTime) => {
+      // 首先按启用状态排序
       if (a.enabled !== b.enabled) {
         return a.enabled ? -1 : 1 // 启用的排在前面
       }
@@ -606,8 +465,8 @@ const fetchPlayTimes = async () => {
       // 最后按名称排序
       return a.name.localeCompare(b.name)
     })
-  } catch (err) {
-    error.value = localizeServerError(err, locale.value.errors.fetchPlayTimesFailed)
+  } catch (err: any) {
+    error.value = getErrorMessage(err) || locale.value.errors.fetchPlayTimesFailed
   } finally {
     loading.value = false
   }
@@ -615,72 +474,50 @@ const fetchPlayTimes = async () => {
 
 // 获取系统设置
 const fetchSystemSettings = async () => {
-  if (!can('play-times:read') && !can('system-settings:read')) return
+  if (!isAdmin.value) return
 
   try {
     const authConfig = getAuthConfig()
-    const data = await $fetch('/api/admin/system-settings/play-times', {
+    const data = await $fetch('/api/admin/system-settings', {
       ...authConfig
     })
     enablePlayTimeSelection.value = data.enablePlayTimeSelection
-    playSlotRequired.value = data.playSlotRequired || false
-    settingsLoaded.value = true
-  } catch (err) {
-    error.value = localizeServerError(err, locale.value.errors.fetchFailed)
+  } catch (err: any) {
+    console.error('获取系统设置失败:', getErrorMessage(err))
   }
 }
 
-// 切换全局启用状态。
+// 切换全局启用状态
 const toggleGlobalEnabled = async () => {
-  if (!settingsLoaded.value) return
-  if (!can('play-times:write') && !can('system-settings:write')) return
-  const prev = { enabled: enablePlayTimeSelection.value, required: playSlotRequired.value }
-  const nextEnabled = !prev.enabled
-  enablePlayTimeSelection.value = nextEnabled
-  playSlotRequired.value = nextEnabled ? prev.required : false
-  await savePlayTimeFlags(prev, locale.value.messages.systemSettingsUpdated, locale.value.errors.updateSystemSettingsFailed)
+  enablePlayTimeSelection.value = !enablePlayTimeSelection.value
+  await updateSystemSettings()
 }
 
-// 切换「时段必选」总开关（仅在总开关开启时可用）
-const toggleSlotRequired = async () => {
-  if (!settingsLoaded.value) return
-  if (!can('play-times:write') && !can('system-settings:write')) return
-  if (!enablePlayTimeSelection.value) return
-  const prev = { enabled: enablePlayTimeSelection.value, required: playSlotRequired.value }
-  playSlotRequired.value = !prev.required
-  await savePlayTimeFlags(prev, locale.value.messages.slotRequiredUpdated, locale.value.errors.updateSlotRequiredFailed)
-}
-
-// 保存两个开关：两者相互约束，同一请求提交完整组合
-const savePlayTimeFlags = async (prev, successMessage, failMessage) => {
-  if (!settingsLoaded.value) return
-  if (!can('play-times:write') && !can('system-settings:write')) return
+// 更新系统设置
+const updateSystemSettings = async () => {
+  if (!isAdmin.value) return
 
   try {
     const authConfig = getAuthConfig()
-    await $fetch('/api/admin/system-settings/play-times', {
+    await $fetch('/api/admin/system-settings', {
       method: 'POST',
       body: {
-        enablePlayTimeSelection: enablePlayTimeSelection.value,
-        playSlotRequired: playSlotRequired.value
+        enablePlayTimeSelection: enablePlayTimeSelection.value
       },
       ...authConfig
     })
 
-    showNotification(successMessage, 'success')
-  } catch (err) {
-    error.value = getErrorMessage(err) || failMessage
+    showNotification(locale.value.messages.systemSettingsUpdated, 'success')
+  } catch (err: any) {
+    error.value = getErrorMessage(err) || locale.value.errors.updateSystemSettingsFailed
     showNotification(error.value, 'error')
-    // 保存失败回滚两个开关状态
-    enablePlayTimeSelection.value = prev.enabled
-    playSlotRequired.value = prev.required
+    // 如果失败，恢复状态
+    enablePlayTimeSelection.value = !enablePlayTimeSelection.value
   }
 }
 
 // 打开添加表单
 const openAddForm = () => {
-  if (!(can('play-times:write'))) return
-  if (!canWrite.value) return
   showAddForm.value = true
   Object.assign(formData, {
     id: 0,
@@ -688,15 +525,12 @@ const openAddForm = () => {
     startTime: '',
     endTime: '',
     description: '',
-    enabled: true,
-    weekdays: [],
-    isDefault: false
+    enabled: true
   })
 }
 
 // 编辑播出时段
-const editPlayTime = (playTime) => {
-  if (!(can('play-times:write'))) return
+const editPlayTime = (playTime: PlayTime) => {
   editingPlayTime.value = playTime
   Object.assign(formData, {
     id: playTime.id,
@@ -704,20 +538,17 @@ const editPlayTime = (playTime) => {
     startTime: playTime.startTime || '',
     endTime: playTime.endTime || '',
     description: playTime.description || '',
-    enabled: playTime.enabled,
-    // 未配置星期 = 每天均可选，编辑时展示为空（不勾选任何一天）
-    weekdays: Array.isArray(playTime.weekdays) ? [...playTime.weekdays].sort((a, b) => a - b) : [],
-    isDefault: playTime.isDefault === true
+    enabled: playTime.enabled
   })
 }
 
 // 切换播出时段状态
-const togglePlayTimeStatus = async (playTime) => {
-  if (!canWrite.value) return
+const togglePlayTimeStatus = async (playTime: PlayTime) => {
+  if (!isAdmin.value) return
 
   try {
     const authConfig = getAuthConfig()
-    const updated = await $fetch(`/api/admin/play-times/${playTime.id}`, {
+    await $fetch(`/api/admin/play-times/${playTime.id}`, {
       method: 'PATCH',
       body: {
         enabled: !playTime.enabled
@@ -727,28 +558,27 @@ const togglePlayTimeStatus = async (playTime) => {
 
     // 更新本地数据
     await fetchPlayTimes()
-    // 停用的如果是默认时段，后端会同时取消默认，按返回的 defaultCleared 给出明确提示
-    const message = updated?.defaultCleared
-      ? locale.value?.messages?.defaultSlotCleared || 'Default play time cleared'
-      : playTime.enabled
-        ? locale.value?.messages?.playTimeDisabled || 'Play time disabled'
-        : locale.value?.messages?.playTimeEnabled || 'Play time enabled'
-    showNotification(message, 'success')
-  } catch (err) {
-    error.value = localizeServerError(err, locale.value.errors.updatePlayTimeStatusFailed)
+    showNotification(
+      playTime.enabled
+        ? (locale.value?.messages?.playTimeDisabled || 'Play time disabled')
+        : (locale.value?.messages?.playTimeEnabled || 'Play time enabled'),
+      'success'
+    )
+  } catch (err: any) {
+    error.value = getErrorMessage(err) || locale.value.errors.updatePlayTimeStatusFailed
     showNotification(error.value, 'error')
   }
 }
 
 // 确认删除
-const confirmDelete = (playTime) => {
+const confirmDelete = (playTime: PlayTime) => {
   playTimeToDelete.value = playTime
   showDeleteConfirm.value = true
 }
 
 // 删除播出时段
 const deletePlayTime = async () => {
-  if (!playTimeToDelete.value || !canWrite.value) return
+  if (!playTimeToDelete.value || !isAdmin.value) return
 
   deleteInProgress.value = true
 
@@ -764,8 +594,8 @@ const deletePlayTime = async () => {
     showDeleteConfirm.value = false
     playTimeToDelete.value = null
     showNotification(locale.value?.messages?.playTimeDeleted || 'Play time deleted', 'success')
-  } catch (err) {
-    error.value = localizeServerError(err, locale.value.errors.deletePlayTimeFailed)
+  } catch (err: any) {
+    error.value = getErrorMessage(err) || locale.value.errors.deletePlayTimeFailed
     showNotification(error.value, 'error')
   } finally {
     deleteInProgress.value = false
@@ -774,7 +604,6 @@ const deletePlayTime = async () => {
 
 // 保存播出时段
 const savePlayTime = async () => {
-  if (!canWrite.value) return
   formError.value = ''
 
   // 时间验证（仅当两个时间都有填写时才进行比较）
@@ -814,11 +643,7 @@ const savePlayTime = async () => {
         startTime: formData.startTime || null,
         endTime: formData.endTime || null,
         description: formData.description || null,
-        enabled: formData.enabled,
-        // 空数组 = 清除星期配置，恢复每天均可选
-        weekdays: [...formData.weekdays].sort((a, b) => a - b),
-        // 停用的时段不能作为默认时段
-        isDefault: formData.enabled ? formData.isDefault : false
+        enabled: formData.enabled
       },
       ...authConfig
     })
@@ -832,8 +657,8 @@ const savePlayTime = async () => {
         : (locale.value?.messages?.playTimeCreated || 'Play time created'),
       'success'
     )
-  } catch (err) {
-    formError.value = localizeServerError(err, locale.value.errors.savePlayTimeFailed)
+  } catch (err: any) {
+    formError.value = getErrorMessage(err) || locale.value.errors.savePlayTimeFailed
     showNotification(formError.value, 'error')
   } finally {
     formSubmitting.value = false
@@ -853,9 +678,7 @@ const cancelForm = () => {
     startTime: '',
     endTime: '',
     description: '',
-    enabled: true,
-    weekdays: [],
-    isDefault: false
+    enabled: true
   })
 }
 </script>
