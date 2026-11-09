@@ -44,7 +44,7 @@
     "@jitl/quickjs-singlefile-browser-release-sync": "0.32.0",
     "@lucide/vue": "^1.59.0",
     "@neteasecloudmusicapienhanced/api": "^4.41.1",
-    "@netlify/functions": "^2.8.2",
+    "@netlify/functions": "^6.1.0",
     "@nuxt/kit": "4.5.0",
     "@pixi/app": "^7.4.3",
     "@pixi/core": "^7.4.3",

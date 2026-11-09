@@ -40,8 +40,8 @@ importers:
         specifier: ^4.41.1
         version: 4.41.1
       '@netlify/functions':
-        specifier: ^2.8.2
-        version: 2.8.2
+        specifier: ^6.1.0
+        version: 6.1.0
       '@nuxt/kit':
         specifier: 4.5.0
         version: 4.5.0(magic-string@1.4.3)(magicast@0.5.5)(oxc-parser@0.153.0)(rolldown@1.2.14)(unplugin@3.4.0(esbuild@0.28.2)(rolldown@1.2.14)(rollup@4.64.7)(vite@8.3.4(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(sass@1.105.2)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))(webpack@5.109.2(esbuild@0.28.2)(lightningcss@1.33.0)(postcss@8.5.30)(sharp@0.35.5(@types/node@26.6.6))))
@@ -1679,17 +1679,21 @@ packages:
     resolution: {integrity: sha512-8BVbf80pKLpVdK6M+TJYMYB8V3hzIrBy0iVY1SP4hxZTqZAVTowC/lVn0gMHV6uc6e6BVXzFYUL0H4CTLdNmKQ==}
     hasBin: true
 
-  '@netlify/functions@2.8.2':
-    resolution: {integrity: sha512-DeoAQh8LuNPvBE4qsKlezjKj0PyXDryOFJfJKo3Z1qZLKzQ21sT314KQKPVjfvw6knqijj+IO+0kHXy/TJiqNA==}
-    engines: {node: '>=14.0.0'}
+  '@netlify/cache@4.2.0':
+    resolution: {integrity: sha512-xT8DGkqwnw3C1TzBmgvJl8NyEugGNKoj6o5aKoSPxKXLGI2Hfm6JodsSHwl9r5drotMMY+x1rH5GjprLngKvIA==}
+    engines: {node: '>=22.12.0'}
 
-  '@netlify/node-cookies@0.1.0':
-    resolution: {integrity: sha512-OAs1xG+FfLX0LoRASpqzVntVV/RpYkgpI0VrUnw2u0Q1qiZUzcPffxRK8HF3gc4GjuhG5ahOEMJ9bswBiZPq0g==}
-    engines: {node: ^14.16.0 || >=16.0.0}
+  '@netlify/functions@6.1.0':
+    resolution: {integrity: sha512-Kwbood+CBR0okDmimwQ7YhsLU5jV0ON/8f6SvaTklVqDMOMfaHhaSsl6ELgnpWwlKgnkDYUf1Sg2BIJnrenRrA==}
+    engines: {node: '>=22.12.0'}
 
-  '@netlify/serverless-functions-api@1.26.1':
-    resolution: {integrity: sha512-q3L9i3HoNfz0SGpTIS4zTcKBbRkxzCRpd169eyiTuk3IwcPC3/85mzLHranlKo2b+HYT0gu37YxGB45aD8A3Tw==}
-    engines: {node: '>=18.0.0'}
+  '@netlify/runtime-utils@3.0.0':
+    resolution: {integrity: sha512-OHo40+V3QZkR+UrDjqhN+LekrAby/dSSJxsvyYs9i88E/mSl3goB/ysoL+VYROm190egxmQyRYlHK7vL4GeHBQ==}
+    engines: {node: '>=22.12.0'}
+
+  '@netlify/types@3.3.0':
+    resolution: {integrity: sha512-u/uh0vOFslJsTcG8nnynAKnTpVIakXbv3mkBG9DTqKZrDEzmfLKDZ3I7evHA3/CYUmNB24pNrzlHj2nIsqEwzg==}
+    engines: {node: '>=22.12.0'}
 
   '@noble/hashes@1.8.0':
     resolution: {integrity: sha512-jCs9ldd7NwzpgXDIf6P3+NrHh9/sD6CQdxHyjQI+h/6rDNo88ypBxxz45UDuZHz9r3tNz7N/VInSVoVdtXEI4A==}
@@ -7694,9 +7698,6 @@ packages:
     resolution: {integrity: sha512-oCwdVC7mTuWiPyjLUz/COz5TLk6wgp0RCsN+wHZ2Ekneac9w8uuV0njcbbie2ME+Vs+d6duwmYuR3HgQXs1fOg==}
     engines: {node: '>= 0.4'}
 
-  urlpattern-polyfill@8.0.2:
-    resolution: {integrity: sha512-Qp95D4TPJl1kC9SKigDcqgyM2VDVO4RiJc2d4qe5GrYm+zbIQCWWKAFaJNQ4BhdFeDGwBmAxqJBwWSJDb9T3BQ==}
-
   util-deprecate@1.0.2:
     resolution: {integrity: sha512-EPD5q1uXyFxJpCrLnCc1nHnq3gOa6DZBocAIiI2TaSCA7VCJ1UJDMagCzIkXNsUYfD1daK//LTEQ8xiIbrHtcw==}
 
@@ -9776,16 +9777,18 @@ snapshots:
       - debug
       - supports-color
 
-  '@netlify/functions@2.8.2':
+  '@netlify/cache@4.2.0':
     dependencies:
-      '@netlify/serverless-functions-api': 1.26.1
+      '@netlify/runtime-utils': 3.0.0
 
-  '@netlify/node-cookies@0.1.0': {}
-
-  '@netlify/serverless-functions-api@1.26.1':
+  '@netlify/functions@6.1.0':
     dependencies:
-      '@netlify/node-cookies': 0.1.0
-      urlpattern-polyfill: 8.0.2
+      '@netlify/cache': 4.2.0
+      '@netlify/types': 3.3.0
+
+  '@netlify/runtime-utils@3.0.0': {}
+
+  '@netlify/types@3.3.0': {}
 
   '@noble/hashes@1.8.0': {}
 
@@ -16657,8 +16660,6 @@ snapshots:
     dependencies:
       punycode: 1.4.1
       qs: 6.16.1
-
-  urlpattern-polyfill@8.0.2: {}
 
   util-deprecate@1.0.2: {}
 
