@@ -1110,7 +1110,7 @@ export const pages = {
     originalLoading: '正在加载原图…',
     downloadImage: '下载图片',
     downloadFailed: '下载失败，请重试',
-    guestViewOnly: '你可以浏览社区内容，登录后即可发帖、评论、点赞和下载图片',
+    guestViewOnly: '你可以浏览社区内容、查看原图与下载图片，登录后即可发帖、评论和点赞',
     guestLoginRequired: '请先登录后再操作',
     withdraw: '撤回',
     deleteContent: '删除',

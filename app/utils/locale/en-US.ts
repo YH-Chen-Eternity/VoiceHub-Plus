@@ -1131,7 +1131,7 @@ export const pages = {
     originalLoading: 'Loading original…',
     downloadImage: 'Download',
     downloadFailed: 'Download failed, please try again',
-    guestViewOnly: 'You can browse the community. Sign in to post, comment, like and download images',
+    guestViewOnly: 'You can browse the community, view originals and download images. Sign in to post, comment and like',
     guestLoginRequired: 'Please sign in to continue',
     withdraw: 'Withdraw',
     deleteContent: 'Delete',
