@@ -990,7 +990,7 @@ export const pages = {
     noSongSelected: 'No song selected',
     remove: 'Remove',
     addImages: 'Add images',
-    imageHint: (max: number) => `Up to ${max} images, 3MB each. Compressed server-side losslessly first, lossy only if needed`,
+    imageHint: (max: number) => `Up to ${max} images, 3MB each. Oversized images are pre-compressed on your device, then re-encoded server-side losslessly first, lossy only if needed`,
     imagesDisabled: 'Images are currently disabled',
     submit: 'Publish',
     submitting: 'Publishing…',
@@ -1116,6 +1116,7 @@ export const pages = {
     imageTypeUnsupported: 'Only PNG / JPEG / WebP / GIF are supported',
     imageTooLarge: 'Original images must be under 15MB',
     imageCompressed: 'Large image was compressed while keeping as much quality as possible',
+    imagePreCompressed: 'Image was pre-compressed on your device — faster upload, less data',
     imageUploadFailed: 'Image upload failed',
     // Image viewer (WeChat-Moments style: zoom / view original / download)
     viewerLabel: 'Image viewer',

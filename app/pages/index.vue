@@ -192,16 +192,16 @@ Modified by YH-Chen on 2026-10-17
           </div>
           <ClientOnly>
             <div
-              :class="{ active: activeTab === 'community', disabled: !isClientAuthenticated }"
+              :class="{ active: activeTab === 'community' }"
               class="section-tab"
               data-tab="community"
-              @click="isClientAuthenticated ? handleTabClick('community') : showLoginNotice()"
+              @click="handleTabClick('community')"
             >
               <Icon class="tab-icon" name="users" :size="20" />
               <span class="tab-text">{{ communityLocale.tab }}</span>
             </div>
             <template #fallback>
-              <div class="section-tab disabled" data-tab="community">
+              <div class="section-tab" data-tab="community">
                 <Icon class="tab-icon" name="users" :size="20" />
                 <span class="tab-text">{{ communityLocale.tab }}</span>
               </div>

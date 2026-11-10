@@ -80,6 +80,16 @@ test('回声社区游客只读：GET 匿名放行，写操作与改密门控仍�
   assert.equal(shouldBypassPublicApiAuthentication('/api/community/posts', 'GET', true), false)
 })
 
+test('公开图片 CDN 前缀：GET 匿名放行，其余方法不放行', () => {
+  assert.equal(isPublicApiPath('/api/public/media/12', 'GET'), true)
+  assert.equal(isPublicApiPath('/api/public/media/12', 'HEAD'), true)
+  assert.equal(isPublicApiPath('/api/public/media/12', 'POST'), false)
+  assert.equal(isPublicApiPath('/api/public/media/12', 'DELETE'), false)
+  assert.equal(shouldBlockDuringPasswordChange('/api/public/media/12', 'GET', true), false)
+  assert.equal(shouldBypassPublicApiAuthentication('/api/public/media/12', 'GET', false), true)
+  assert.equal(shouldBypassPublicApiAuthentication('/api/public/media/12', 'GET', true), false)
+})
+
 test('强制改密门控放行公共 API，但阻止业务写入和 OAuth provider 路由', () => {
   assert.equal(shouldBlockDuringPasswordChange('/api/site-config', 'GET', true), false)
   assert.equal(shouldBlockDuringPasswordChange('/api/sys/time', 'GET', true), false)

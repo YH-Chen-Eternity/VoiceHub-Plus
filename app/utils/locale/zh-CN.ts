@@ -969,7 +969,7 @@ export const pages = {
     noSongSelected: '未选择歌曲',
     remove: '移除',
     addImages: '添加图片',
-    imageHint: (max: number) => `最多 ${max} 张，单张不超过 3MB，服务端将优先无损压缩，压不到才适当有损压缩`,
+    imageHint: (max: number) => `最多 ${max} 张，单张不超过 3MB；超限图片先在本机预压缩，服务端再优先无损压缩、压不到才适当有损`,
     imagesDisabled: '当前不允许发布图片',
     submit: '发布',
     submitting: '发布中…',
@@ -1095,6 +1095,7 @@ export const pages = {
     imageTypeUnsupported: '仅支持 PNG / JPEG / WebP / GIF 格式',
     imageTooLarge: '图片原始文件不能超过 15MB',
     imageCompressed: '图片较大，已在尽量保持画质的前提下压缩',
+    imagePreCompressed: '已在本机预压缩图片，上传更快更省流量',
     imageUploadFailed: '图片上传失败',
     // 图片查看器（微信朋友圈式：缩放 / 查看原图 / 下载）
     viewerLabel: '图片查看器',

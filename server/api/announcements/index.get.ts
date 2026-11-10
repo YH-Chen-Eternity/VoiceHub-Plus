@@ -36,7 +36,8 @@ export default defineEventHandler(async () => {
       id: row.id,
       type: row.type === 'IMAGE' ? 'IMAGE' : 'TEXT',
       text: row.text || '',
-      imageUrl: row.imageId ? `/api/media/${row.imageId}` : row.imageUrl || '',
+      // 已启用公告的配图走公开 CDN 端点：无 Cookie、public 缓存 + ETag/304，边缘可直接复用
+      imageUrl: row.imageId ? `/api/public/media/${row.imageId}` : row.imageUrl || '',
       linkUrl: row.linkUrl || '',
       // SCROLL=超宽滚动（默认）；WRAP=分两行完整显示
       displayMode: row.displayMode === 'WRAP' ? 'WRAP' : 'SCROLL',
