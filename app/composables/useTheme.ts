@@ -27,7 +27,8 @@ function applyTheme(t: Theme) {
 /** 将实际生效主题写入 cookie，供 SSR 水合时读取，保证服务端渲染与客户端首帧一致 */
 function writeAppliedThemeCookie(t: Theme) {
   try {
-    document.cookie = `voicehub-theme-applied=${encodeURIComponent(t)}; Path=/; Max-Age=31536000; SameSite=Lax`
+    const secure = location.protocol === 'https:' ? '; Secure' : ''
+    document.cookie = `voicehub-theme-applied=${encodeURIComponent(t)}; Path=/; Max-Age=31536000; SameSite=Lax${secure}`
   } catch {
     /* cookie 写入失败时静默忽略：仅影响下次 SSR 水合一致性 */
   }
