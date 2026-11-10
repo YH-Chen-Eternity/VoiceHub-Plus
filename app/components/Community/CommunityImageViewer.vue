@@ -287,6 +287,8 @@ async function downloadImage() {
     // 防御：服务端异常时可能返回 HTML 错误页，避免把它存成损坏的图片文件
     if (!contentType.startsWith('image/')) throw new Error('not-image')
     const blob = await response.blob()
+    // 双重校验：blob.type 来自实际响应，防止头部与内容不一致的异常响应被存为损坏文件
+    if (!blob.type.startsWith('image/')) throw new Error('not-image')
     const objectUrl = URL.createObjectURL(blob)
     const anchor = document.createElement('a')
     anchor.href = objectUrl
