@@ -17,14 +17,14 @@ import {
   buildCommunityIdentity,
   ensureCommunityProfile,
   getCommunitySettings,
-  isCommunityReviewer,
-  requireCommunityUser
+  getCommunityViewer,
+  isCommunityReviewer
 } from '~~/server/utils/community'
 import { createApiError } from '~~/server/utils/apiError'
 import { resolveCommunityLevel } from '~~/server/utils/communityLevel'
 
 export default defineEventHandler(async (event) => {
-  const viewer = requireCommunityUser(event)
+  const viewer = getCommunityViewer(event)
   const settings = await getCommunitySettings()
   if (!settings.enabled && !isCommunityReviewer(viewer)) {
     throw createApiError(403, 'COMMUNITY_DISABLED', '回声社区暂未开放')

@@ -2,12 +2,12 @@ import { getQuery } from 'h3'
 import { and, desc, eq, ilike, inArray, or, sql } from 'drizzle-orm'
 import { db } from '~/drizzle/db'
 import { schedules, songs } from '~/drizzle/schema'
-import { requireCommunityUser } from '~~/server/utils/community'
+import { getCommunityViewer } from '~~/server/utils/community'
 import { getActiveSemesterName, resolveCommunitySongLikeState } from '~~/server/utils/communitySongVote'
 import { matchSongBlacklistCheap } from '~~/server/utils/songBlacklistMatch'
 
 export default defineEventHandler(async (event) => {
-  const user = requireCommunityUser(event)
+  const user = getCommunityViewer(event)
   const query = getQuery(event)
   const q = String(query.q || '').trim().slice(0, 50)
   const activeSemester = await getActiveSemesterName()

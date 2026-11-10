@@ -3,13 +3,13 @@ import { db } from '~/drizzle/db'
 import { communityBoards } from '~/drizzle/schema'
 import {
   getCommunitySettings,
-  isCommunityReviewer,
-  requireCommunityUser
+  getCommunityViewer,
+  isCommunityReviewer
 } from '~~/server/utils/community'
 import { createApiError } from '~~/server/utils/apiError'
 
 export default defineEventHandler(async (event) => {
-  const user = requireCommunityUser(event)
+  const user = getCommunityViewer(event)
   const settings = await getCommunitySettings()
   if (!settings.enabled && !isCommunityReviewer(user)) {
     throw createApiError(403, 'COMMUNITY_DISABLED', '回声社区暂未开放')

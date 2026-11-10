@@ -3,16 +3,19 @@ import { eq, sql } from 'drizzle-orm'
 import { db } from '~/drizzle/db'
 import { communityPostViews, communityPosts, communityProfiles } from '~/drizzle/schema'
 import {
+  getCommunityViewer,
   getReviewableBoardIds,
   isCommunityAdmin,
-  isCommunityReviewer,
-  requireCommunityUser
+  isCommunityGuest,
+  isCommunityReviewer
 } from '~~/server/utils/community'
 import { createApiError } from '~~/server/utils/apiError'
 import { getCommunityPostById } from '~~/server/utils/communityFeed'
+import { recordGuestView } from '~~/server/utils/guestView'
 
 export default defineEventHandler(async (event) => {
-  const user = requireCommunityUser(event)
+  const user = getCommunityViewer(event)
+  const guest = isCommunityGuest(event)
   const postId = Number(getRouterParam(event, 'id'))
   if (!Number.isInteger(postId) || postId <= 0) {
     throw createApiError(400, 'COMMUNITY_POST_INVALID', '帖子参数不正确')
@@ -41,18 +44,23 @@ export default defineEventHandler(async (event) => {
     }
   }
 
-  // 观看人数：同一用户对同一帖子只计一次（数据库唯一键去重，重启/多实例都不会重复计数）
+  // 浏览量：登录用户按 (postId,userId) 永久去重；游客用签名 cookie 匿名 id + 小时桶去重。
+  // 两者都用数据库唯一键 + onConflictDoNothing 原子判定，重启/多实例都不会重复计数。
   let counted = false
   if (post.status === 'APPROVED') {
-    try {
-      const inserted = await db
-        .insert(communityPostViews)
-        .values({ postId, userId: user.id })
-        .onConflictDoNothing()
-        .returning({ postId: communityPostViews.postId })
-      counted = inserted.length > 0
-    } catch {
-      counted = false
+    if (guest) {
+      counted = await recordGuestView(event, postId)
+    } else {
+      try {
+        const inserted = await db
+          .insert(communityPostViews)
+          .values({ postId, userId: user.id })
+          .onConflictDoNothing()
+          .returning({ postId: communityPostViews.postId })
+        counted = inserted.length > 0
+      } catch {
+        counted = false
+      }
     }
   }
   if (counted) {

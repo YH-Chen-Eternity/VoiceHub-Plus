@@ -1,15 +1,17 @@
 import { getQuery } from 'h3'
 import {
   getCommunitySettings,
+  getCommunityViewer,
   isCommunityAdmin,
-  isCommunityReviewer,
-  requireCommunityUser
+  isCommunityGuest,
+  isCommunityReviewer
 } from '~~/server/utils/community'
 import { createApiError } from '~~/server/utils/apiError'
 import { loadCommunityPosts } from '~~/server/utils/communityFeed'
 
 export default defineEventHandler(async (event) => {
-  const user = requireCommunityUser(event)
+  const user = getCommunityViewer(event)
+  const guest = isCommunityGuest(event)
   const settings = await getCommunitySettings()
   if (!settings.enabled && !isCommunityReviewer(user)) {
     throw createApiError(403, 'COMMUNITY_DISABLED', '回声社区暂未开放')
@@ -19,7 +21,8 @@ export default defineEventHandler(async (event) => {
   const boardId = Number(query.boardId || 0) || undefined
   const beforeId = Number(query.beforeId || 0) || undefined
   const limit = Math.min(Math.max(Number(query.limit || 20) || 20, 1), 30)
-  const mine = query.mine === '1' || query.mine === 'true'
+  // 游客无论如何都只能看「已通过」的公开信息流：禁止 mine 参数把 status 放宽到全部
+  const mine = !guest && (query.mine === '1' || query.mine === 'true')
   const q = String(query.q || '').trim().slice(0, 50)
   const sort = query.sort === 'hot' ? 'hot' : 'latest'
 

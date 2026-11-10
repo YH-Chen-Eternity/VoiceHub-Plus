@@ -561,6 +561,13 @@
       "when": 1794141232000,
       "tag": "20261108123352_loose_bastion",
       "breakpoints": true
+    },
+    {
+      "idx": 80,
+      "version": "7",
+      "when": 1794276943289,
+      "tag": "20261110021543_auto-migration",
+      "breakpoints": true
     }
   ]
 }

@@ -67,6 +67,38 @@ export function requireCommunityUser(event: H3Event) {
   return user
 }
 
+/**
+ * 游客占位身份：id=0 不匹配任何真实用户（DB 自增主键从 1 开始），role 为空不具任何权限。
+ * 仅用于「游客可浏览」的公开只读端点，让 `${user.id}` 之类的 SQL 参数安全落到 0，
+ * 使 likedByMe / 拉黑过滤 / 「自己的评论」/ 审帖板块等查询自然返回空集。
+ */
+export const COMMUNITY_GUEST_USER = Object.freeze({
+  id: 0,
+  role: '',
+  name: '',
+  grade: '',
+  class: '',
+  requirePasswordChange: false
+})
+
+/**
+ * 只读端点的查看者身份：登录返回真实 user，未登录返回游客占位对象（不抛 401）。
+ *
+ * 使用场景：帖子列表 / 详情 / 评论列表 / 板块 / 歌曲 / 用户主页等「游客可只读」端点。
+ * 调用方仍必须把可见性收紧到「APPROVED + 未删除 + 非影子封禁」，并处理
+ * ensureCommunityProfile 等会写库的逻辑（对游客跳过），见 status.get.ts。
+ *
+ * 严禁用于任何写操作或需要真实身份的端点——那些一律使用 requireCommunityUser。
+ */
+export function getCommunityViewer(event: H3Event): any {
+  return event.context.user || COMMUNITY_GUEST_USER
+}
+
+/** 是否为未登录游客（无登录态） */
+export function isCommunityGuest(event: H3Event): boolean {
+  return !event.context.user
+}
+
 /** 社区配置读取（单例，缺失时自动补默认行） */
 export async function getCommunitySettings(): Promise<CommunitySettingsRow> {
   const existing = await db

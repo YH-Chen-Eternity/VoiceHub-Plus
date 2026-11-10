@@ -286,17 +286,8 @@ Modified by YH-Chen on 2026-10-17
 
             <!-- 回声社区内容 -->
             <div v-else-if="activeTab === 'community'" key="community" class="tab-pane community-pane">
-              <div v-if="!isClientAuthenticated" class="login-required-container">
-                <div class="login-required-content">
-                  <div class="login-icon">💬</div>
-                  <h3>{{ communityLocale.loginRequired }}</h3>
-                  <p>{{ communityLocale.loginRequiredDesc }}</p>
-                  <button class="login-button" @click="navigateToLogin">
-                    {{ communityLocale.loginNow }}
-                  </button>
-                </div>
-              </div>
-              <CommunityFeed v-else />
+              <!-- 回声社区对游客开放只读浏览：可看帖子与图片，发帖/评论/点赞/下载由组件内拦截 -->
+              <CommunityFeed />
             </div>
 
             <!-- 通知内容 -->

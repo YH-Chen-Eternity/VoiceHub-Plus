@@ -12,6 +12,7 @@
           <span>{{ t.goReview }}</span>
         </button>
         <button
+          v-if="!isGuest"
           class="primary-button"
           :disabled="!settings.enabled || ban.muted"
           type="button"
@@ -641,7 +642,7 @@
             </div>
 
             <footer class="comment-foot">
-              <template v-if="selectedPost.status === 'APPROVED' && !ban.muted">
+              <template v-if="selectedPost.status === 'APPROVED' && !ban.muted && !isGuest">
                 <div v-if="replyTo" class="reply-chip">
                   <span>回复 {{ replyTo.author?.displayName || '' }}</span>
                   <button type="button" @click="cancelReply">
@@ -671,10 +672,11 @@
                   <span>{{ t.sendComment }}</span>
                 </button>
               </template>
+              <p v-else-if="isGuest" class="foot-hint">{{ t.guestViewOnly }}</p>
               <p v-else class="foot-hint">
                 {{ ban.muted ? t.muted : t.pendingHint }}
               </p>
-              <p v-if="selectedPost.status === 'APPROVED' && !ban.muted" class="mention-hint">
+              <p v-if="selectedPost.status === 'APPROVED' && !ban.muted && !isGuest" class="mention-hint">
                 {{ t.mentionHint || '输入 @用户名 可以提醒同学' }}
               </p>
             </footer>
@@ -779,36 +781,16 @@
       </Transition>
     </Teleport>
 
-    <!-- 图片预览 -->
-    <Teleport to="body">
-      <Transition name="community-fade">
-        <div v-if="lightbox.open" class="lightbox" @click.self="closeLightbox">
-          <button class="lightbox-close" type="button" @click="closeLightbox">
-            <X :size="22" />
-          </button>
-          <button
-            v-if="lightbox.images.length > 1"
-            class="lightbox-nav lightbox-prev"
-            type="button"
-            @click.stop="stepLightbox(-1)"
-          >
-            <ChevronLeft :size="24" />
-          </button>
-          <img :alt="`图片 ${lightbox.index + 1}`" :src="lightbox.images[lightbox.index]?.url">
-          <button
-            v-if="lightbox.images.length > 1"
-            class="lightbox-nav lightbox-next"
-            type="button"
-            @click.stop="stepLightbox(1)"
-          >
-            <ChevronRight :size="24" />
-          </button>
-          <span v-if="lightbox.images.length > 1" class="lightbox-counter">
-            {{ lightbox.index + 1 }} / {{ lightbox.images.length }}
-          </span>
-        </div>
-      </Transition>
-    </Teleport>
+    <!-- 图片查看器：微信朋友圈式缩放 / 查看原图 / 下载（未登录不可下载） -->
+    <CommunityImageViewer
+      :open="lightbox.open"
+      :images="lightbox.images"
+      :index="lightbox.index"
+      :can-download="!isGuest"
+      @close="closeLightbox"
+      @update:index="lightbox.index = $event"
+      @need-login="requireLogin"
+    />
 
     <!-- 点赞署名选择：匿名 or 署名 -->
     <RevealChoiceDialog
@@ -857,8 +839,6 @@ import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import {
   AlertTriangle,
   ArrowRight,
-  ChevronLeft,
-  ChevronRight,
   Eye,
   Flag,
   Heart,
@@ -893,9 +873,9 @@ import { useToast } from '~/composables/useToast'
 import { useSongPlayback } from '~/composables/useSongPlayback'
 import {
   COMMUNITY_IMAGE_MAX_UPLOAD_BYTES,
-  compressCommunityImageFile,
   isCommunityImageType
 } from '~/utils/communityImage'
+import CommunityImageViewer from '~/components/Community/CommunityImageViewer.vue'
 
 type AnyRecord = Record<string, any>
 
@@ -938,6 +918,13 @@ const violationCount = computed(() => Number(status.value?.viewer?.violationCoun
 const activeBoards = computed(() => boards.value.filter((board) => board.isActive))
 const maxImages = computed(() => Math.min(Number(settings.value.maxImages || 9), 9))
 const myUserId = computed(() => Number(me.value?.user?.id || 0))
+// 未登录游客：可浏览内容与图片，但发帖/评论/点赞/下载等写操作一律拦截（服务端同步强校验）
+const isGuest = computed(() => myUserId.value <= 0)
+function requireLogin(): boolean {
+  if (!isGuest.value) return false
+  showToast(t.value.guestLoginRequired || '请先登录后再操作', 'warning')
+  return true
+}
 
 function isOwnPost(post: AnyRecord | null) {
   return !!post && Number(post.author?.id) === myUserId.value && myUserId.value > 0
@@ -955,6 +942,7 @@ const reportState = reactive<{
 }>({ show: false, targetType: 'POST', targetId: 0, targetLabel: '' })
 
 function openReport(targetType: 'POST' | 'COMMENT' | 'USER', targetId: number, label?: string) {
+  if (requireLogin()) return
   reportState.targetType = targetType
   reportState.targetId = Number(targetId)
   reportState.targetLabel = String(label || '').slice(0, 40)
@@ -1096,7 +1084,8 @@ async function init() {
   try {
     const [statusRes, meRes] = await Promise.all([
       $fetch<AnyRecord>('/api/community/status'),
-      $fetch<AnyRecord>('/api/community/me')
+      // 游客访问 /me 会 401，容错为 null，保证只读浏览不受影响
+      $fetch<AnyRecord>('/api/community/me').catch(() => null)
     ])
     status.value = statusRes
     me.value = meRes
@@ -1195,6 +1184,7 @@ function reportComment(comment: AnyRecord) {
  * 本地更新 + 按点赞重排，不整页刷新。
  */
 async function toggleCommentLike(comment: AnyRecord) {
+  if (requireLogin()) return
   if (!comment?.id) return
   // 取消点赞不需要询问署名
   if (comment.likedByMe) {
@@ -1269,6 +1259,7 @@ function applyCommentLikeState(commentId: number, liked: boolean, likeCount: num
 
 /** 帖子点赞与歌曲点赞共用 voteRevealMode 偏好：ASK 每次询问 / ANONYMOUS 匿名 / REVEAL 署名 */
 async function togglePostLike(post: AnyRecord) {
+  if (requireLogin()) return
   if (!post?.id || post.liking) return
   // 取消点赞不需要询问署名
   if (post.likedByMe) {
@@ -1455,6 +1446,7 @@ async function onLikeRevealConfirm(reveal: boolean, remember: boolean) {
 }
 
 async function toggleLike(post: AnyRecord) {
+  if (requireLogin()) return
   if (!post?.song || post.liking) return
   if (!canToggleLike(post)) {
     const reason = likeBlockedText(post)
@@ -1476,6 +1468,7 @@ async function toggleLike(post: AnyRecord) {
 }
 
 function openPublish() {
+  if (requireLogin()) return
   if (!settings.value.enabled) return
   if (ban.value.muted) {
     showToast(t.value.muted, 'warning')
@@ -1553,12 +1546,11 @@ async function handleImageSelect(event: Event) {
     }
     uploading.value += 1
     try {
-      const prepared = await compressCommunityImageFile(file)
-      if (prepared.compressed) showToast(t.value.imageCompressed, 'info', 2500)
+      // 原图直传服务端：统一走「先无损、压不到 3MB 才有损」阶梯，避免浏览器二次有损压缩
       const form = new FormData()
-      form.append('file', prepared.file)
+      form.append('file', file)
       const res = await $fetch<AnyRecord>('/api/community/media', { method: 'POST', body: form })
-      if (res.compressed && !prepared.compressed) showToast(t.value.imageCompressed, 'info', 2500)
+      if (res.compressed) showToast(t.value.imageCompressed, 'info', 2500)
       publishForm.images.push({ id: res.id, url: res.url })
     } catch (error: any) {
       showToast(apiMessage(error, t.value.imageUploadFailed), 'error')
@@ -1573,6 +1565,7 @@ function removeImage(imageId: number) {
 }
 
 async function submitPost() {
+  if (requireLogin()) return
   if (!canSubmit.value || submitting.value) return
   submitting.value = true
   try {
@@ -1725,6 +1718,7 @@ function closeDetail() {
 }
 
 function startReply(comment: AnyRecord) {
+  if (requireLogin()) return
   replyTo.value = comment
 }
 
@@ -1733,6 +1727,7 @@ function cancelReply() {
 }
 
 async function sendComment() {
+  if (requireLogin()) return
   const content = commentContent.value.trim()
   if (!content || sendingComment.value || !selectedPost.value) return
   sendingComment.value = true
@@ -1795,12 +1790,6 @@ function openLightbox(images: AnyRecord[], index: number) {
 
 function closeLightbox() {
   lightbox.open = false
-}
-
-function stepLightbox(step: number) {
-  const total = lightbox.images.length
-  if (!total) return
-  lightbox.index = (lightbox.index + step + total) % total
 }
 
 function goReview() {
