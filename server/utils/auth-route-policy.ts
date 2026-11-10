@@ -72,7 +72,10 @@ export const PUBLIC_API_PREFIX_ROUTES: readonly RoutePolicy[] = [
   { path: '/api/open/', methods: [...GET_METHODS, ...WRITE_METHODS] },
   { path: '/api/auth/webauthn/login/', methods: ['POST'] },
   // 上传的图片（公告栏图片走这里；运行时新增静态文件会被 Nitro 清单 404 掉）
-  { path: '/api/media/', methods: GET_METHODS }
+  { path: '/api/media/', methods: GET_METHODS },
+  // 回声社区游客只读：仅放行 GET，游客到达端点后由各接口自行限定只读范围；
+  // 需要登录的端点（me/blocks/review 等）自带 requireCommunityUser 校验，游客访问仍 401。
+  { path: '/api/community/', methods: GET_METHODS }
 ]
 
 function matchesMethod(policy: RoutePolicy, method: string): boolean {
