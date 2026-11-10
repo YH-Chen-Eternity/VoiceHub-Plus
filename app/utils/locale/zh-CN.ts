@@ -969,7 +969,7 @@ export const pages = {
     noSongSelected: '未选择歌曲',
     remove: '移除',
     addImages: '添加图片',
-    imageHint: (max: number) => `最多 ${max} 张，单张不超过 3MB，优先无损压缩，超出才适当压缩`,
+    imageHint: (max: number) => `最多 ${max} 张，单张不超过 3MB，服务端将优先无损压缩，压不到才适当有损压缩`,
     imagesDisabled: '当前不允许发布图片',
     submit: '发布',
     submitting: '发布中…',

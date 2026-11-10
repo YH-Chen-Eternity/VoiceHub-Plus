@@ -283,6 +283,9 @@ async function downloadImage() {
       credentials: 'same-origin'
     })
     if (!response.ok) throw new Error(String(response.status))
+    const contentType = String(response.headers.get('content-type') || '')
+    // 防御：服务端异常时可能返回 HTML 错误页，避免把它存成损坏的图片文件
+    if (!contentType.startsWith('image/')) throw new Error('not-image')
     const blob = await response.blob()
     const objectUrl = URL.createObjectURL(blob)
     const anchor = document.createElement('a')
