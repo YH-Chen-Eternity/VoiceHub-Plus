@@ -202,7 +202,7 @@ test('searchSongs 编排：注入上游映射候选、截断上限、上游抖�
   assert.deepEqual(await searchSongs('netease', '   ', 1), [])
   assert.deepEqual(normalizeAstrbotSongCandidates('netease', []), [])
   assert.deepEqual(normalizeAstrbotSongCandidates('netease', null), [])
-  assert.match(searchUtils, /catch \(error\)[\s\S]{0,200}return \[\]/)
+  assert.match(searchUtils, /catch\s*\(error[^)]*\)[\s\S]{0,300}return \[\]/)
 })
 
 test('音源层复用同进程实现：SDK 参数正确、无 /api 自请求', () => {

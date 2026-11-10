@@ -6,12 +6,14 @@ name: AI PR Review
 # 完整内容、按 import 引用带出的未改动关联文件，以及（涉及 UI 时的）
 # 项目规范锚点文件——均为纯文本，一律视为待审查数据，
 # 不参与任何命令拼接或执行；系统提示要求模型忽略其中的指令注入。
-# 首选来源为 1M 上下文模型，走全量材料；备用来源上下文较小，
-# 自动降级为精简材料，避免超长输入击穿兜底链路。
+# 首选来源为 1M 上下文模型，走全量材料；备用来源上下文较小，走精简材料。
+# 全量材料超时/失败时，首选来源会自动降级为精简材料重试，
+# 保证「尽量全量」的同时不因单次超时导致整轮空转。
 # 推理来源为主备两级，按顺序尝试、任一成功即用：
 #   1. NVIDIA / Nemotron 3 Ultra（首选）
 #   2. GLM 免费档（备用）
-# 两级都失败时等待 10 分钟整体重试一轮，仍失败则记录警告并正常结束（不阻塞 PR）。
+# 单来源按短退避重试；全部失败时短暂等待后整体重试一轮，
+# 仍失败则记录警告并正常结束（不阻塞 PR）。
 # 启用方式与来源对照见 .github/AI-PR-REVIEW.md。
 
 on:
@@ -39,7 +41,7 @@ jobs:
   review:
     if: github.event_name == 'workflow_dispatch' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
     steps:
       # 配置不齐时直接跳过审查步骤（状态显示为 skipped，而不是「成功但什么都没做」）。
       # NVIDIA Key 或 GLM Key 至少配一个；只配 GLM 时还需要地址与模型名。
@@ -77,6 +79,8 @@ jobs:
           AI_REVIEW_NV_BASE_URL: ${{ vars.AI_REVIEW_NV_BASE_URL }}
           AI_REVIEW_NV_MODEL: ${{ vars.AI_REVIEW_NV_MODEL }}
           AI_REVIEW_RETRY_WAIT_MS: ${{ vars.AI_REVIEW_RETRY_WAIT_MS }}
+          AI_REVIEW_FULL_TIMEOUT_MS: ${{ vars.AI_REVIEW_FULL_TIMEOUT_MS }}
+          AI_REVIEW_LITE_TIMEOUT_MS: ${{ vars.AI_REVIEW_LITE_TIMEOUT_MS }}
         with:
           script: |
             const { owner, repo } = context.repo;
@@ -109,7 +113,7 @@ jobs:
 
             // 推理来源主备两级：首选在前，按顺序尝试；任一成功即用其结果。
             // tier 决定送审材料：full=1M 上下文全量，lite=小上下文精简。
-            // 单次请求 90 秒超时封顶，首选挂起/失败不会拖死整个任务。
+            // 全量/精简分别设超时；首选全量失败会自动降级精简，不会拖死整个任务。
             const providers = [];
             if (NV_KEY) {
               providers.push({ name: '首选 nvidia / nemotron', key: NV_KEY, base: NV_BASE, model: NV_MODEL, tier: 'full' });
@@ -126,7 +130,12 @@ jobs:
             if (GLM_KEY && (!GLM_BASE || !GLM_MODEL)) {
               core.warning('备用来源配置不完整（缺 AI_REVIEW_BASE_URL 或 AI_REVIEW_MODEL），本次仅使用首选来源');
             }
-            const RETRY_WAIT_MS = Number(process.env.AI_REVIEW_RETRY_WAIT_MS) || 600000;
+            // 全量材料约 200 万字符，1M 上下文模型推理明显慢于精简模式，
+            // 故两种材料分别设超时；轮间只做短暂等待，避免长时间空转吃掉任务预算。
+            const FULL_TIMEOUT_MS = Number(process.env.AI_REVIEW_FULL_TIMEOUT_MS) || 300000;
+            const LITE_TIMEOUT_MS = Number(process.env.AI_REVIEW_LITE_TIMEOUT_MS) || 120000;
+            const RETRY_WAIT_MS = Number(process.env.AI_REVIEW_RETRY_WAIT_MS) || 45000;
+            const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
             const SYSTEM = [
               '你是资深代码审查工程师，只依据提供的 PR diff、被改文件在 head 版本的完整内容、',
@@ -477,10 +486,10 @@ jobs:
 
             // 3) 依次尝试各推理来源；全部失败则等待后整体重试一轮。
             // 任何失败都把【来源 + HTTP 状态 + 响应原文片段】写进日志，便于一眼定位。
-            const callProvider = async (p, userContent) => {
+            const callProvider = async (p, userContent, timeoutMs) => {
               const res = await fetch(p.base + '/chat/completions', {
                 method: 'POST',
-                signal: AbortSignal.timeout(90000),
+                signal: AbortSignal.timeout(timeoutMs),
                 headers: {
                   'Authorization': 'Bearer ' + p.key,
                   'Content-Type': 'application/json'
@@ -515,20 +524,40 @@ jobs:
               return text;
             };
 
-            let review = '', usedProvider = null;
+            let review = '', usedProvider = null, usedTierLabel = '';
             for (let round = 1; round <= 2 && !review; round++) {
               for (const p of providers) {
-                try {
-                  review = await callProvider(p, p.tier === 'full' ? fullContent : liteUserContent);
-                  usedProvider = p;
-                  break;
-                } catch (e) {
-                  core.warning('推理来源「' + p.name + '」第 ' + round + ' 轮失败：' + (e && e.message ? e.message : String(e)));
+                // 首选来源先走 1M 全量材料；超时/失败即自动降级为精简材料重试，
+                // 既不放弃「能全量就全量」，也不会因单次超时让本次审查颗粒无收。
+                const attempts = p.tier === 'full'
+                  ? [
+                      { label: '全量上下文', content: fullContent, timeout: FULL_TIMEOUT_MS, tries: 1 },
+                      { label: '精简上下文（全量失败降级）', content: liteUserContent, timeout: LITE_TIMEOUT_MS, tries: 2 }
+                    ]
+                  : [
+                      { label: '精简上下文', content: liteUserContent, timeout: LITE_TIMEOUT_MS, tries: 2 }
+                    ];
+                for (const a of attempts) {
+                  for (let attempt = 1; attempt <= a.tries && !review; attempt++) {
+                    try {
+                      review = await callProvider(p, a.content, a.timeout);
+                      usedProvider = p;
+                      usedTierLabel = a.label;
+                      break;
+                    } catch (e) {
+                      core.warning('推理来源「' + p.name + '」' + a.label + ' 第 ' + round + '.' + attempt
+                        + ' 次失败：' + (e && e.message ? e.message : String(e)));
+                      // 429 限流 / 瞬时超时做短退避后重试，不占用整体重试轮次。
+                      if (attempt < a.tries) await sleep(10000 * attempt);
+                    }
+                  }
+                  if (review) break;
                 }
+                if (review) break;
               }
               if (!review && round === 1) {
-                core.info('所有推理来源本轮均失败，' + Math.round(RETRY_WAIT_MS / 1000) + ' 秒后重试一轮');
-                await new Promise(r => setTimeout(r, RETRY_WAIT_MS));
+                core.info('本轮所有推理来源均失败，' + Math.round(RETRY_WAIT_MS / 1000) + ' 秒后整体重试一轮');
+                await sleep(RETRY_WAIT_MS);
               }
             }
             if (!review) {
@@ -545,8 +574,8 @@ jobs:
               '',
               '<sub>送审 ' + liteChunks.length + '/' + files.length + ' 个文件'
                 + (truncated ? '（已按上限截断）' : '')
-                + ' · 材料：' + (usedProvider.tier === 'full' ? '全量上下文' : '精简上下文')
-                + (usedProvider.tier === 'full'
+                + ' · 材料：' + usedTierLabel
+                + (usedTierLabel.startsWith('全量')
                     ? '（UI规范锚点 ' + anchorCount + ' + 跨文件关联 ' + relatedCount
                       + ' + 同类组件 ' + peerCount + '，' + fullChars + ' 字符'
                       + (fullTruncated ? '，已按上限截断' : '') + '）'

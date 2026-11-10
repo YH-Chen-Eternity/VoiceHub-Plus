@@ -17,7 +17,7 @@
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { heatWeightedOrder, buildHeatMap, DEFAULT_HEAT_WEIGHT } from '../app/utils/autoSchedule'
+import { heatWeightedOrder, buildHeatMap, DEFAULT_HEAT_WEIGHT } from '../app/utils/autoSchedule.ts'
 
 const mk = (votes: number[]) =>
   votes.map((v, i) => ({
