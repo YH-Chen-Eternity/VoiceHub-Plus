@@ -642,8 +642,9 @@ export default defineNuxtConfig({
       script: [
         {
           tagPriority: 'critical',
-          // 与 useTheme.ts 默认逻辑一致：无保存值或非法值时回退 ClassicDark；System 按系统配色偏好解析
-          innerHTML: "(function(){var t='ClassicDark';try{var s=localStorage.getItem('voicehub-theme');if(['ClassicDark','ClassicLight','ModernLight'].indexOf(s)>-1){t=s}else if(s==='System'){t=window.matchMedia('(prefers-color-scheme: dark)').matches?'ClassicDark':'ClassicLight'}}catch(e){}document.documentElement.setAttribute('data-theme',t)})()"
+          // 与 useTheme.ts 默认逻辑一致：优先读 cookie（voicehub-theme-applied，SSR 同源）；
+          // 无 cookie 时回退 localStorage；System 按系统配色偏好解析
+          innerHTML: "(function(){var t='ClassicDark';try{var m=document.cookie.match(/(?:^|;\\s*)voicehub-theme-applied=([^;]+)/);if(m&&['ClassicDark','ClassicLight','ModernLight'].indexOf(decodeURIComponent(m[1]))>-1){t=decodeURIComponent(m[1])}else{var s=localStorage.getItem('voicehub-theme');if(['ClassicDark','ClassicLight','ModernLight'].indexOf(s)>-1){t=s}else if(s==='System'){t=window.matchMedia('(prefers-color-scheme: dark)').matches?'ClassicDark':'ClassicLight'}}}catch(e){}document.documentElement.setAttribute('data-theme',t)})()"
         }
       ],
       title: siteTitle,

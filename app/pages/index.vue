@@ -1624,7 +1624,12 @@ const applyHomeData = () => {
   ssrPrimed.value = true
 }
 
-watch(homeData, applyHomeData, { immediate: true })
+// 灌入时机：setup 内同步调用一次覆盖「client 直接导航 / payload 同步恢复」场景；
+// flush:'sync' 的 watch 覆盖「SSR 上 asyncData 异步 resolve」场景——Vue SSR 不会调度
+// 默认(pre) flush 的 watch 回调，若不这样做 SSR 将永远用 fallback 文本渲染，
+// 与客户端从 payload 恢复后的渲染不一致，产生 hydration mismatch。
+applyHomeData()
+watch(homeData, applyHomeData, { flush: 'sync' })
 
 // 首页标题：根据加载阶段动态切换
 // 配置加载完成前使用环境配置的站点标题兜底，保证 SSR 输出真实站点名（SEO / 链接预览），

@@ -134,12 +134,18 @@ export const useAuth = () => {
   }
 
   const refreshUser = async () => {
-    const data = await $fetch<{ user: User }>('/api/auth/verify')
-    if (data?.user) {
-      setAuthState(data.user)
-      return data.user
+    // 未登录（401）属于正常场景：静默返回 null，避免在浏览器控制台产生报错噪音
+    try {
+      const data = await $fetch<{ user: User }>('/api/auth/verify')
+      if (data?.user) {
+        setAuthState(data.user)
+        return data.user
+      }
+      return null
+    } catch {
+      clearAuthState()
+      return null
     }
-    return null
   }
 
   const syncPasswordChangeState = async (
