@@ -61,8 +61,10 @@ export default defineEventHandler(async (event) => {
   }
 
   // ETag 用入库时的内容哈希（查看原图与预览图字节不同，ETag 按 variant 区分），
+  // 历史数据 sha256 可能为空，此时退回 id + 字节量组成稳定键，避免缓存键冲突；
   // 支持浏览器/CDN 协商缓存：内容不变时命中 304，不再回源传输字节
-  const etag = `"${row.sha256}-${wantPreview ? 'preview' : 'full'}"`
+  const etagSource = row.sha256 || `id-${row.id}-${row.byteSize}`
+  const etag = `"${etagSource}-${wantPreview ? 'preview' : 'full'}"`
   const ifNoneMatch = String(getHeader(event, 'if-none-match') || '')
   if (ifNoneMatch && ifNoneMatch.split(',').map((v) => v.trim()).includes(etag)) {
     setResponseHeaders(event, {

@@ -3,9 +3,9 @@ export const COMMUNITY_IMAGE_MAX_UPLOAD_BYTES = 15 * 1024 * 1024
 
 const SUPPORTED_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
 // 与服务端 COMMUNITY_LOSSY_ATTEMPTS 对齐：先保持原尺寸逐级降质量，质量到下限仍超标才降尺寸兜底，
-// 质量全程单调不回升（尺寸是画质最大杀手，降尺寸永远排在最后）
-const FULL_SIZE_QUALITIES = [0.92, 0.86, 0.8, 0.74]
-const DOWNSCALE_STEPS = [
+// 质量全程单调不回升（尺寸是画质最大杀手，降尺寸永远排在最后）；导出以便测试直接比对口径
+export const FULL_SIZE_QUALITIES = [0.92, 0.86, 0.8, 0.74]
+export const DOWNSCALE_STEPS = [
   { maxDimension: 2560, quality: 0.74 },
   { maxDimension: 2048, quality: 0.68 },
   { maxDimension: 1600, quality: 0.62 },
@@ -13,7 +13,7 @@ const DOWNSCALE_STEPS = [
   { maxDimension: 1024, quality: 0.5 }
 ]
 // 与服务端一致的解码像素上限，超限图不做本地预压缩（服务端会明确拒绝并提示）
-const MAX_PIXELS = 40 * 1000 * 1000
+export const MAX_PIXELS = 40 * 1000 * 1000
 
 export function isCommunityImageType(type: string): boolean {
   return SUPPORTED_TYPES.includes(String(type || '').toLowerCase())

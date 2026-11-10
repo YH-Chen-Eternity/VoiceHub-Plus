@@ -2,6 +2,9 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   COMMUNITY_IMAGE_MAX_BYTES,
+  MAX_PIXELS,
+  DOWNSCALE_STEPS,
+  FULL_SIZE_QUALITIES,
   compressCommunityImageFile,
   isCommunityImageType
 } from '../../app/utils/communityImage.ts'
@@ -37,14 +40,22 @@ test('非浏览器环境（无 createImageBitmap/canvas）安全回退原图', a
   assert.equal(res.file, big, '无法本地压缩时应回退原图，绝不阻断上传')
 })
 
-test('本地压缩阶梯与服务端有损阶梯口径一致：先保尺寸降质量，后降尺寸兜底', async () => {
-  // 阶梯常量在模块内部，这里通过源码断言防止未来口径漂移
-  const { readFileSync } = await import('node:fs')
-  const source = readFileSync(new URL('../../app/utils/communityImage.ts', import.meta.url), 'utf8')
-  assert.match(source, /FULL_SIZE_QUALITIES = \[0\.92, 0\.86, 0\.8, 0\.74\]/)
-  assert.match(source, /maxDimension: 2560[\s\S]*?quality: 0\.74/)
-  assert.match(source, /maxDimension: 1024[\s\S]*?quality: 0\.5/)
+test('本地压缩阶梯与服务端有损阶梯口径一致：先保尺寸降质量，后降尺寸兜底', () => {
+  // 质量全程单调不回升：全尺寸 0.92→0.74，降尺寸阶段 0.74→0.5
+  assert.deepEqual(FULL_SIZE_QUALITIES, [0.92, 0.86, 0.8, 0.74])
+  assert.deepEqual(
+    DOWNSCALE_STEPS.map((step) => step.maxDimension),
+    [2560, 2048, 1600, 1280, 1024]
+  )
+  assert.deepEqual(
+    DOWNSCALE_STEPS.map((step) => step.quality),
+    [0.74, 0.68, 0.62, 0.56, 0.5]
+  )
+  const allQualities = [...FULL_SIZE_QUALITIES, ...DOWNSCALE_STEPS.map((step) => step.quality)]
+  for (let i = 1; i < allQualities.length; i += 1) {
+    assert.ok(allQualities[i]! <= allQualities[i - 1]!, '质量必须单调不回升')
+  }
   // 与服务端一致的 3MB 目标体积与 40MP 像素上限
   assert.equal(COMMUNITY_IMAGE_MAX_BYTES, 3 * 1024 * 1024)
-  assert.match(source, /MAX_PIXELS = 40 \* 1000 \* 1000/)
+  assert.equal(MAX_PIXELS, 40 * 1000 * 1000)
 })
