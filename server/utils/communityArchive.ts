@@ -16,6 +16,7 @@ import {
   maskCommunityName
 } from './community'
 import { createApiError } from './apiError'
+import { deleteMediaFiles } from './mediaStorage'
 
 type CommunityActor = {
   id: number
@@ -351,8 +352,18 @@ async function purgePostMedia(mediaIds: number[]): Promise<void> {
       .filter((id): id is number => id != null)
   ])
   const removable = mediaIds.filter((id) => !stillUsed.has(id))
-  if (removable.length) {
-    await db.delete(mediaAssets).where(inArray(mediaAssets.id, removable))
+  if (!removable.length) return
+  // 落盘后必须先取相对路径，删库记录后同步删私有目录文件，避免留下无法回收的孤儿图片
+  const files = await db
+    .select({ storagePath: mediaAssets.storagePath, previewPath: mediaAssets.previewPath })
+    .from(mediaAssets)
+    .where(inArray(mediaAssets.id, removable))
+  await db.delete(mediaAssets).where(inArray(mediaAssets.id, removable))
+  try {
+    await deleteMediaFiles(files.flatMap((f) => [f.storagePath, f.previewPath]))
+  } catch (error) {
+    // 文件删除失败不阻断数据清理；残留文件由后续卷级清理兜底
+    console.warn('[community-archive] 图片文件清理失败:', error)
   }
 }
 

@@ -10,6 +10,10 @@ import { createApiError } from './apiError'
  * - GIF / 动态 WebP 保留动画帧；
  * - 文件名统一清洗，避免路径穿越与控制字符；
  * - sharp 使用动态 import，缺失时返回明确错误；读取接口不依赖 sharp。
+ *
+ * 社区图片走「两阶段」压缩：先做原尺寸无损 WebP，无损结果能装进 3MB 就直接采用（像素零损失）；
+ * 只有无损结果仍超过 3MB，才进入有损阶段逐级降质量、最后才降尺寸压到 3MB。
+ * 公告图片沿用原有的有损阶梯，互不影响。
  */
 
 export type ImageFormat = 'png' | 'jpeg' | 'webp' | 'gif'
@@ -63,10 +67,11 @@ function stripForbiddenFilenameChars(value: string): string {
 
 type EncodeAttempt = {
   maxDimension: number | null
-  quality: number
+  quality?: number
+  lossless?: boolean
 }
 
-// 静态图阶梯：先尝试原始尺寸，再逐步缩小尺寸并降低质量
+// 公告图片 / 默认阶梯：先尝试原始尺寸，再逐步缩小尺寸并降低质量（保持历史行为不变）
 const STATIC_ATTEMPTS: EncodeAttempt[] = [
   { maxDimension: null, quality: 82 },
   { maxDimension: 2560, quality: 82 },
@@ -76,7 +81,33 @@ const STATIC_ATTEMPTS: EncodeAttempt[] = [
   { maxDimension: 1024, quality: 56 }
 ]
 
-// 动图重编码成本高，阶梯更短
+// 社区图片采用严格的「两阶段」压缩，精确对应产品口径：
+//   阶段 A 无损：仅做 lossless WebP 重编码（去元数据、统一格式，像素零损失、不降尺寸），
+//                原尺寸无损结果 ≤ maxBytes(3MB) 即直接采用，绝不做任何有损处理。
+//   阶段 B 有损：仅当阶段 A 的无损结果仍 > 3MB 才启用；优先保持原尺寸逐级降质量，
+//                质量降到下限仍超标才逐级降尺寸兜底，硬保证输出 ≤ 3MB。
+// 尺寸是画质最大杀手，故「降尺寸」永远排在有损阶段的最后；有损质量全程单调不回升。
+// 动图不走此阶梯（动画无损体积不可控，见 ANIMATED_ATTEMPTS）。
+const COMMUNITY_LOSSLESS_PASS: EncodeAttempt = { maxDimension: null, lossless: true }
+const COMMUNITY_LOSSY_ATTEMPTS: EncodeAttempt[] = [
+  // 阶段 B-1：保持原尺寸，逐级降质量，尽量找到刚好装得下 3MB 的最高质量
+  { maxDimension: null, quality: 92 },
+  { maxDimension: null, quality: 86 },
+  { maxDimension: null, quality: 80 },
+  { maxDimension: null, quality: 74 },
+  // 阶段 B-2：质量已到下限仍超标，才降尺寸兜底；质量持平或继续下降，不回升
+  { maxDimension: 2560, quality: 74 },
+  { maxDimension: 2048, quality: 68 },
+  { maxDimension: 1600, quality: 62 },
+  { maxDimension: 1280, quality: 56 },
+  { maxDimension: 1024, quality: 50 }
+]
+const LOSSLESS_STATIC_ATTEMPTS: EncodeAttempt[] = [
+  COMMUNITY_LOSSLESS_PASS,
+  ...COMMUNITY_LOSSY_ATTEMPTS
+]
+
+// 动图重编码成本高，阶梯更短（无损动画体积不可控，动图统一沿用有损，仅首帧用于生成预览）
 const ANIMATED_ATTEMPTS: EncodeAttempt[] = [
   { maxDimension: null, quality: 78 },
   { maxDimension: 1280, quality: 72 },
@@ -182,6 +213,7 @@ export function sanitizeDownloadFilename(filename: string, format: ImageFormat):
  * @param params.filename       客户端文件名（会被清洗）
  * @param params.maxBytes       输出体积上限（字节），超限时按阶梯降级，仍超限则拒绝
  * @param params.fallbackName   文件名兜底主干（不含扩展名）
+ * @param params.lossless       是否走「尽量无损」阶梯（社区图片 true，公告图片保持默认 false）
  */
 export async function normalizeUploadedImage(params: {
   data: Buffer
@@ -189,6 +221,7 @@ export async function normalizeUploadedImage(params: {
   filename: string
   maxBytes: number
   fallbackName?: string
+  lossless?: boolean
 }): Promise<NormalizedImage> {
   const { data, maxBytes } = params
 
@@ -269,7 +302,12 @@ export async function normalizeUploadedImage(params: {
   }
 
   const animated = frames > 1
-  const attempts = animated ? ANIMATED_ATTEMPTS : STATIC_ATTEMPTS
+  // 动图不使用无损阶梯（动画无损体积不可控）；静态图按 lossless 参数选择阶梯
+  const attempts = animated
+    ? ANIMATED_ATTEMPTS
+    : params.lossless
+      ? LOSSLESS_STATIC_ATTEMPTS
+      : STATIC_ATTEMPTS
   const maxMb = Math.max(1, Math.round(maxBytes / (1024 * 1024)))
 
   let output: Buffer | null = null
@@ -292,9 +330,14 @@ export async function normalizeUploadedImage(params: {
         })
       }
       // 不调用 withMetadata：输出 WebP 默认丢弃 EXIF/GPS/ICC 等元数据
-      const buffer: Buffer = await pipeline
-        .webp({ quality: attempt.quality, effort: animated ? 3 : 4, smartSubsample: true })
-        .toBuffer()
+      const webpOptions: any = attempt.lossless
+        ? { lossless: true, effort: animated ? 3 : 4 }
+        : {
+            quality: attempt.quality,
+            effort: animated ? 3 : 4,
+            smartSubsample: true
+          }
+      const buffer: Buffer = await pipeline.webp(webpOptions).toBuffer()
       if (buffer.length <= maxBytes) {
         output = buffer
         attemptIndex = index
@@ -326,7 +369,56 @@ export async function normalizeUploadedImage(params: {
     data: output,
     mimeType: MIME_BY_FORMAT.webp,
     filename: `${baseName}.webp`,
-    // 原始文件已超体积上限，或原始尺寸无法达标需要降级时才视为「已压缩」
-    compressed: data.length > maxBytes || attemptIndex > 0
+    // 仅「阶段 B 有损压缩」才算已压缩：第 0 档（无损）命中时 attemptIndex=0，
+    // 即便原文件超过 3MB，只要无损重编码能装下就保持像素零损失、不标记为压缩。
+    compressed: attemptIndex > 0
   }
+}
+
+/**
+ * 由已规范化的原图生成更小的预览图（九宫格缩略图与灯箱默认展示用）。
+ * 动图只取首帧；任何失败都返回 null，调用方直接回退展示原图，绝不影响上传主流程。
+ */
+export async function buildPreviewImage(
+  data: Buffer,
+  options: { maxBytes?: number; maxDimension?: number; quality?: number } = {}
+): Promise<Buffer | null> {
+  const maxBytes = options.maxBytes ?? 512 * 1024
+  const maxDimension = options.maxDimension ?? 1600
+  const quality = options.quality ?? 80
+  if (!Buffer.isBuffer(data) || data.length === 0) return null
+
+  const attempts = [
+    { dimension: maxDimension, q: quality },
+    { dimension: 1280, q: 76 },
+    { dimension: 1024, q: 70 },
+    { dimension: 800, q: 64 }
+  ]
+
+  try {
+    const sharpFactory = await loadSharp()
+    for (const attempt of attempts) {
+      try {
+        const buffer: Buffer = await sharpFactory(data, {
+          animated: false,
+          limitInputPixels: IMAGE_MAX_PIXELS
+        })
+          .rotate()
+          .resize({
+            width: attempt.dimension,
+            height: attempt.dimension,
+            fit: 'inside',
+            withoutEnlargement: true
+          })
+          .webp({ quality: attempt.q, effort: 4, smartSubsample: true })
+          .toBuffer()
+        if (buffer.length <= maxBytes) return buffer
+      } catch {
+        // 单档失败继续下一档；全部失败返回 null
+      }
+    }
+  } catch {
+    // sharp 不可用：由调用方回退原图
+  }
+  return null
 }

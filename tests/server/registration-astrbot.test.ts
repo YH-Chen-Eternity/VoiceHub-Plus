@@ -19,13 +19,18 @@ test('两种注册入口在 serverless 请求内等待待审通知', () => {
   assert.match(oauthRegistration, /await notifyRegistration\(/)
 })
 
-test('待审核注册通知选取管理员并通过批量站内通知转发 AstrBot', () => {
+test('待审核注册通知选取管理员并批量落库站内通知', () => {
   assert.match(registration, /inArray\(users\.role, \['ADMIN', 'SUPER_ADMIN'\]\)/)
-  assert.match(registration, /if \(requiresApproval\)\s*\{[\s\S]*?createBatchSystemNotifications\(/)
+  assert.match(registration, /if \(requiresApproval\)\s*\{[\s\S]*?adminIds\.map\(/)
+  assert.match(registration, /db\.insert\(notifications\)\.values\(/)
   assert.match(notifications, /sendBatchAstrbotNotifications\(/)
-  assert.doesNotMatch(registration, /sendAstrbotNotificationToUser\(userId/)
-  // 待审通知必须走广播为 false 的批量路径，绝不触发群广播。
-  assert.match(registration, /createBatchSystemNotifications\(\s*adminIds,[\s\S]*?false\s*\)/)
+  // 待审通知只走站内批量落库：绝不触发 AstrBot 单发或群广播，避免误发到群。
+  assert.doesNotMatch(
+    registration,
+    /sendAstrbotNotificationToUser\(|createBatchSystemNotifications\(|postAstrbotNotification/
+  )
+  // 通知失败必须被吞掉，不能影响注册结果。
+  assert.match(registration, /catch\s*\(error[^)]*\)/)
 })
 
 test('审核结果不向申请人发送 AstrBot，原有邮件路径保留', () => {

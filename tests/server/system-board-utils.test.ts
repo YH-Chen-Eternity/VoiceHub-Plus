@@ -19,7 +19,13 @@ function runTsx(code: string): string {
     const raw = execSync(`npx tsx "${file}"`, {
       cwd: process.cwd(),
       encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'pipe']
+      stdio: ['pipe', 'pipe', 'pipe'],
+      // 被测模块经 ~/drizzle/db 间接依赖 DATABASE_URL：纯函数本身不查库，
+      // 但模块加载时就会校验该变量，故注入惰性占位值，避免测试环境误报失败。
+      env: {
+        ...process.env,
+        DATABASE_URL: process.env.DATABASE_URL || 'postgresql://voicehub:voicehub@127.0.0.1:5432/voicehub'
+      }
     })
     // 剔除工具日志行，只保留最后一行结果
     return raw.split('\n').filter(l => l.trim() && !l.startsWith('◇') && !l.startsWith('🔄') && !l.startsWith('✅')).pop()?.trim() || ''

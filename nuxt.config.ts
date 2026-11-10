@@ -773,12 +773,10 @@ export default defineNuxtConfig({
     timing: true,
     // 增加请求超时时间
     routeRules: {
-      // 上传的图片（公告栏图片等）：id 不可变，长缓存；必须比 /api/** 更具体才能覆盖 no-store
-      '/api/media/**': {
-        headers: {
-          'Cache-Control': 'public, max-age=604800, immutable'
-        }
-      },
+      // /api/media/** 的 Cache-Control 由读取端点按每张图的可见性动态设置：
+      // 仅「已启用公告 / 已通过且未删除帖子」的公开图片可进公共缓存，
+      // 未审核 / 已删除 / 影子封禁 / 审核令牌 / 上传者本人 / 下载响应一律 no-store。
+      // 这里不能给 media 统一设 public 默认值，否则私有分支与错误响应会被 CDN 缓存造成越权。
       // 完全禁用所有API路由的缓存，确保每次都请求数据库
       '/api/**': {
         headers: {

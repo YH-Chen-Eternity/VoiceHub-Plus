@@ -16,14 +16,17 @@
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 import { readMultipartFormData } from 'h3'
+import { eq } from 'drizzle-orm'
 import { db } from '~/drizzle/db'
 import { mediaAssets } from '~/drizzle/schema'
 import { createApiError } from '~~/server/utils/apiError'
 import { normalizeUploadedImage } from '~~/server/utils/imageSecurity'
 import { findReusableMediaAsset, hashMediaData } from '~~/server/utils/mediaDedup'
+import { deleteMediaFiles, saveMediaFiles } from '~~/server/utils/mediaStorage'
 
-// 图片上传：校验后存库（base64）+ 通过 /api/media/[id] 转发。
-// 之所以不落 public 目录：Nitro 的资源清单在构建期烘焙，运行时新增文件一律 404。
+// 图片上传：校验后落到私有目录 + 通过 /api/media/[id] 鉴权后转发。
+// 不写 base64（体积太大），不放 public/CDN（运行时新增文件 404 且可绕过鉴权直连）。
+// 公告图片沿用原有有损阶梯与 2MB 上限，与社区「尽量无损」策略互不影响。
 const MAX_BYTES = 2 * 1024 * 1024
 
 export default defineEventHandler(async (event) => {
@@ -65,19 +68,35 @@ export default defineEventHandler(async (event) => {
     return { success: true, id: existing.id, url: `/api/media/${existing.id}`, reused: true }
   }
 
+  // 先落库拿 id（文件路径由 id + sha256 生成），再写私有目录文件并回填相对路径
   const [row] = await db
     .insert(mediaAssets)
     .values({
       filename: normalized.filename,
       mimeType: normalized.mimeType,
       byteSize: normalized.data.length,
-      data: normalized.data.toString('base64'),
       sha256,
       uploadedBy: user.id
     })
     .returning({ id: mediaAssets.id })
 
   if (!row) {
+    throw createApiError(500, 'MEDIA_SAVE_FAILED', '图片保存失败，请稍后重试')
+  }
+
+  let storagePath = ''
+  try {
+    // 公告图片不需要预览图
+    const paths = await saveMediaFiles({ id: row.id, sha256, original: normalized.data })
+    storagePath = paths.storagePath
+    await db
+      .update(mediaAssets)
+      .set({ storagePath, previewPath: null })
+      .where(eq(mediaAssets.id, row.id))
+  } catch (error) {
+    await deleteMediaFiles([storagePath])
+    await db.delete(mediaAssets).where(eq(mediaAssets.id, row.id))
+    console.error('[admin-media] 图片落盘失败:', error)
     throw createApiError(500, 'MEDIA_SAVE_FAILED', '图片保存失败，请稍后重试')
   }
 

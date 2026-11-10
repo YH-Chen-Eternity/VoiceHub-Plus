@@ -95,12 +95,13 @@ VoiceHub 是一个面向校园的广播站点歌系统（Nuxt 4 全栈应用）�
 
 ## <a id="主要修改内容changelog" name="主要修改内容changelog"></a>主要修改内容（Changelog）
 
-> 最新更新：**2026-11-09**。下方为精简速览；各轮完整记录与功能明细已折叠，点击展开查看。
+> 最新更新：**2026-11-10**。下方为精简速览；各轮完整记录与功能明细已折叠，点击展开查看。
 
 **更新速览**
 
 | 日期 | 主题 |
 | --- | --- |
+| 2026-11-10 | 社区图片查看器、无损优先压缩、图片私有目录存储与游客只读 |
 | 2026-11-09 | 首个正式 Release：UI 统一性、AI 审查工作流修复、依赖治理与发版前复核 |
 | 2026-11-08 | 音乐解析与播放状态、社区图片与评论分页、媒体缓存优化 |
 | 2026-10-31 | 音乐链接解析稳定性与响应速度 |
@@ -113,7 +114,34 @@ VoiceHub 是一个面向校园的广播站点歌系统（Nuxt 4 全栈应用）�
 > 逐文件明细见 [`CUSTOM_CHANGES.md`](CUSTOM_CHANGES.md)；10-27 批次见 [`社区增强批次-20261027.md`](社区增强批次-20261027.md)。
 
 <details>
-<summary><b>展开查看完整更新记录与功能明细（2026-10-23 ~ 2026-11-09）</b></summary>
+<summary><b>展开查看完整更新记录与功能明细（2026-10-23 ~ 2026-11-10）</b></summary>
+
+### 2026-11-10 社区图片查看器、无损优先压缩与私有目录存储
+
+**社区图片查看体验（微信朋友圈式）**
+
+- 新增 `CommunityImageViewer.vue`：点击图片弹出可缩放查看器，支持移动端双指捏合 / 双击缩放、桌面滚轮 / 双击缩放与拖拽平移，左右切图、切图自动重置缩放状态；深色遮罩与项目既有 UI 规范一致，适配手机与桌面，补齐中英双语。
+- 新增「查看原图」：默认展示更轻量的预览图，点击后加载压缩后 ≤3MB 的原图；新增「下载图片」默认下载原图，游客与登录用户均可下载（服务端统一鉴权输出）。
+
+**压缩尽量无损**
+
+- 后端压缩改为严格两阶段：先做原尺寸无损 WebP（像素零损失、绝不降尺寸），装得进 3MB 就直接采用；只有无损压不到 3MB 才进入逐级有损（保尺寸优先、质量单调下降），最后才降尺寸兜底。
+- 去掉浏览器端 canvas 预压，避免二次有损；公告图片仍沿用原有 2MB 有损阶梯，与社区图片互不影响。
+
+**存储与安全**
+
+- 图片不再以 base64 存库：压缩后落服务器私有目录（非 public / 非 CDN），数据库只存相对路径；读取仍统一经 `/api/media/{id}` 鉴权，未审核 / 已删除 / 影子封禁帖的图片一律 404，公网无法直链。
+- 阿里云内容审核与独立审核服务的 `?mt=` 拉图链路保持不变，审查始终拿到完整质量原图；保留魔数复检、去 EXIF、40MP 上限、CSP sandbox、nosniff 与私有图禁公共缓存。
+- 归档 / 立即删除同步清理磁盘文件；新增 `MEDIA_STORAGE_DIR` 环境变量与持久化卷支持。
+
+**游客只读与浏览量**
+
+- 回声社区对游客开放只读浏览：可看审核通过的帖子与图片，也可查看原图与下载原图；发帖 / 评论 / 点赞仍需登录（前端隐藏 + 服务端强校验）。
+- 未登录访问也计入浏览量「小眼睛」：签名 HttpOnly cookie 匿名 ID + 同一帖 1 小时去重（新增 `CommunityGuestView` 表与迁移，定时清理过期桶）。
+
+**依赖与合规**
+
+- 未引入任何新的 npm 依赖；新增数据库迁移由 `pnpm db:generate` 生成；README 项目结构树与 Changelog 同步更新。
 
 ### 2026-11-09 首个正式 Release 与发版前收口
 
@@ -1196,6 +1224,15 @@ VoiceHub/
 │   │   │   └── TwoFactorVerify.vue   # 双重认证验证组件
 │   │   ├── Common/            # 通用组件
 │   │   │   └── UserSearchModal.vue   # 用户搜索弹窗
+│   │   ├── Community/         # 回声社区组件
+│   │   │   ├── BlockButton.vue          # 拉黑用户按钮
+│   │   │   ├── CommunityCommentItem.vue # 社区评论条目
+│   │   │   ├── CommunityFeed.vue        # 社区动态主组件（发帖 / 评论 / 点赞 / 九宫格）
+│   │   │   ├── CommunityImageViewer.vue # 可缩放图片查看器（查看原图 / 下载）
+│   │   │   ├── NowPlayingCard.vue       # 正在播放卡片
+│   │   │   ├── ReportDialog.vue         # 举报对话框
+│   │   │   ├── RevealChoiceDialog.vue   # 揭晓选择对话框
+│   │   │   └── UserAchievement.vue      # 用户成就展示
 │   │   ├── Notifications/     # 通知系统组件
 │   │   │   └── NotificationSettings.vue # 通知设置
 │   │   ├── Player/            # 播放器相关组件
@@ -1825,6 +1862,7 @@ VoiceHub/
 │   │   ├── geo.ts          # 地理位置工具
 │   │   ├── grade-class-core.ts # 年级班级选项纯函数
 │   │   ├── grade-class-options.ts # 年级班级选项提取工具
+│   │   ├── guestView.ts    # 游客浏览量签名去重与过期清理
 │   │   ├── initial-password-policy.ts # 初始密码设置状态策略
 │   │   ├── important-notification-policy.ts # 重要通知发送与展示策略
 │   │   ├── notification-history-policy.ts # 通知批次引用、筛选与分页策略
@@ -1832,6 +1870,7 @@ VoiceHub/
 │   │   ├── ip-utils.ts     # IP地址工具
 │   │   ├── jwt-enhanced.ts # JWT工具
 │   │   ├── log-manager.ts  # 日志管理工具
+│   │   ├── mediaStorage.ts # 社区/公告图片私有目录文件存储（路径防穿越 / 原子写入）
 │   │   ├── music-source-plugins/ # LX Music 与 MusicFree 音源插件运行时、沙箱与凭证管理
 │   │   │   ├── access.ts    # 后台权限、同源校验与调用限流
 │   │   │   ├── backup.ts    # 插件表备份清单与恢复写入

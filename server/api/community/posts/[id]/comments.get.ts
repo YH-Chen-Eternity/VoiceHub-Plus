@@ -10,10 +10,10 @@ import {
 } from '~/drizzle/schema'
 import {
   buildCommunityIdentity,
+  getCommunityViewer,
   getReviewableBoardIds,
   isCommunityAdmin,
-  isCommunityReviewer,
-  requireCommunityUser
+  isCommunityReviewer
 } from '~~/server/utils/community'
 import { getBlockedUserIds } from '~~/server/utils/communityRelations'
 import {
@@ -50,7 +50,7 @@ interface CommunityCommentThread extends CommunityCommentPayload {
 }
 
 export default defineEventHandler(async (event) => {
-  const user = requireCommunityUser(event)
+  const user = getCommunityViewer(event)
   const postId = Number(getRouterParam(event, 'id'))
   if (!Number.isInteger(postId) || postId <= 0) {
     throw createApiError(400, 'COMMUNITY_POST_INVALID', '帖子参数不正确')
@@ -210,7 +210,7 @@ export default defineEventHandler(async (event) => {
       roots.push(node)
     }
   }
-  let threads = roots
+  const threads = roots
 
   const byCreatedAtAsc = (a: { createdAt: Date; id: number }, b: { createdAt: Date; id: number }) =>
     new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime() || a.id - b.id

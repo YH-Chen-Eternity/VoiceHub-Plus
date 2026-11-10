@@ -918,7 +918,8 @@ export type NewBackupHistory = typeof backupHistory.$inferInsert;
 // ───────────────────────── 公告栏 / 媒体资源 / 改名申请（2026-10-11） ─────────────────────────
 
 // 媒体资源：运行时上传的图片不能放 public（Nitro 资源清单构建期烘焙，运行时新增文件一律 404），
-// 因此统一存库 + 通过 /api/media/[id] 转发，公告栏图片就走这条路。
+// 也不能放任何可被 Web 服务器直接映射的目录，否则未审核/已删除帖子的图片会被绕过鉴权直接访问。
+// 因此统一落在私有数据目录，数据库只存相对路径，由 /api/media/[id] 鉴权后按 id 转发。
 export const mediaAssets = pgTable('MediaAsset', {
   // 规范化后内容的 sha256，用于同用户重复图片去重（可空，历史数据无）
   sha256: text('sha256'),
@@ -926,8 +927,11 @@ export const mediaAssets = pgTable('MediaAsset', {
   filename: text('filename').notNull(),
   mimeType: text('mimeType').notNull(),
   byteSize: integer('byteSize').notNull(),
-  // base64 存放（图片限制 2MB 内），随数据库一起备份，不依赖文件系统
-  data: text('data').notNull(),
+  // 原图 / 预览图在私有存储目录内的相对路径；新上传一律落盘，不再写 base64
+  storagePath: text('storagePath'),
+  previewPath: text('previewPath'),
+  // 历史 base64 数据，仅为兼容存量图片保留；读取端点优先 storagePath，缺失时回退此列
+  data: text('data'),
   uploadedBy: integer('uploadedBy'),
   createdAt: timestamp('createdAt').defaultNow().notNull(),
 }, (table) => [
@@ -1252,6 +1256,19 @@ export const communityPostViews = pgTable('CommunityPostView', {
 }, (table) => [
   primaryKey({ columns: [table.postId, table.userId] }),
   index('CommunityPostView_user_idx').on(table.userId, table.viewedAt)
+]);
+
+// 游客浏览量去重：签名 cookie 的匿名哈希 + 小时桶。
+// (postId, guestHash, hourBucket) 唯一，配合 onConflictDoNothing 原子判定「该游客这一小时是否已计过」，
+// 与登录用户 (postId,userId) 口径一致，且不留可用的明文身份，过期桶由归档清理任务顺带删除。
+export const communityGuestViews = pgTable('CommunityGuestView', {
+  postId: integer('postId').notNull().references(() => communityPosts.id, { onDelete: 'cascade' }),
+  guestHash: text('guestHash').notNull(),
+  hourBucket: integer('hourBucket').notNull(),
+  viewedAt: timestamp('viewedAt').defaultNow().notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.postId, table.guestHash, table.hourBucket] }),
+  index('CommunityGuestView_bucket_idx').on(table.hourBucket)
 ]);
 
 // 违规记录：用于「近 30 天」滚动统计，避免历史违规永久累计
