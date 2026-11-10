@@ -21,6 +21,35 @@ let siteDefault: Theme = 'System'
 function applyTheme(t: Theme) {
   current!.value = t
   document.documentElement.setAttribute('data-theme', t)
+  writeAppliedThemeCookie(t)
+}
+
+/** 将实际生效主题写入 cookie，供 SSR 水合时读取，保证服务端渲染与客户端首帧一致 */
+function writeAppliedThemeCookie(t: Theme) {
+  try {
+    const secure = location.protocol === 'https:' ? '; Secure' : ''
+    document.cookie = `voicehub-theme-applied=${encodeURIComponent(t)}; Path=/; Max-Age=31536000; SameSite=Lax${secure}`
+  } catch {
+    /* cookie 写入失败时静默忽略：仅影响下次 SSR 水合一致性 */
+  }
+}
+
+/** 读取上次实际生效的主题（SSR 读请求 cookie，客户端读 document.cookie）；无有效值时回退 ClassicDark */
+function readAppliedThemeFromCookie(): Theme {
+  try {
+    let cookieStr = ''
+    if (import.meta.server) {
+      cookieStr = useRequestHeaders(['cookie']).cookie || ''
+    } else {
+      cookieStr = document.cookie || ''
+    }
+    const match = /(?:^|;\s*)voicehub-theme-applied=([^;]+)/.exec(cookieStr)
+    const value = match?.[1] ? (decodeURIComponent(match[1]) as Theme) : null
+    if (value && THEMES.includes(value)) return value
+  } catch {
+    /* 无 Nuxt 上下文或 cookie 不可读时忽略 */
+  }
+  return 'ClassicDark'
 }
 
 /** 注册系统配色偏好监听：系统切换时自动应用对应经典主题 */
@@ -53,11 +82,14 @@ function readSavedTheme(): Theme | null {
  * 在组件 composable 中使用，服务端返回初始值但不订阅。
  */
 export function useTheme() {
-  // SSR 环境返回只读 stub，避免模块级单例在 Node 进程中跨请求共享可变状态
+  // SSR 环境返回只读 stub，避免模块级单例在 Node 进程中跨请求共享可变状态。
+  // 主题值从请求 cookie（voicehub-theme-applied，由客户端 applyTheme 写入）读取，
+  // 保证 SSR 渲染的主题与客户端水合首帧一致，消除主题相关的 hydration mismatch。
   if (import.meta.server) {
-    const currentTheme = computed(() => 'ClassicDark' as Theme)
-    const selectedTheme = computed(() => 'ClassicDark' as Theme)
-    const isDark = computed(() => true)
+    const applied = readAppliedThemeFromCookie()
+    const currentTheme = computed(() => applied)
+    const selectedTheme = computed(() => applied)
+    const isDark = computed(() => applied === 'ClassicDark')
     return {
       currentTheme,
       selectedTheme,
@@ -73,10 +105,20 @@ export function useTheme() {
     // 用户保存的主题被禁用时回退到站点默认；回退结果不写回 localStorage，避免把系统代选固化为用户偏好
     const chosen: Theme = (THEMES.includes(saved as Theme) && enabledThemes.value.includes(saved as Theme) ? saved : null) ?? siteDefault
 
+    // 客户端初始化：一律先用与 SSR 同源的 cookie 主题渲染首帧（消除 hydration mismatch），
+    // 水合完全结束后「System」再按系统配色偏好解析校正
+    const nuxtApp = useNuxtApp()
+    const initialCurrent: Theme = chosen === 'System' ? readAppliedThemeFromCookie() : chosen
+
     selected = ref<Theme>(chosen)
-    current = ref<Theme>(chosen === 'System' ? resolveSystemTheme() : chosen)
-    document.documentElement.setAttribute('data-theme', current.value)
-    if (chosen === 'System') watchSystemTheme()
+    current = ref<Theme>(initialCurrent)
+    applyTheme(current.value)
+    if (chosen === 'System') {
+      watchSystemTheme()
+      nuxtApp.hooks.hookOnce('app:mounted', () => {
+        if (selected!.value === 'System') applyTheme(resolveSystemTheme())
+      })
+    }
   }
 
   const theme = current!
@@ -148,6 +190,10 @@ export function applyThemeConfig(defaultTheme: unknown, configuredThemes: unknow
   selected.value = next
   if (next === 'System') {
     watchSystemTheme()
+    // 水合期间保持与 SSR 同源的 cookie 主题，由 useTheme 初始化时注册的 app:mounted 钩子
+    // 在水合完成后按系统配色解析；若在此时立即解析，会早于 hydration 比对改变主题，
+    // 产生 logo/配色相关的 hydration mismatch
+    if (useNuxtApp()?.isHydrating) return
     applyTheme(resolveSystemTheme())
   } else {
     unwatchSystemTheme()

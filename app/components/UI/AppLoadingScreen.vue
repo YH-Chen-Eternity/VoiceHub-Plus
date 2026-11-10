@@ -7,11 +7,13 @@
   >
     <div class="top-progress-bar" :style="{ width: `${safeProgress}%` }" />
 
-    <WarpCanvas
-      :settings="warpSettings"
-      :is-accelerating="isAccelerating"
-      :current-progress="safeProgress / 100"
-    />
+    <ClientOnly>
+      <WarpCanvas
+        :settings="warpSettings"
+        :is-accelerating="isAccelerating"
+        :current-progress="safeProgress / 100"
+      />
+    </ClientOnly>
 
     <main class="loading-main">
       <div class="progress-ring-wrap">

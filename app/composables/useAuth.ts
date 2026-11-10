@@ -134,12 +134,23 @@ export const useAuth = () => {
   }
 
   const refreshUser = async () => {
-    const data = await $fetch<{ user: User }>('/api/auth/verify')
-    if (data?.user) {
-      setAuthState(data.user)
-      return data.user
+    // 未登录（401/403）属于正常场景：静默清理并返回 null，避免控制台报错噪音；
+    // 其它错误（网络抖动、5xx 等）保留登录态并原样上抛，由调用方决定如何处理
+    try {
+      const data = await $fetch<{ user: User }>('/api/auth/verify')
+      if (data?.user) {
+        setAuthState(data.user)
+        return data.user
+      }
+      return null
+    } catch (error: any) {
+      const status = error?.status ?? error?.statusCode ?? error?.response?.status
+      if (status === 401 || status === 403) {
+        clearAuthState()
+        return null
+      }
+      throw error
     }
-    return null
   }
 
   const syncPasswordChangeState = async (
