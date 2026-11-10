@@ -786,7 +786,7 @@
       :open="lightbox.open"
       :images="lightbox.images"
       :index="lightbox.index"
-      :can-download="!isGuest"
+      :can-download="true"
       @close="closeLightbox"
       @update:index="lightbox.index = $event"
       @need-login="requireLogin"

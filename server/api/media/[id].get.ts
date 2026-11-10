@@ -43,7 +43,7 @@ import { readMediaFile } from '~~/server/utils/mediaStorage'
  * variant=preview 返回更小的预览图（新上传才有；缺失时回退原图）；
  * 不带 variant 返回压缩后 ≤3MB 的「原图」——阿里云审核的 ?mt= 拉图不带 variant，
  * 因此审查始终拿到完整质量图片，链路不受存储改造影响。
- * download=1 返回 attachment 且强制登录（游客仅可查看，不可取走原图），并禁用公共缓存，
+ * download=1 返回 attachment（游客同样可下载原图），并禁用公共缓存，
  * 避免 attachment 响应被共享缓存串味给普通查看请求。
  */
 export default defineEventHandler(async (event) => {
@@ -60,11 +60,6 @@ export default defineEventHandler(async (event) => {
   const query = getQuery(event)
   const wantDownload = query.download === '1' || query.download === 'true'
   const wantPreview = query.variant === 'preview'
-
-  // 下载 = 取走原图，属于写语义：服务端强校验登录，不能只靠前端隐藏按钮
-  if (wantDownload && !event.context.user) {
-    throw createApiError(401, 'AUTH_UNAUTHORIZED', '登录后可下载图片')
-  }
 
   const viewer = event.context.user
   const privileged =
