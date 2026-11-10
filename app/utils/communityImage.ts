@@ -39,7 +39,12 @@ export async function compressCommunityImageFile(
 
   let bitmap: ImageBitmap | null = null
   try {
-    bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' })
+    // imageOrientation 旧浏览器不支持该选项会抛错，此时降级为不带选项解码再试一次
+    try {
+      bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' })
+    } catch {
+      bitmap = await createImageBitmap(file)
+    }
     const sourceWidth = bitmap.width
     const sourceHeight = bitmap.height
     if (sourceWidth * sourceHeight > MAX_PIXELS) return { file, compressed: false }
@@ -74,8 +79,9 @@ export async function compressCommunityImageFile(
         }
       }
     }
-  } catch {
-    // 浏览器不支持或解码失败时退回原图，由服务端 sharp 处理
+  } catch (error) {
+    // 浏览器不支持或解码失败时退回原图，由服务端 sharp 处理；记录日志便于排查
+    console.warn('[community] 本地预压缩失败，回退原图直传:', error)
   } finally {
     bitmap?.close?.()
   }
