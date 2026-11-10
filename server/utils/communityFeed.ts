@@ -188,10 +188,18 @@ export async function loadCommunityPosts(options: LoadOptions) {
         .orderBy(asc(communityPostImages.sortOrder))
     : []
 
+  const statusByPost = new Map<number, string>()
+  for (const row of rows) statusByPost.set(row.id, row.status)
   const imagesByPost = new Map<number, Array<{ id: number; url: string }>>()
   for (const image of imageRows) {
     const list = imagesByPost.get(image.postId) || []
-    list.push({ id: image.mediaId, url: `/api/media/${image.mediaId}` })
+    // 已通过审核的帖子图片走公开 CDN 端点（无 Cookie、可公共缓存、支持 ETag/304），
+    // 未审核/驳回帖（作者或审帖员视图）保留鉴权端点；公开端点自身同样校验可见性，双重兜底
+    const url =
+      statusByPost.get(image.postId) === 'APPROVED'
+        ? `/api/public/media/${image.mediaId}`
+        : `/api/media/${image.mediaId}`
+    list.push({ id: image.mediaId, url })
     imagesByPost.set(image.postId, list)
   }
 

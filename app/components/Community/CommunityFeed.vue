@@ -781,7 +781,7 @@
       </Transition>
     </Teleport>
 
-    <!-- 图片查看器：微信朋友圈式缩放 / 查看原图 / 下载（未登录不可下载） -->
+    <!-- 图片查看器：微信朋友圈式缩放 / 查看原图 / 下载（游客与登录用户均可下载） -->
     <CommunityImageViewer
       :open="lightbox.open"
       :images="lightbox.images"
@@ -873,6 +873,7 @@ import { useToast } from '~/composables/useToast'
 import { useSongPlayback } from '~/composables/useSongPlayback'
 import {
   COMMUNITY_IMAGE_MAX_UPLOAD_BYTES,
+  compressCommunityImageFile,
   isCommunityImageType
 } from '~/utils/communityImage'
 import CommunityImageViewer from '~/components/Community/CommunityImageViewer.vue'
@@ -918,7 +919,7 @@ const violationCount = computed(() => Number(status.value?.viewer?.violationCoun
 const activeBoards = computed(() => boards.value.filter((board) => board.isActive))
 const maxImages = computed(() => Math.min(Number(settings.value.maxImages || 9), 9))
 const myUserId = computed(() => Number(me.value?.user?.id || 0))
-// 未登录游客：可浏览内容与图片，但发帖/评论/点赞/下载等写操作一律拦截（服务端同步强校验）
+// 未登录游客：可浏览内容与图片、查看原图与下载，但发帖/评论/点赞等写操作一律拦截（服务端同步强校验）
 const isGuest = computed(() => myUserId.value <= 0)
 function requireLogin(): boolean {
   if (!isGuest.value) return false
@@ -1546,11 +1547,22 @@ async function handleImageSelect(event: Event) {
     }
     uploading.value += 1
     try {
-      // 原图直传服务端：统一走「先无损、压不到 3MB 才有损」阶梯，避免浏览器二次有损压缩
+      // 浏览器本地预压缩：超过 3MB 的静态图先在本机压到 3MB 内再上传（省流量提速）；
+      // 预压缩失败/不支持时自动回退原图，服务端仍统一做校验与「先无损、压不到才降」重编码兜底
+      let uploadFile: File = file
+      let localCompressed = false
+      try {
+        const pre = await compressCommunityImageFile(file)
+        uploadFile = pre.file
+        localCompressed = pre.compressed
+      } catch {
+        uploadFile = file
+      }
       const form = new FormData()
-      form.append('file', file)
+      form.append('file', uploadFile)
       const res = await $fetch<AnyRecord>('/api/community/media', { method: 'POST', body: form })
-      if (res.compressed) showToast(t.value.imageCompressed, 'info', 2500)
+      if (localCompressed) showToast(t.value.imagePreCompressed || t.value.imageCompressed, 'info', 2500)
+      else if (res.compressed) showToast(t.value.imageCompressed, 'info', 2500)
       publishForm.images.push({ id: res.id, url: res.url })
     } catch (error: any) {
       showToast(apiMessage(error, t.value.imageUploadFailed), 'error')
