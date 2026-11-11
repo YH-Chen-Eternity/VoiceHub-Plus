@@ -21,7 +21,9 @@ import {
 // 配置以 compose 注入的 MUSIC_SRC_* 为准，兼容历史变量名，最后才回落到公开默认值。
 const cfg = (name: string, legacy: string, fallback = ''): string =>
   String(process.env[name] || process.env[legacy] || fallback).trim()
-// 不再内置明文 HTTP 裸 IP 源地址：未配置源地址时该源直接跳过，凭据不得经明文链路传输
+// 不再内置明文 HTTP 裸 IP 源地址：该默认值会让第三方音源卡密经明文链路传输，
+// 且裸 IP 无法验证对端身份（可被劫持/仿冒），凭据存在泄露与中间人篡改风险。
+// 因此未通过环境变量显式配置源地址时，该源直接跳过，不做回落。
 const HYW_TX_URL = cfg('MUSIC_SRC_HYW_URL', 'MUSIC_HYW_TX_URL')
 const YUAFENG_TX_URL = cfg('MUSIC_SRC_YUAFENG_URL', 'MUSIC_YUAFENG_TX_URL', 'https://api-v2.yuafeng.cn/API/qqmusic.php')
 const HELLOWORLD_TX_URL = cfg('MUSIC_SRC_HELLOWORLD_URL', 'MUSIC_HELLOWORLD_TX_URL', 'https://a.aa.cab/qq.music')

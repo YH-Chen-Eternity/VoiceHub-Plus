@@ -1565,6 +1565,7 @@ const updateSongCounts = async (semester = null) => {
 }
 
 // 后台标签页不空转请求；恢复可见时立即补刷一次，兼顾性能与前台数据新鲜度
+// 模块级 handler 仅用于首页单实例；重复注册会先移除旧监听，卸载时置 null 避免 SPA 复用残留
 let visibilityRefreshHandler = null
 const runSilentRefresh = async () => {
   try {
