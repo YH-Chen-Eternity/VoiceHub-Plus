@@ -197,7 +197,7 @@ set_real_ip_from 192.0.2.10;   # 换成实际内网 IP
 | --- | --- |
 | `00-zones.conf` | audio-proxy 限流/并发 zone、`auth-token` Cookie 映射 |
 | `00-media-cache.conf` | 社区公开图片缓存区 `vh_media` |
-| `voicehub-proxy.conf` | 统一回源头，放到 `/etc/nginx/snippets/` 供各处 `include` |
+| `voicehub-proxy.conf`（存量文件，源在 `deploy/nginx/voicehub-proxy.conf`） | 统一回源头，放到 `/etc/nginx/snippets/` 供各处 `include` |
 
 要点：
 
@@ -207,6 +207,13 @@ set_real_ip_from 192.0.2.10;   # 换成实际内网 IP
 - 公开图返回 `public immutable`，私有/鉴权图返回 `private no-store`；
   Nginx 尊重 `no-store`，因此私有响应不会进入共享缓存。
 - 缓存目录需存在且可写：`mkdir -p /var/cache/nginx/vh-media`。
+- `00-media-cache.conf` 的 `inactive=7d` 是未访问对象的清理周期，location 的
+  `proxy_cache_valid 200 30d` 是响应有效期；长期无人访问的对象 7 天后被清理、
+  再次访问需回源，属预期行为。
+- 私有图的主防护是上游 `private no-store`（Nginx 尊重 `no-store`）。若上游缓存
+  策略变更，务必同步复核 `proxy_no_cache`：当前为 `$http_authorization`；可选
+  纵深防御是追加 `$vh_auth_token`，使带会话 Cookie 的请求一律不写缓存，但会
+  让登录态下的公开图不参与缓存写入，启用前需同步线上并做回归。
 
 ## 十一、验证清单
 
