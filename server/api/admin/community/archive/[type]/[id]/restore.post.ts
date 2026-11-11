@@ -1,5 +1,5 @@
 import { getRouterParam } from 'h3'
-import { requireCommunityReviewer } from '~~/server/utils/community'
+import { requireCommunityAdmin } from '~~/server/utils/community'
 import { restoreArchivedCommunityContent } from '~~/server/utils/communityArchive'
 import { createApiError } from '~~/server/utils/apiError'
 import { writeAdminAudit } from '~~/server/utils/adminAudit'
@@ -7,10 +7,10 @@ import { writeAdminAudit } from '~~/server/utils/adminAudit'
 /**
  * 管理后台「社区归档记录」恢复/撤回归档。
  * POST /api/admin/community/archive/:type/:id/restore，type 支持 post/posts/comment/comments。
- * 鉴权与归档列表（archive.get.ts）一致：管理员、超级管理员与审帖员（审帖员仅限负责板块）。
+ * 鉴权：仅管理员/超级管理员（2026-11-11：归档记录整体从审帖员视野收回，恢复操作同口径）。
  */
 export default defineEventHandler(async (event) => {
-  const user = requireCommunityReviewer(event)
+  const user = requireCommunityAdmin(event)
 
   const typeParam = String(getRouterParam(event, 'type') || '').trim()
   const id = Number(getRouterParam(event, 'id'))

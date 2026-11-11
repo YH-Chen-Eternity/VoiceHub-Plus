@@ -2,6 +2,7 @@ import { getQuery } from 'h3'
 import {
   getCommunitySettings,
   getCommunityViewer,
+  getGuestVisibleBoardIds,
   isCommunityAdmin,
   isCommunityGuest,
   isCommunityReviewer
@@ -26,10 +27,15 @@ export default defineEventHandler(async (event) => {
   const q = String(query.q || '').trim().slice(0, 50)
   const sort = query.sort === 'hot' ? 'hot' : 'latest'
 
+  // 游客只能看到管理员开启「游客可见」的板块；boardId 参数与白名单取交集，
+  // 防止用 boardId 把可见范围放大到禁看板块。空数组时 loadCommunityPosts 会返回空集。
+  const guestBoardIds = guest ? await getGuestVisibleBoardIds() : undefined
+
   const posts = await loadCommunityPosts({
     viewerId: user.id,
     viewerRole: user.role,
     boardId,
+    boardIds: guestBoardIds,
     // 最热排序不支持游标翻页，只返回第一页（前端在热门模式隐藏“加载更多”）
     beforeId: sort === 'hot' ? undefined : beforeId,
     limit,

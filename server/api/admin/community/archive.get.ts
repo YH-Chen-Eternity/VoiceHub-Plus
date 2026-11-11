@@ -8,9 +8,8 @@ import {
   communityPosts,
   users
 } from '~/drizzle/schema'
-import { getReviewableBoardIds, requireCommunityReviewer } from '~~/server/utils/community'
+import { requireCommunityAdmin } from '~~/server/utils/community'
 import { purgeExpiredCommunityContent } from '~~/server/utils/communityArchive'
-import { createApiError } from '~~/server/utils/apiError'
 
 type AnyRecord = Record<string, any>
 
@@ -22,17 +21,14 @@ function actorView(map: Map<number, AnyRecord>, id: number | null | undefined) {
 }
 
 export default defineEventHandler(async (event) => {
-  const user = requireCommunityReviewer(event)
+  // 归档记录含全站已撤回/删除内容，仅限管理员/超级管理员（2026-11-11：从审帖员视野收回）
+  requireCommunityAdmin(event)
   const query = getQuery(event)
   const type = String(query.type || 'posts') === 'comments' ? 'comments' : 'posts'
   const boardId = Number(query.boardId || 0) || undefined
   const limit = Math.min(Math.max(Number(query.limit || 30) || 30, 1), 100)
 
-  const scopedBoardIds = await getReviewableBoardIds(user)
-  if (boardId && scopedBoardIds && !scopedBoardIds.includes(boardId)) {
-    throw createApiError(403, 'COMMUNITY_REVIEW_BOARD_FORBIDDEN', '你没有被分配到该板块')
-  }
-
+  // 归档已收权至管理员（requireCommunityAdmin），无需再按审帖员板块范围过滤，管理员可查看全站归档
   await purgeExpiredCommunityContent()
 
   const boardScope = boardId

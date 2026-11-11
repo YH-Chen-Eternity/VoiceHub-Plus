@@ -12,7 +12,9 @@ import {
   buildCommunityIdentity,
   getCommunityViewer,
   getReviewableBoardIds,
+  isBoardGuestVisible,
   isCommunityAdmin,
+  isCommunityGuest,
   isCommunityReviewer
 } from '~~/server/utils/community'
 import { getBlockedUserIds } from '~~/server/utils/communityRelations'
@@ -69,6 +71,11 @@ export default defineEventHandler(async (event) => {
     .limit(1)
   const post = postRow[0]
   if (!post || post.deletedAt) throw createApiError(404, 'COMMUNITY_POST_NOT_FOUND', '帖子不存在')
+
+  // 游客只能读取「游客可见」板块内帖子的评论；禁看板块按不存在处理（不泄露存在性）
+  if (isCommunityGuest(event) && !(await isBoardGuestVisible(post.boardId))) {
+    throw createApiError(404, 'COMMUNITY_POST_NOT_FOUND', '帖子不存在')
+  }
 
   const scopedBoardIds = await getReviewableBoardIds(user)
   const canReviewBoard = !scopedBoardIds || scopedBoardIds.includes(post.boardId)

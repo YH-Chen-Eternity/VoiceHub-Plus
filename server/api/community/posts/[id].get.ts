@@ -5,6 +5,7 @@ import { communityPostViews, communityPosts, communityProfiles } from '~/drizzle
 import {
   getCommunityViewer,
   getReviewableBoardIds,
+  isBoardGuestVisible,
   isCommunityAdmin,
   isCommunityGuest,
   isCommunityReviewer
@@ -23,6 +24,11 @@ export default defineEventHandler(async (event) => {
 
   const post = await getCommunityPostById(postId, user.id, user.role)
   if (!post) throw createApiError(404, 'COMMUNITY_POST_NOT_FOUND', '帖子不存在')
+
+  // 游客只能读取「游客可见」板块里的帖子；禁看板块按不存在处理（不泄露存在性）
+  if (guest && !(await isBoardGuestVisible(post.board.id))) {
+    throw createApiError(404, 'COMMUNITY_POST_NOT_FOUND', '帖子不存在')
+  }
 
   // 审帖员只能读取自己负责板块的未公开帖子
   const scopedBoardIds = await getReviewableBoardIds(user)

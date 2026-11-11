@@ -733,3 +733,28 @@ AST 普查器枚举危险调用点与请求源，按风险类别分诊，并与�
 
 - 第三方依赖与内容审核服务运行时同步至最新稳定版本，清理未使用依赖；均通过构建与类型检查。
 - `server/api/auth/forgot-password.post.ts`、`server/utils/rateLimiter.ts`：放宽找回密码请求的 IP / 账号维度频率限制；重设链接有效期、重设提交次数与人机验证等其余策略保持不变。
+
+### 10.20 游客板块可见性、归档收权与概览状态修复（2026-11-11）
+
+**游客板块可见性（按板块独立开关）**
+
+- `CommunityBoard` 新增 `allowGuestView` 布尔列（默认关闭，迁移 `20261111121305_community-board-guest-view.sql`）：管理员可在后台板块管理中按板块开启「游客可见」，开启后未登录访客可只读浏览该板块的已通过帖子（含评论与图片查看/下载），不能发帖、评论或点赞；未开启板块对游客完全不可见。
+- 三条读取链路同步收紧，防直链绕过：帖子列表（`posts/index.get.ts`）按游客可见板块白名单过滤（`boardId` 参数与白名单取交集）；帖子详情（`posts/[id].get.ts`）与评论列表（`posts/[id]/comments.get.ts`）对禁看板块按 404 处理，不泄露存在性；板块列表（`boards.get.ts`）对游客只返回开启开关的板块。
+- 白名单实现位于 `server/utils/community.ts`（`getGuestVisibleBoardIds` / `isBoardGuestVisible`），与既有游客只读框架（`COMMUNITY_GUEST_USER` 占位、游客浏览量去重）复用同一口径。
+- 后台板块管理（`CommunityBoards.vue` + `boards` 三个 admin 端点）：卡片新增「游客可见/仅登录可见」快捷开关，编辑弹窗新增开关与说明文案；配置入口维持 ADMIN/SUPER_ADMIN 权限（`requireCommunityAdmin`）不变。
+
+**社区归档记录收权（仅管理员可见）**
+
+- 「社区归档记录」栏目从审帖员（REVIEWER）菜单移除，仅 ADMIN/SUPER_ADMIN 可见（`usePermissions.ts` 两处角色列表同步修改）。
+- 后端同步收紧：`archive.get.ts` 与 `archive/[type]/[id]/restore.post.ts` 由 `requireCommunityReviewer` 改为 `requireCommunityAdmin`，前端隐藏之外接口层也拒绝审帖员访问。
+- 「举报与申诉」保留给审帖员：前端菜单入口（`community-reports`）与后端 `requireCommunityReviewer` 鉴权链路均不回收，审帖员仍按板块范围处理举报与申诉。
+
+**数据概览系统状态修复（放歌员/歌曲管理员）**
+
+- 修复回归：2026-10-23 将 `/api/system/status` 收紧到仅管理员后，放歌员（BROADCASTER）与歌曲管理员（SONG_ADMIN）打开数据概览时数据库/API 全部显示「异常」并标记离线（实际系统正常）。
+- 现对这两类角色返回受限载荷（`status: 'ok'` + `database.connected`），足以渲染概览状态；连接池、实例 ID、进程内存等内部细节仍仅管理员可见，数据库探测异常按「不可达」返回而非 500。
+
+**验证**
+
+- 新增策略测试 `tests/server/community-guest-view-policy.test.ts`（9 项）：归档收权、举报申诉保留、游客可见 schema/迁移/三条读取链路接入、后台读写链路、双语词典键一致、系统状态受限载荷不含内部细节。
+- 本机验证：eslint 0 error（改动文件）、单测 421/421 通过、`nuxt build` 通过。
