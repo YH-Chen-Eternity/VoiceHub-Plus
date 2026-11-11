@@ -100,6 +100,7 @@
             type="button"
             role="switch"
             :aria-checked="board.allowGuestView"
+            :aria-label="`${board.name} · ${board.allowGuestView ? t.guestViewOn : t.guestViewOff}`"
             :title="t.guestViewHint"
             class="inline-flex items-center gap-1.5 rounded px-2 py-0.5 transition-colors"
             :class="board.allowGuestView ? 'bg-primary-10 text-primary' : 'bg-bg-tertiary text-text-tertiary hover:text-text-secondary'"
@@ -207,6 +208,8 @@
                 type="button"
                 role="switch"
                 :aria-checked="editor.allowGuestView"
+                :aria-label="t.guestViewLabel"
+                :aria-describedby="editor.id ? 'board-guest-view-hint' : undefined"
                 class="flex items-center gap-2 rounded-xl border border-border-secondary px-3 py-2.5 text-xs font-bold text-text-secondary"
                 @click="editor.allowGuestView = !editor.allowGuestView"
               >
@@ -216,7 +219,7 @@
                 {{ t.guestViewLabel }}
               </button>
             </div>
-            <p class="rounded-xl bg-bg-tertiary-40 p-3 text-[11px] leading-relaxed text-text-tertiary">
+            <p id="board-guest-view-hint" class="rounded-xl bg-bg-tertiary-40 p-3 text-[11px] leading-relaxed text-text-tertiary">
               {{ t.guestViewHint }}
             </p>
           </div>

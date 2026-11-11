@@ -210,12 +210,20 @@ test('系统状态回归：放歌员/歌曲管理员获得受限载荷，内部�
   const statusSource = readFileSync(join(repoRoot, 'server/api/system/status.get.ts'), 'utf-8')
   assert.match(statusSource, /FULL_ADMIN_ROLES = \['ADMIN', 'SUPER_ADMIN'\]/)
   assert.match(statusSource, /OVERVIEW_ROLES = \['SONG_ADMIN', 'BROADCASTER'\]/)
-  // 受限分支不得暴露连接池 / 实例 ID / 进程信息（截取受限 return 到 FULL 分支 try 之前）
-  const limitedMatch = statusSource.match(
-    /if \(!FULL_ADMIN_ROLES\.includes\(user\.role\)\) \{[\s\S]*?\n {2}\}\n/
+  // 显式白名单放行，其余角色（含 REVIEWER/普通用户/未登录）403
+  assert.match(
+    statusSource,
+    /\[\.\.\.FULL_ADMIN_ROLES, \.\.\.OVERVIEW_ROLES\]\.includes\(role\)/,
+    '入口应为两类角色的显式白名单'
   )
-  assert.ok(limitedMatch, '应能定位受限角色分支')
-  const limitedBranch = limitedMatch[0]
+  // 受限分支 = 从受限 return 到管理员分支 try 之间，锚点不依赖缩进格式
+  const gateIdx = statusSource.indexOf('if (!FULL_ADMIN_ROLES.includes(role)) {')
+  assert.ok(gateIdx > 0, '应能定位受限角色分支入口')
+  const tryIdx = statusSource.indexOf('try {', gateIdx)
+  assert.ok(tryIdx > gateIdx, '受限分支之后应是管理员完整分支的 try 块')
+  const limitedBranch = statusSource.slice(gateIdx, tryIdx)
+  assert.match(limitedBranch, /status: 'ok'/, '受限分支应返回 status ok')
+  assert.match(limitedBranch, /connected: dbStatus\.connected/, '受限分支应返回数据库连通性')
   assert.ok(!limitedBranch.includes('poolStatus'), '受限分支不应包含 poolStatus')
   assert.ok(!limitedBranch.includes('instanceId'), '受限分支不应包含 instanceId')
   assert.ok(!limitedBranch.includes('heapUsed'), '受限分支不应包含进程内存信息')

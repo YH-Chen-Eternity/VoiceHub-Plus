@@ -12,8 +12,11 @@ const FULL_ADMIN_ROLES = ['ADMIN', 'SUPER_ADMIN']
 const OVERVIEW_ROLES = ['SONG_ADMIN', 'BROADCASTER']
 
 export default defineEventHandler(async (event) => {
+  // 显式白名单：两类角色允许访问，其余（含 REVIEWER/普通用户/未登录）一律 403
   const user = event.context.user
-  if (!user || (!FULL_ADMIN_ROLES.includes(user.role) && !OVERVIEW_ROLES.includes(user.role))) {
+  const role = String(user?.role || '')
+  const allowed = [...FULL_ADMIN_ROLES, ...OVERVIEW_ROLES].includes(role)
+  if (!allowed) {
     throw createError({ statusCode: 403, message: '只有管理员可以查看系统状态' })
   }
 
@@ -26,7 +29,7 @@ export default defineEventHandler(async (event) => {
     console.error('[System Status] 数据库连通性探测失败:', dbError)
   }
 
-  if (!FULL_ADMIN_ROLES.includes(user.role)) {
+  if (!FULL_ADMIN_ROLES.includes(role)) {
     return {
       status: 'ok',
       database: {

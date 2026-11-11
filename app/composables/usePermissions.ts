@@ -38,8 +38,7 @@ export const usePermissions = () => {
       return ['overview', 'schedule', 'print'].includes(page)
     }
 
-    // 审帖员 = 普通用户 + 帖子/评论审核 + 举报与申诉处理
-    // （社区归档记录 2026-11-11 收权：仅 ADMIN/SUPER_ADMIN 可见，后端接口同步收紧）
+    // 审帖员 = 帖子/评论审核 + 举报与申诉处理（社区归档记录已收权至 ADMIN/SUPER_ADMIN）
     if (role === 'REVIEWER') {
       return ['community-review', 'community-comment-review', 'community-reports'].includes(page)
     }
