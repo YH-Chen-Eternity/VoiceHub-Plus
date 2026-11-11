@@ -1,4 +1,4 @@
-import { asc, eq, sql } from 'drizzle-orm'
+import { and, asc, eq, sql } from 'drizzle-orm'
 import { db } from '~/drizzle/db'
 import { communityBoards } from '~/drizzle/schema'
 import {
@@ -34,7 +34,7 @@ export default defineEventHandler(async (event) => {
     // 游客只看到开启「游客可见」的板块；审帖员/管理员可见全部（含停用）
     .where(
       isCommunityGuest(event)
-        ? sql`${communityBoards.isActive} = true and ${communityBoards.allowGuestView} = true`
+        ? and(eq(communityBoards.isActive, true), eq(communityBoards.allowGuestView, true))
         : isCommunityReviewer(user)
           ? undefined
           : eq(communityBoards.isActive, true)
