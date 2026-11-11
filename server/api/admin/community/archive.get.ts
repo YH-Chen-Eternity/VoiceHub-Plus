@@ -31,20 +31,11 @@ export default defineEventHandler(async (event) => {
   // 归档已收权至管理员（requireCommunityAdmin），无需再按审帖员板块范围过滤，管理员可查看全站归档
   await purgeExpiredCommunityContent()
 
-  const boardScope = boardId
-    ? eq(communityPosts.boardId, boardId)
-    : scopedBoardIds
-      ? inArray(communityPosts.boardId, scopedBoardIds.length ? scopedBoardIds : [-1])
-      : undefined
+  const boardScope = boardId ? eq(communityPosts.boardId, boardId) : undefined
 
   const boards = await db
     .select({ id: communityBoards.id, name: communityBoards.name })
     .from(communityBoards)
-    .where(
-      scopedBoardIds
-        ? inArray(communityBoards.id, scopedBoardIds.length ? scopedBoardIds : [-1])
-        : undefined
-    )
 
   const [postStatRows, commentStatRows] = await Promise.all([
     db
