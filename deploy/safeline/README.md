@@ -46,6 +46,9 @@
 2. 修改 `voicehub.conf`（可直接使用本目录模板）：
    - HTTP 跳转块：`listen 80;` → `listen 127.0.0.1:10081;`（删除 IPv6 listen）
    - 主站块：`listen 443 ssl http2;` → `listen 127.0.0.1:10080;`，并注释掉全部 `ssl_*` 指令
+   - 共享 http 层配置 `00-zones.conf`、`00-media-cache.conf` 与 snippet
+     `voicehub-proxy.conf` 一并放到对应目录（见步骤 8），否则 `nginx -t` 会因
+     zone / 缓存区 / 变量未定义而失败
 3. 生效并确认 80/443 已空出：
    ```bash
    nginx -t && systemctl reload nginx
@@ -139,10 +142,73 @@ docker stats --no-stream | grep safeline    # 确认限制已生效
 set_real_ip_from 192.0.2.10;   # 换成实际内网 IP
 ```
 
-`real_ip_header CF-Connecting-IP` 保持不变（该头由 CF 覆写、雷池透传，客户端无法伪造）。
+按实际接入方式在 `cloudflare-real-ip.conf` 中二选一（模板已含两种模式的注释）：
+
+| 接入方式 | `real_ip_header` | 需信任的地址 |
+| --- | --- | --- |
+| 经 CDN 代理 | `CF-Connecting-IP` | CDN 官方 IP 段 + 雷池回源地址 |
+| 直连 + 雷池回源 | `X-Forwarded-For` | 雷池回源地址 |
+
+直连模式下务必开启 `real_ip_recursive on;`：雷池回源把真实客户端 IP 追加到 XFF，
+从右往左取第一个非受信地址；客户端伪造的 XFF 位于真实 IP 之前，不会被取到。
 改完 `nginx -t && systemctl reload nginx`，并验证访问日志里的 IP 是真实访客 IP。
 
-## 九、验证清单
+## 九、步骤 7：HTTP 强制跳转 HTTPS（可选但建议）
+
+前置代理终结 TLS 后，回源请求都是纯 HTTP，源站 Nginx 无法用 `$scheme` 判断访客
+实际使用的是 http 还是 https。做法是让前置代理回源时写入协议头，源站据此跳转：
+
+1. 在前置代理的站点自定义回源参数中增加（雷池：站点 → 自定义配置 / `custom_params`）：
+
+   ```nginx
+   proxy_set_header X-Forwarded-Proto $scheme;
+   ```
+
+   该头由前置代理覆盖写入，客户端伪造无效。
+
+2. `voicehub.conf` 主站 server 已内置对应规则：
+
+   ```nginx
+   if ($http_x_forwarded_proto = "http") {
+       return 301 https://$host$request_uri;
+   }
+   ```
+
+   仅 `http` 跳转，`https` 不受影响，不会出现循环重定向；路径与查询串保留。
+
+3. 验证：
+
+   ```bash
+   curl -sI http://example.com/                                  # 301 → https://example.com/
+   curl -sI https://example.com/                                 # 200
+   curl -sI -H 'X-Forwarded-Proto: http' https://example.com/    # 仍 200（伪造头无效）
+   ```
+
+> 若前置代理本身提供「强制 HTTPS」开关，直接开启即可，与本方案二选一；
+> 两层同时开启也不冲突（前置代理先跳转，源站收不到 http 请求）。
+> 未配置 `X-Forwarded-Proto` 时规则不触发，退化成「不跳转」，不影响可用性。
+
+## 十、步骤 8：http 层共享配置与社区图片缓存
+
+`00-zones.conf`、`00-media-cache.conf` 需与 `voicehub.conf` 一起放入
+`/etc/nginx/conf.d/`（`00-` 前缀保证先加载，其中指令只能在 http 层出现）：
+
+| 文件 | 作用 |
+| --- | --- |
+| `00-zones.conf` | audio-proxy 限流/并发 zone、`auth-token` Cookie 映射 |
+| `00-media-cache.conf` | 社区公开图片缓存区 `vh_media` |
+| `voicehub-proxy.conf` | 统一回源头，放到 `/etc/nginx/snippets/` 供各处 `include` |
+
+要点：
+
+- 会话 Cookie 名含连字符（`auth-token`），Nginx 没有对应内置变量，
+  用 `map $http_cookie $vh_auth_token` 提取。`voicehub.conf` 的音频代理
+  防线 2 依赖该变量，**缺少 map 会导致所有音频代理请求被 403**。
+- 公开图返回 `public immutable`，私有/鉴权图返回 `private no-store`；
+  Nginx 尊重 `no-store`，因此私有响应不会进入共享缓存。
+- 缓存目录需存在且可写：`mkdir -p /var/cache/nginx/vh-media`。
+
+## 十一、验证清单
 
 ```bash
 # 1) 全链路
@@ -157,9 +223,15 @@ curl -s -o /dev/null -w '%{http_code}\n' "https://example.com/?id=1' and 1=1-- "
 free -h && docker stats --no-stream | grep safeline
 
 # 5) 暴露面：10080 / 10081 / 9443 公网均不可达，80/443 由雷池监听
+
+# 6) HTTP 强制跳转（见步骤 7）
+curl -sI http://example.com/ | grep -i '^location'
+
+# 7) 共享 http 层配置已加载
+nginx -T | grep -E 'keys_zone=vh_media|zone=vh_aproxy|map \$http_cookie'
 ```
 
-## 十、免费防护建议开关（人机验证除外）
+## 十二、免费防护建议开关（人机验证除外）
 
 | 防护项 | 建议 |
 | --- | --- |
@@ -171,7 +243,7 @@ free -h && docker stats --no-stream | grep safeline
 | 响应检测（m_response） | 关（性能开销大，收益低） |
 | HTML/JS 代码加密 | 关（会改写页面 JS，易破坏前端） |
 
-## 十一、回滚
+## 十三、回滚
 
 1. 还原 Nginx 备份包（步骤 1 生成），恢复 `listen 80/443` 与 `ssl_*` 配置
 2. `cd /data/safeline && docker compose down`，雷池即交还 80/443
