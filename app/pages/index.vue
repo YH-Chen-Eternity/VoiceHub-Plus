@@ -1564,6 +1564,22 @@ const updateSongCounts = async (semester = null) => {
   }
 }
 
+// 后台标签页不空转请求；恢复可见时立即补刷一次，兼顾性能与前台数据新鲜度
+let visibilityRefreshHandler = null
+const runSilentRefresh = async () => {
+  try {
+    if (isClientAuthenticated.value) {
+      await Promise.allSettled([songs.fetchSongs(true), songs.fetchPublicSchedules(true), loadNotifications()])
+    } else {
+      await Promise.allSettled([songs.fetchPublicSchedules(true), songs.fetchSongCount()])
+    }
+
+    await updateSongCounts()
+  } catch (error) {
+    console.error('定时刷新失败:', error)
+  }
+}
+
 // 智能刷新定时器：依据通知设置的刷新间隔周期性静默刷新
 const setupRefreshInterval = () => {
   if (refreshInterval) {
@@ -1575,19 +1591,21 @@ const setupRefreshInterval = () => {
 
   console.log(`设置智能刷新间隔: ${intervalSeconds}秒`)
 
-  refreshInterval = setInterval(async () => {
-    try {
-      if (isClientAuthenticated.value) {
-        await Promise.allSettled([songs.fetchSongs(true), songs.fetchPublicSchedules(true), loadNotifications()])
-      } else {
-        await Promise.allSettled([songs.fetchPublicSchedules(true), songs.fetchSongCount()])
-      }
-
-      await updateSongCounts()
-    } catch (error) {
-      console.error('定时刷新失败:', error)
-    }
+  refreshInterval = setInterval(() => {
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+    void runSilentRefresh()
   }, intervalMs)
+
+  // 可见性恢复时补刷一次；重复调用不叠加监听器
+  if (typeof document !== 'undefined') {
+    if (visibilityRefreshHandler) {
+      document.removeEventListener('visibilitychange', visibilityRefreshHandler)
+    }
+    visibilityRefreshHandler = () => {
+      if (document.visibilityState === 'visible') void runSilentRefresh()
+    }
+    document.addEventListener('visibilitychange', visibilityRefreshHandler)
+  }
 }
 
 // 将 SSR 预取数据灌入各组合式状态；配置缺失视为预取失败，交由客户端回退补拉
@@ -1757,6 +1775,11 @@ onUnmounted(() => {
 
   if (refreshInterval) {
     clearInterval(refreshInterval)
+  }
+
+  if (visibilityRefreshHandler) {
+    document.removeEventListener('visibilitychange', visibilityRefreshHandler)
+    visibilityRefreshHandler = null
   }
 })
 

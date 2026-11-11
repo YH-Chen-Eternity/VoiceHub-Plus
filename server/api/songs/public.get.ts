@@ -8,7 +8,6 @@ import { SUBMISSION_NOTE_STATUS } from '~~/server/config/constants'
 import { maskPublicScheduleData,
   applySubmissionAnonymityToSchedules,
   stripAnonymousSongIdentifiersFromSchedules,
-  applySubmissionAnonymityToSchedules,
   type PublicScheduleItem
 } from '../../utils/studentMask'
 import { verifyUserAuth } from '../../utils/auth'

@@ -52,6 +52,7 @@ export default defineEventHandler(async (event) => {
     if (identity.provider === 'totp') {
       return {
         ...identity,
+        providerUserId: '', // TOTP 密钥不下发到客户端（前端本就隐藏展示）
         avatar: null,
         isAvatarSource: false
       }

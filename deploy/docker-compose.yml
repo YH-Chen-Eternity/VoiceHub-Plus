@@ -86,8 +86,6 @@ services:
       - TRUSTED_CLIENT_IP_HEADERS=x-real-ip
       - NUXT_PUBLIC_HOST=${NUXT_PUBLIC_HOST}
       - ATTACK_LOG_TOKEN=${ATTACK_LOG_TOKEN}
-      - NETEASE_SHARE_COOKIE=${NETEASE_SHARE_COOKIE}
-      - NETEASE_SHARE_IPS=
       # ---- 第三方音源（可随时换源，无需改代码/重建镜像）----
       # 变量名必须与 server/api/music/resolve-url.post.ts 读取的一致：
       # MUSIC_HYW_TX_URL / MUSIC_HYW_CARD_KEY / MUSIC_YUAFENG_TX_URL / MUSIC_YUAFENG_APIKEY

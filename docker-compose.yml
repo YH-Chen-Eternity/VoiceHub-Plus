@@ -4,7 +4,7 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      - '3000:3000'
+      - '127.0.0.1:3000:3000'
     environment:
       - DATABASE_URL=postgresql://user:${DB_PASSWORD:?set DB_PASSWORD}@postgres:5432/voicehub
       - JWT_SECRET=${JWT_SECRET:?set JWT_SECRET}

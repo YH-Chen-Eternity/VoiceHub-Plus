@@ -101,6 +101,10 @@ export default defineEventHandler(async (event) => {
       const avatarSource = resolveAvatarSource(user, user.identities || [])
       return {
         ...user,
+        // TOTP 的 providerUserId 实为 2FA 密钥，管理员列表也不应下发
+        identities: (user.identities || []).map((identity: any) =>
+          identity.provider === 'totp' ? { ...identity, providerUserId: '' } : identity
+        ),
         avatar: avatarSource?.url ?? null
       }
     })
