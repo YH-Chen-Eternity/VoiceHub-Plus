@@ -74,6 +74,11 @@ test('归档端点收权：archive 列表与恢复接口均已改为 requireComm
     !listSource.includes('requireCommunityReviewer'),
     'archive.get.ts 不应再允许审帖员访问'
   )
+  // 运行时回归守卫：收权清理时曾漏删 scopedBoardIds 引用，管理员打开归档页直接 500
+  assert.ok(
+    !listSource.includes('scopedBoardIds'),
+    'archive.get.ts 不应残留审帖员板块范围变量 scopedBoardIds'
+  )
 
   const restoreSource = readFileSync(
     join(repoRoot, 'server/api/admin/community/archive/[type]/[id]/restore.post.ts'),
