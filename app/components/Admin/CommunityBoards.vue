@@ -91,11 +91,32 @@
           </button>
         </div>
 
-        <div class="mt-3 flex flex-wrap gap-2 text-[10px] font-bold text-text-tertiary">
+        <div class="mt-3 flex flex-wrap items-center gap-2 text-[10px] font-bold text-text-tertiary">
           <span class="rounded bg-bg-tertiary px-2 py-0.5">{{ t.postCount }} {{ board.postCount }}</span>
           <span class="rounded bg-bg-tertiary px-2 py-0.5">{{ t.pendingCount }} {{ board.pendingCount }}</span>
           <span class="rounded bg-bg-tertiary px-2 py-0.5">{{ t.reviewersLabel }} {{ board.reviewerCount }}</span>
           <span class="rounded bg-bg-tertiary px-2 py-0.5">{{ t.sortOrder }} {{ board.sortOrder }}</span>
+          <button
+            type="button"
+            role="switch"
+            :aria-checked="board.allowGuestView"
+            :title="t.guestViewHint"
+            class="inline-flex items-center gap-1.5 rounded px-2 py-0.5 transition-colors"
+            :class="board.allowGuestView ? 'bg-primary-10 text-primary' : 'bg-bg-tertiary text-text-tertiary hover:text-text-secondary'"
+            :disabled="busyId === board.id"
+            @click="toggleGuestView(board)"
+          >
+            <span
+              class="relative h-3 w-6 rounded-full transition-colors"
+              :class="board.allowGuestView ? 'bg-primary-hover' : 'bg-border-secondary'"
+            >
+              <span
+                class="absolute top-0.5 h-2 w-2 rounded-full bg-bg-secondary transition-all"
+                :class="board.allowGuestView ? 'left-3.5' : 'left-0.5'"
+              />
+            </span>
+            {{ board.allowGuestView ? t.guestViewOn : t.guestViewOff }}
+          </button>
         </div>
 
         <div class="mt-4 flex flex-wrap gap-2">
@@ -182,7 +203,22 @@
                 </span>
                 {{ t.active }}
               </button>
+              <button
+                type="button"
+                role="switch"
+                :aria-checked="editor.allowGuestView"
+                class="flex items-center gap-2 rounded-xl border border-border-secondary px-3 py-2.5 text-xs font-bold text-text-secondary"
+                @click="editor.allowGuestView = !editor.allowGuestView"
+              >
+                <span class="relative h-4 w-8 rounded-full transition-colors" :class="editor.allowGuestView ? 'bg-primary-hover' : 'bg-bg-tertiary'">
+                  <span class="absolute top-0.5 h-3 w-3 rounded-full bg-bg-secondary transition-all" :class="editor.allowGuestView ? 'left-4' : 'left-0.5'" />
+                </span>
+                {{ t.guestViewLabel }}
+              </button>
             </div>
+            <p class="rounded-xl bg-bg-tertiary-40 p-3 text-[11px] leading-relaxed text-text-tertiary">
+              {{ t.guestViewHint }}
+            </p>
           </div>
           <div class="mt-6 flex gap-2">
             <button
@@ -313,6 +349,7 @@ const editor = reactive({
   description: '',
   sortOrder: 0,
   isActive: true,
+  allowGuestView: false,
   saving: false
 })
 
@@ -351,6 +388,7 @@ const openEditor = (board) => {
     description: board?.description || '',
     sortOrder: board?.sortOrder ?? 0,
     isActive: board ? !!board.isActive : true,
+    allowGuestView: board ? !!board.allowGuestView : false,
     saving: false
   })
 }
@@ -366,7 +404,8 @@ const saveBoard = async () => {
       name: editor.name.trim(),
       description: editor.description.trim(),
       sortOrder: Number(editor.sortOrder) || 0,
-      isActive: editor.isActive
+      isActive: editor.isActive,
+      allowGuestView: editor.allowGuestView
     }
     if (editor.id) {
       await $fetch(`/api/admin/community/boards/${editor.id}`, { method: 'PUT', body })
@@ -391,6 +430,23 @@ const toggleBoard = async (board) => {
       body: { isActive: !board.isActive }
     })
     board.isActive = !board.isActive
+  } catch (e) {
+    showToast(e?.data?.message || t.value.settingsFailed, 'error')
+  } finally {
+    busyId.value = 0
+  }
+}
+
+/** 游客可见开关：按板块独立生效，立即保存（与启用开关同级别的小粒度操作） */
+const toggleGuestView = async (board) => {
+  busyId.value = board.id
+  try {
+    await $fetch(`/api/admin/community/boards/${board.id}`, {
+      method: 'PUT',
+      body: { allowGuestView: !board.allowGuestView }
+    })
+    board.allowGuestView = !board.allowGuestView
+    showToast(t.value.guestViewSaved, 'success')
   } catch (e) {
     showToast(e?.data?.message || t.value.settingsFailed, 'error')
   } finally {

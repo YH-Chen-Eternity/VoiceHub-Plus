@@ -5,22 +5,40 @@ import { databaseManager } from '~~/server/utils/database-manager'
 import { getInstanceId } from '~~/server/utils/instance-id'
 import { isTelemetryEnabled } from '~~/server/utils/telemetry'
 
-const ADMIN_ROLES = ['ADMIN', 'SUPER_ADMIN']
+const FULL_ADMIN_ROLES = ['ADMIN', 'SUPER_ADMIN']
+// 放歌员 / 歌曲管理员：管理后台数据概览也会读取系统状态（2026-10-23 收紧到仅管理员后，
+// 他们的概览页数据库/API 全部显示「异常」，构成回归）。允许他们拿到「服务是否正常」的
+// 最小结论，但不返回连接池、实例 ID、进程内存等内部细节。
+const OVERVIEW_ROLES = ['SONG_ADMIN', 'BROADCASTER']
 
 export default defineEventHandler(async (event) => {
-  // 系统状态含实例 ID、连接池细节与内部错误信息，仅限管理员（2026-10-23 安全加固：
-  // 原实现任何登录用户均可读取，构成信息泄露）
   const user = event.context.user
-  if (!user || !ADMIN_ROLES.includes(user.role)) {
+  if (!user || (!FULL_ADMIN_ROLES.includes(user.role) && !OVERVIEW_ROLES.includes(user.role))) {
     throw createError({ statusCode: 403, message: '只有管理员可以查看系统状态' })
+  }
+
+  // 数据库连通性探测：对所有允许的角色都执行（这是概览页唯一需要的真实信号）。
+  // 探测异常按「数据库不可达」处理，绝不让该接口 500——概览页靠它区分「服务挂了」和「无权查看」。
+  let dbStatus: { connected: boolean; error?: string | null } = { connected: false, error: null }
+  try {
+    dbStatus = await databaseManager.getConnectionStatus()
+  } catch (dbError: any) {
+    console.error('[System Status] 数据库连通性探测失败:', dbError)
+  }
+
+  if (!FULL_ADMIN_ROLES.includes(user.role)) {
+    return {
+      status: 'ok',
+      database: {
+        connected: dbStatus.connected
+      }
+    }
   }
 
   try {
     const instanceId = await getInstanceId()
     const telemetryEnabled = await isTelemetryEnabled()
 
-    // 获取数据库连接状态
-    const dbStatus = await databaseManager.getConnectionStatus()
     let poolStatus = null
     try {
       poolStatus = await databaseManager.getConnectionPoolStatus()
@@ -28,7 +46,6 @@ export default defineEventHandler(async (event) => {
       console.warn('[System Status] Failed to get database pool status:', poolError)
     }
 
-    // 数据库连接测试结果
     const dbTestResult = dbStatus.connected
     const dbError = dbStatus.connected ? null : dbStatus.error
 

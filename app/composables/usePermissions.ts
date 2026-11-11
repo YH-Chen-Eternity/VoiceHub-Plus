@@ -38,9 +38,10 @@ export const usePermissions = () => {
       return ['overview', 'schedule', 'print'].includes(page)
     }
 
-    // 审帖员 = 普通用户 + 帖子/评论审核 + 归档查看
+    // 审帖员 = 普通用户 + 帖子/评论审核 + 举报与申诉处理
+    // （社区归档记录 2026-11-11 收权：仅 ADMIN/SUPER_ADMIN 可见，后端接口同步收紧）
     if (role === 'REVIEWER') {
-      return ['community-review', 'community-comment-review', 'community-archive', 'community-reports'].includes(page)
+      return ['community-review', 'community-comment-review', 'community-reports'].includes(page)
     }
 
     return false
@@ -94,7 +95,7 @@ export const usePermissions = () => {
       case 'BROADCASTER':
         return ['overview', 'schedule', 'print']
       case 'REVIEWER':
-        return ['community-review', 'community-comment-review', 'community-archive', 'community-reports']
+        return ['community-review', 'community-comment-review', 'community-reports']
       default:
         return []
     }

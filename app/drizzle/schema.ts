@@ -1047,6 +1047,8 @@ export const communityBoards = pgTable('CommunityBoard', {
   description: text('description').default('').notNull(),
   sortOrder: integer('sortOrder').default(0).notNull(),
   isActive: boolean('isActive').default(true).notNull(),
+  // 游客（未登录）可见开关：开启后该板块的已通过帖子对游客完整只读，默认关闭（仅登录用户可见）
+  allowGuestView: boolean('allowGuestView').default(false).notNull(),
 }, (table) => [
   uniqueIndex('CommunityBoard_name_unique').on(table.name),
   index('CommunityBoard_sort_idx').on(table.sortOrder)

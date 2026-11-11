@@ -99,6 +99,26 @@ export function isCommunityGuest(event: H3Event): boolean {
   return !event.context.user
 }
 
+/**
+ * 游客（未登录）可见板块 id 集合：开启 allowGuestView 且未停用的板块。
+ * 管理员按板块逐个开启（默认关闭）；列表/详情/评论等游客可读端点都用它收紧可见范围，
+ * 防止「帖子在允许板块、详情直链却指向禁看板块」的绕过。板块数量很少，直接查库即可。
+ */
+export async function getGuestVisibleBoardIds(): Promise<number[]> {
+  const rows = await db
+    .select({ id: communityBoards.id })
+    .from(communityBoards)
+    .where(and(eq(communityBoards.isActive, true), eq(communityBoards.allowGuestView, true)))
+  return rows.map((row) => row.id)
+}
+
+/** 判断板块 id 是否对游客可见；boardIds 为空时视为不可见 */
+export async function isBoardGuestVisible(boardId: number): Promise<boolean> {
+  if (!Number.isInteger(boardId) || boardId <= 0) return false
+  const ids = await getGuestVisibleBoardIds()
+  return ids.includes(boardId)
+}
+
 /** 社区配置读取（单例，缺失时自动补默认行） */
 export async function getCommunitySettings(): Promise<CommunitySettingsRow> {
   const existing = await db

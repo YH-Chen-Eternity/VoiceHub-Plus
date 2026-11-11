@@ -21,7 +21,8 @@ export default defineEventHandler(async (event) => {
         name,
         description: clean(body?.description, 200),
         sortOrder: Number.isFinite(Number(body?.sortOrder)) ? Math.trunc(Number(body.sortOrder)) : 0,
-        isActive: body?.isActive !== false
+        isActive: body?.isActive !== false,
+        allowGuestView: body?.allowGuestView === true
       })
       .returning()
     return { success: true, board }

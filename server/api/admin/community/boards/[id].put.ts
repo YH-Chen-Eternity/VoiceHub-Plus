@@ -26,6 +26,7 @@ export default defineEventHandler(async (event) => {
     patch.sortOrder = Math.trunc(Number(body.sortOrder))
   }
   if (typeof body?.isActive === 'boolean') patch.isActive = body.isActive
+  if (typeof body?.allowGuestView === 'boolean') patch.allowGuestView = body.allowGuestView
 
   try {
     const [board] = await db

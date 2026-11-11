@@ -1,0 +1,1 @@
+ALTER TABLE "CommunityBoard" ADD COLUMN "allowGuestView" boolean DEFAULT false NOT NULL;

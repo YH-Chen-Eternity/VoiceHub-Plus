@@ -8,7 +8,7 @@ import {
   communityPosts,
   users
 } from '~/drizzle/schema'
-import { getReviewableBoardIds, requireCommunityReviewer } from '~~/server/utils/community'
+import { getReviewableBoardIds, requireCommunityAdmin } from '~~/server/utils/community'
 import { purgeExpiredCommunityContent } from '~~/server/utils/communityArchive'
 import { createApiError } from '~~/server/utils/apiError'
 
@@ -22,7 +22,8 @@ function actorView(map: Map<number, AnyRecord>, id: number | null | undefined) {
 }
 
 export default defineEventHandler(async (event) => {
-  const user = requireCommunityReviewer(event)
+  // 归档记录含全站已撤回/删除内容，仅限管理员/超级管理员（2026-11-11：从审帖员视野收回）
+  const user = requireCommunityAdmin(event)
   const query = getQuery(event)
   const type = String(query.type || 'posts') === 'comments' ? 'comments' : 'posts'
   const boardId = Number(query.boardId || 0) || undefined

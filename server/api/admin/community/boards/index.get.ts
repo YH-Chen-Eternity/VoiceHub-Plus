@@ -13,6 +13,7 @@ export default defineEventHandler(async (event) => {
       description: communityBoards.description,
       sortOrder: communityBoards.sortOrder,
       isActive: communityBoards.isActive,
+      allowGuestView: communityBoards.allowGuestView,
       createdAt: communityBoards.createdAt,
       // 显式限定外层列，避免子查询里的 "id" 被解析成内层表主键。
       reviewerCount: sql<number>`(select count(*)::int from "CommunityBoardReviewer" r where r."boardId" = "CommunityBoard"."id")`,
