@@ -21,7 +21,10 @@ import {
 // 配置以 compose 注入的 MUSIC_SRC_* 为准，兼容历史变量名，最后才回落到公开默认值。
 const cfg = (name: string, legacy: string, fallback = ''): string =>
   String(process.env[name] || process.env[legacy] || fallback).trim()
-const HYW_TX_URL = cfg('MUSIC_SRC_HYW_URL', 'MUSIC_HYW_TX_URL', 'http://103.79.184.97/api/music/url')
+// 不再内置明文 HTTP 裸 IP 源地址：该默认值会让第三方音源卡密经明文链路传输，
+// 且裸 IP 无法验证对端身份（可被劫持/仿冒），凭据存在泄露与中间人篡改风险。
+// 因此未通过环境变量显式配置源地址时，该源直接跳过，不做回落。
+const HYW_TX_URL = cfg('MUSIC_SRC_HYW_URL', 'MUSIC_HYW_TX_URL')
 const YUAFENG_TX_URL = cfg('MUSIC_SRC_YUAFENG_URL', 'MUSIC_YUAFENG_TX_URL', 'https://api-v2.yuafeng.cn/API/qqmusic.php')
 const HELLOWORLD_TX_URL = cfg('MUSIC_SRC_HELLOWORLD_URL', 'MUSIC_HELLOWORLD_TX_URL', 'https://a.aa.cab/qq.music')
 // QQ 已知无效占位音频，命中说明源返回的是错误录音
@@ -57,7 +60,7 @@ const isValidTxAudioUrl = (url: string) => /^https?:\/\//i.test(url) && !url.inc
 
 const resolveTxWithHyw = async (songmid: string, quality: unknown) => {
   const cardKey = getHywCardKey()
-  if (!cardKey) throw new Error('HYW 源未配置（MUSIC_HYW_CARD_KEY），已跳过')
+  if (!cardKey || !HYW_TX_URL) throw new Error('HYW 源未配置（URL 或 MUSIC_HYW_CARD_KEY），已跳过')
   const qualityMap: Record<string, string> = {
     '4': '128k',
     '8': '320k',
@@ -436,12 +439,8 @@ export default defineEventHandler(async (event) => {
 
   // 并发合并：同一首歌的并发请求共用一个上游调用，避免瞬间打爆上游
   if (cacheKey && inFlightResolves.has(cacheKey)) {
-    try {
-      const shared = await inFlightResolves.get(cacheKey)!
-      return { ...shared, cached: true }
-    } catch (error) {
-      throw error
-    }
+    const shared = await inFlightResolves.get(cacheKey)!
+    return { ...shared, cached: true }
   }
 
   const resolvePromise = runResolve()
