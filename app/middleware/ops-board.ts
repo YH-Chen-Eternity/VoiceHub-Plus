@@ -1,5 +1,5 @@
 import { useAuth } from '~/composables/useAuth'
-import { CONFIGURABLE_ROLES } from '~/types/rolePages'
+import { CONFIGURABLE_ROLES } from '~~/types/rolePages'
 
 // 运维看板可见性：SUPER_ADMIN 恒可见；可配置角色（ADMIN/SONG_ADMIN/BROADCASTER/
 // REVIEWER）按超管在「角色权限」页配置的生效页面（effectivePages 含 ops-board）
