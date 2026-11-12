@@ -96,6 +96,7 @@ const quotaResetText = computed(() => {
   if (quota.value.source !== 'lighthouse' || !t.value?.lighthouse?.periodEnd) return ''
   const end = new Date(t.value.lighthouse.periodEnd)
   if (Number.isNaN(end.getTime())) return ''
+  // 部署时区为东八区（无 DST），ceil 到整天数不会跨时区漂移
   const days = Math.max(0, Math.ceil((end.getTime() - Date.now()) / 86400000))
   return `计费周期 ${end.getMonth() + 1} 月 ${end.getDate()} 日重置（剩 ${days} 天）`
 })

@@ -27,7 +27,7 @@ export default defineEventHandler(async (event) => {
   const fallbackTotal = settings.cosQuotaBytes
   const fallbackUsed = metered.month
 
-  const useLighthouse = lighthouse.available && lighthouse.total !== null
+  const useLighthouse = lighthouse.available && lighthouse.total != null
   const total = useLighthouse ? lighthouse.total : fallbackTotal
   const used = useLighthouse ? lighthouse.used : fallbackUsed
 
@@ -57,7 +57,8 @@ export default defineEventHandler(async (event) => {
     quota: {
       total,
       used,
-      remaining: total === null ? null : Math.max(0, total - (used ?? 0)),
+      // used 為 null（已用未知）時 remaining 也置 null，避免 0-偽裝成「未用」
+      remaining: total === null || used == null ? null : Math.max(0, total - used),
       period: useLighthouse ? 'billing' : 'month',
       source: useLighthouse ? 'lighthouse' : 'estimated',
       available: total !== null && settings.available

@@ -27,13 +27,18 @@
 import { createHash, createHmac } from 'node:crypto'
 import axios from 'axios'
 
-const SECRET_ID = String(process.env.TENCENT_SECRET_ID || '').trim()
-const SECRET_KEY = String(process.env.TENCENT_SECRET_KEY || '').trim()
-const INSTANCE_ID = String(process.env.LIGHTHOUSE_INSTANCE_ID || '').trim()
-const REGION = String(process.env.LIGHTHOUSE_REGION || '').trim()
-const HOST = String(
-  process.env.LIGHTHOUSE_ENDPOINT || 'lighthouse.tencentcloudapi.com'
-).trim()
+/** 每次调用时读取 env（而非模块加载时缓存），避免运行时改动不生效。 */
+function readConfig() {
+  return {
+    SECRET_ID: String(process.env.TENCENT_SECRET_ID || '').trim(),
+    SECRET_KEY: String(process.env.TENCENT_SECRET_KEY || '').trim(),
+    INSTANCE_ID: String(process.env.LIGHTHOUSE_INSTANCE_ID || '').trim(),
+    REGION: String(process.env.LIGHTHOUSE_REGION || '').trim(),
+    HOST: String(
+      process.env.LIGHTHOUSE_ENDPOINT || 'lighthouse.tencentcloudapi.com'
+    ).trim()
+  }
+}
 
 const SERVICE = 'lighthouse'
 const ACTION = 'DescribeInstancesTrafficPackages'
@@ -43,6 +48,9 @@ const CACHE_TTL_MS = 5 * 60 * 1000
 const WARN_INTERVAL_MS = 60_000
 
 let cache: { at: number; data: LighthouseTrafficPackage } | null = null
+// ⚠️ cache 為進程內單例：當前生產為單容器單進程，即全域緩存；
+// 若未來多實例（PM2 cluster 等），各進程各自緩存、各自查詢（5 分鐘窗口內重複），
+// 功能正確僅查詢量增加；如需去重請改 Redis 共享緩存。
 let lastWarnAt = 0
 
 function warnThrottled(...args: unknown[]) {
@@ -65,10 +73,10 @@ function hmac(key: string | Buffer, value: string): Buffer {
 }
 
 /** 產生 TC3-HMAC-SHA256 的 Authorization（與 tencentMonitor.ts 同一套規範）。 */
-function buildAuthorization(payload: string, timestamp: number): string {
+function buildAuthorization(cfg: ReturnType<typeof readConfig>, payload: string, timestamp: number): string {
   const date = new Date(timestamp * 1000).toISOString().slice(0, 10)
   const canonicalHeaders =
-    `content-type:application/json; charset=utf-8\nhost:${HOST}\n`
+    `content-type:application/json; charset=utf-8\nhost:${cfg.HOST}\n`
   const signedHeaders = 'content-type;host'
   const canonicalRequest = [
     'POST',
@@ -85,11 +93,11 @@ function buildAuthorization(payload: string, timestamp: number): string {
     credentialScope,
     sha256Hex(canonicalRequest)
   ].join('\n')
-  const secretDate = hmac(`TC3${SECRET_KEY}`, date)
+  const secretDate = hmac(`TC3${cfg.SECRET_KEY}`, date)
   const secretService = hmac(secretDate, SERVICE)
   const secretSigning = hmac(secretService, 'tc3_request')
   const signature = createHmac('sha256', secretSigning).update(stringToSign).digest('hex')
-  return `TC3-HMAC-SHA256 Credential=${SECRET_ID}/${credentialScope}, ` +
+  return `TC3-HMAC-SHA256 Credential=${cfg.SECRET_ID}/${credentialScope}, ` +
     `SignedHeaders=${signedHeaders}, Signature=${signature}`
 }
 
@@ -124,23 +132,43 @@ const EMPTY: LighthouseTrafficPackage = {
  * 失敗一律降級 available:false，不拋到端點。
  */
 export async function getLighthouseTrafficPackage(): Promise<LighthouseTrafficPackage> {
-  if (!SECRET_ID || !SECRET_KEY || !INSTANCE_ID || !REGION) return { ...EMPTY }
+  const cfg = readConfig()
+  const missingEnv = ([
+    ['SECRET_ID', 'TENCENT_SECRET_ID'],
+    ['SECRET_KEY', 'TENCENT_SECRET_KEY'],
+    ['INSTANCE_ID', 'LIGHTHOUSE_INSTANCE_ID'],
+    ['REGION', 'LIGHTHOUSE_REGION']
+  ] as const)
+    .filter(([key]) => !cfg[key])
+    .map(([, name]) => name)
+  if (missingEnv.length) {
+    warnThrottled(`[lighthouse-traffic] 缺少必填 env：${missingEnv.join(' / ')}，流量包查詢降級`)
+    return { ...EMPTY }
+  }
   if (cache && Date.now() - cache.at < CACHE_TTL_MS) return cache.data
 
-  const payload = JSON.stringify({ InstanceIds: [INSTANCE_ID] })
+  const payload = JSON.stringify({ InstanceIds: [cfg.INSTANCE_ID] })
   const timestamp = Math.floor(Date.now() / 1000)
-  const authorization = buildAuthorization(payload, timestamp)
+  const authorization = buildAuthorization(cfg, payload, timestamp)
+  // 規範化 endpoint：HOST 若被誤配成含路徑/協議的值，收斂為 origin，避免拼接出異常地址
+  let endpoint: string
+  try {
+    endpoint = new URL('/', `https://${cfg.HOST}`).href
+  } catch {
+    warnThrottled('[lighthouse-traffic] LIGHTHOUSE_ENDPOINT 非法域名，降級')
+    return { ...EMPTY }
+  }
 
   try {
-    const response = await axios.post<any>(`https://${HOST}/`, payload, {
+    const response = await axios.post<any>(endpoint, payload, {
       headers: {
         'Content-Type': 'application/json; charset=utf-8',
-        Host: HOST,
+        Host: cfg.HOST,
         Authorization: authorization,
         'X-TC-Action': ACTION,
         'X-TC-Timestamp': String(timestamp),
         'X-TC-Version': VERSION,
-        'X-TC-Region': REGION
+        'X-TC-Region': cfg.REGION
       },
       timeout: REQUEST_TIMEOUT_MS,
       proxy: false,
@@ -150,8 +178,13 @@ export async function getLighthouseTrafficPackage(): Promise<LighthouseTrafficPa
     if (body?.Response?.Error) {
       throw new Error(String(body.Response.Error.Code || 'LighthouseError'))
     }
-    const pkg = body?.Response?.InstanceTrafficPackageSet?.[0]?.TrafficPackageSet?.[0]
-    if (!pkg) throw new Error('TrafficPackageSet 缺失')
+    const instanceSet = body?.Response?.InstanceTrafficPackageSet
+    const pkgSet = Array.isArray(instanceSet) && instanceSet.length
+      ? instanceSet[0]?.TrafficPackageSet
+      : undefined
+    if (!Array.isArray(pkgSet)) throw new Error('實例不存在或無流量包（InstanceTrafficPackageSet 為空）')
+    const pkg = pkgSet[0]
+    if (!pkg) throw new Error('實例未開通流量包（TrafficPackageSet 為空）')
     const data: LighthouseTrafficPackage = {
       available: true,
       total: Number(pkg.TrafficPackageTotal) || 0,
@@ -159,7 +192,7 @@ export async function getLighthouseTrafficPackage(): Promise<LighthouseTrafficPa
       remaining: Number(pkg.TrafficPackageRemaining) || 0,
       periodStart: pkg.StartTime ? String(pkg.StartTime) : null,
       periodEnd: pkg.EndTime ? String(pkg.EndTime) : null,
-      instanceId: INSTANCE_ID
+      instanceId: cfg.INSTANCE_ID
     }
     cache = { at: Date.now(), data }
     return data
