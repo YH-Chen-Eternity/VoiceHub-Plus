@@ -7,6 +7,7 @@ import {
   formatCommunityMuteNotice,
   getReviewableBoardIds,
   isCommunityAdmin,
+  assertReviewPageAccess,
   requireCommunityReviewer
 } from '~~/server/utils/community'
 import { createApiError } from '~~/server/utils/apiError'
@@ -14,6 +15,7 @@ import { writeAdminAudit } from '~~/server/utils/adminAudit'
 
 export default defineEventHandler(async (event) => {
   const user = requireCommunityReviewer(event)
+  await assertReviewPageAccess(user, 'community-review')
   const postId = Number(getRouterParam(event, 'id'))
   if (!Number.isInteger(postId) || postId <= 0) {
     throw createApiError(400, 'COMMUNITY_POST_INVALID', '帖子参数不正确')

@@ -7,6 +7,7 @@ import {
   assertCommunityBoardAccess,
   formatCommunityMuteNotice,
   isCommunityAdmin,
+  assertReviewPageAccess,
   requireCommunityReviewer
 } from '~~/server/utils/community'
 import { dispatchCommunityCommentMentionNotifications } from '~~/server/utils/communityCommentMentions'
@@ -15,6 +16,7 @@ import { writeAdminAudit } from '~~/server/utils/adminAudit'
 
 export default defineEventHandler(async (event) => {
   const user = requireCommunityReviewer(event)
+  await assertReviewPageAccess(user, 'community-comment-review')
   const commentId = Number(getRouterParam(event, 'id'))
   if (!Number.isInteger(commentId) || commentId <= 0) {
     throw createApiError(400, 'COMMUNITY_COMMENT_INVALID', '评论参数不正确')

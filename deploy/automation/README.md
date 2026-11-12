@@ -16,6 +16,7 @@
 | `scripts/04-attack-watch.sh` | 攻击监控与邮件告警（带冷却） | 每 10 分钟 |
 | `scripts/05-slow-query.sh` | 数据库慢查询周报 | 每周一 09:00 |
 | `scripts/06-geo-allow-update.sh` | 放行 IP 库更新（配合地域访问限制使用，见第 8 节） | 建议每月 1 日 04:00 |
+| `scripts/08-watchdog.sh` | 主机看门狗：应用健康检查 + 容器自动重启恢复 + 磁盘保护（systemd timer，见第 10 节） | 每 2 分钟 |
 
 ---
 
@@ -61,13 +62,17 @@ deploy/automation/
 ├── sync-to-tat.py             # 可选：把脚本同步为 TAT 命令
 ├── mailer/
 │   └── voicehub-mailer.py     # 运维告警投递模板（经应用内部接口交站内 SMTP 代发）
+├── systemd/
+│   ├── voicehub-watchdog.service  # 看门狗 oneshot 单元
+│   └── voicehub-watchdog.timer    # 每 2 分钟触发
 └── scripts/
     ├── 01-db-backup.sh
     ├── 02-backup-cos.sh
     ├── 03-security-inspect.sh
     ├── 04-attack-watch.sh
     ├── 05-slow-query.sh
-    └── 06-geo-allow-update.sh
+    ├── 06-geo-allow-update.sh
+    └── 08-watchdog.sh
 ```
 
 ---
@@ -238,10 +243,40 @@ unset TENCENTCLOUD_SECRET_ID TENCENTCLOUD_SECRET_KEY     # 用完清除
 
 ---
 
-## 10. 变更记录
+## 10. 主机看门狗（自动重启恢复）
+
+容器自带的 `restart: unless-stopped` 只能处理「进程退出」，处理不了「进程活着但 HTTP 不响应」。看门狗补这一层：由 **systemd timer 每 2 分钟**执行，不依赖 TAT。
+
+| 检查项 | 判据 | 动作 |
+| --- | --- | --- |
+| 应用存活 | `GET /api/health` 连续失败 ≥ `VH_MAX_FAILS`（默认 2 次） | `docker restart voicehub`；容器不存在则 `compose up -d voicehub`；重启后 120s 内复检并告警 |
+| 重启风暴保护 | 距上次自动重启 < `VH_RESTART_COOLDOWN`（默认 300s） | 跳过重启，仅记录 |
+| 依赖容器 | `voicehub-postgres` / `voicehub-redis` / `voicehub-rewriter` 非 running | `compose up -d <服务>`，失败再 `docker start` |
+| 磁盘占用 | 根分区 ≥ `VH_DISK_MAX_PERCENT`（默认 90%） | 清理悬空镜像与构建缓存并告警 |
+
+日志写入 `$VH_HOME/backups/watchdog.log`；状态与计数在 `/var/lib/voicehub-watchdog`（可用 `VH_STATE_DIR` 改）。告警复用 `VH_MAIL_BIN`，未配置则只记日志。
+
+```bash
+# 安装（root，路径按实际部署目录调整）
+install -m 755 deploy/automation/scripts/08-watchdog.sh /usr/local/sbin/voicehub-watchdog
+install -m 644 deploy/automation/systemd/voicehub-watchdog.service /etc/systemd/system/
+install -m 644 deploy/automation/systemd/voicehub-watchdog.timer /etc/systemd/system/
+systemctl daemon-reload && systemctl enable --now voicehub-watchdog.timer
+
+# 校验
+systemctl list-timers voicehub-watchdog.timer
+systemctl start voicehub-watchdog.service && tail -5 "$VH_HOME/backups/watchdog.log"
+```
+
+`/api/health` 为公开存活探针，只返回 `{ status: 'ok' }`，不含版本与环境信息。它只反映进程自身存活，不查数据库/Redis——依赖故障时重启应用无益，依赖容器由看门狗单独处理。
+
+---
+
+## 11. 变更记录
 
 | 日期 | 内容 |
 | --- | --- |
+| 2026-11-12 | 新增主机看门狗 `08-watchdog.sh` 与 systemd timer（应用健康检查 + 自动重启 + 依赖容器兜底 + 磁盘保护）；应用新增公开存活探针 `/api/health`，compose 增加 healthcheck；删除已废弃的看板独立域名 nginx 模板（看板已并入管理后台） |
 | 2026-11-12 | 运维告警收件人改为后台「运维通知」可配、复用站内 SMTP 代发；新增 `voicehub-mailer.py` 投递模板（去掉自带 SMTP 凭据、改 POST 应用内部接口）；统一腾讯云自动化助手（TAT）职责表述与凭据边界说明（仅文案与措辞，调度方式不变） |
 | 2026-11-08 | 运维脚本统一配置外置与占位符化；更新放行 IP 库脚本；巡检补充公网监听端口检查；整理脚本集与配置说明、同步工具 |
 | 2026-10-25 | 备份完整性校验、COS 查重重试、巡检与告警增强、慢查询周报 |

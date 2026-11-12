@@ -15,6 +15,8 @@ import {
 } from '~/drizzle/schema'
 import { and, eq, gte, sql } from 'drizzle-orm'
 import { createApiError } from './apiError'
+import { getRolePagesCached } from './rolePagesSettings'
+import { CONFIGURABLE_ROLES, resolveEffectivePages } from '~~/types/rolePages'
 
 export const COMMUNITY_REVIEWER_ROLE = 'REVIEWER'
 export const COMMUNITY_BROADCASTER_ROLE = 'BROADCASTER'
@@ -68,6 +70,25 @@ export function requireCommunityReviewer(event: H3Event) {
     throw createApiError(403, 'COMMUNITY_REVIEWER_ONLY', '只有审帖员可以执行此操作')
   }
   return user
+}
+
+/**
+ * 审核端点的角色权限校验：与后台页面同一份 rolePages 配置。
+ * 超管在「角色权限」页取消某审核页后，对应接口直接 403，而不是只隐藏菜单。
+ * SUPER_ADMIN 直通；非可配置角色不受影响。
+ */
+export async function assertReviewPageAccess(
+  user: any,
+  pageId: 'community-review' | 'community-comment-review'
+) {
+  const role = String(user?.role || '')
+  if (role === 'SUPER_ADMIN') return
+  if (!(CONFIGURABLE_ROLES as readonly string[]).includes(role)) return
+  const effective = resolveEffectivePages(role, await getRolePagesCached())
+  if (!effective) return
+  if (!effective.includes(pageId)) {
+    throw createApiError(403, 'AUTH_PAGE_FORBIDDEN', '无权访问该审核页面（角色权限未开通）')
+  }
 }
 
 export function requireCommunityUser(event: H3Event) {

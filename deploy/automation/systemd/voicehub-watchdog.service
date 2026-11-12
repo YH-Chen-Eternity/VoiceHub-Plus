@@ -1,0 +1,23 @@
+# VoiceHub-Plus — 非官方社区版（基于 laoshuikaixue/VoiceHub，GPL-3.0）
+# Copyright (C) 2026 YH-Chen-Eternity  |  SPDX-License-Identifier: GPL-3.0-only
+# 社区版新增模板；完整许可证见仓库根目录 LICENSE。
+#
+# 主机看门狗服务单元：oneshot，由同目录 timer 每 2 分钟触发
+# 安装：
+#   install -m 755 deploy/automation/scripts/08-watchdog.sh /usr/local/sbin/voicehub-watchdog
+#   install -m 644 deploy/automation/systemd/voicehub-watchdog.service /etc/systemd/system/
+#   install -m 644 deploy/automation/systemd/voicehub-watchdog.timer /etc/systemd/system/
+#   systemctl daemon-reload && systemctl enable --now voicehub-watchdog.timer
+
+[Unit]
+Description=VoiceHub watchdog (health check + auto recovery)
+Documentation=https://github.com/YH-Chen-Eternity/VoiceHub-Plus
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=VH_AUTOMATION_ENV=/etc/voicehub/automation.env
+ExecStart=/usr/local/sbin/voicehub-watchdog
+TimeoutStartSec=180
+Nice=5
