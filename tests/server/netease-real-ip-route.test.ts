@@ -102,6 +102,14 @@ test('不同扫码 key 可能落在不同 IP', async () => {
   assert.notEqual(first.realIP, second.realIP)
 })
 
+test('key 以数组重复传参时 seed 仍与单值一致', async () => {
+  const single = await call('login/qr/create', { key: 'unikey-array' })
+  const created = await call('login/qr/create', { key: ['stale-key', 'unikey-array'] })
+  const checked = await call('login/qr/check', { key: ['stale-key', 'unikey-array'] })
+  assert.equal(created.realIP, single.realIP)
+  assert.equal(checked.realIP, single.realIP)
+})
+
 test('同一账号的 cookie 请求使用同一 IP', async () => {
   const cookie = 'MUSIC_U=abc123; __csrf=def'
   const first = await call('login/status', { cookie })

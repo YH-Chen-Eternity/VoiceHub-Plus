@@ -120,12 +120,11 @@ const normalizeParams = (input: Record<string, any>) => {
  */
 const buildRealIpSeed = (
   endpointPath: string,
-  params: Record<string, any>,
+  qrKey: string,
   cookieText: string
 ): string | undefined => {
   if (endpointPath.startsWith('login/qr/')) {
-    const key = typeof params.key === 'string' ? params.key.trim() : ''
-    return key ? `qr:${key}` : 'qr:default'
+    return qrKey ? `qr:${qrKey}` : 'qr:default'
   }
 
   const matched = cookieText.match(/(?:^|;\s*)MUSIC_U=([^;]+)/)
@@ -139,6 +138,20 @@ const collectCookieText = (input: unknown): string => {
   if (typeof raw === 'string') return raw
   if (Array.isArray(raw)) {
     return raw.filter((item): item is string => typeof item === 'string').join('; ')
+  }
+  return ''
+}
+
+/** 直接从原始入参取单个字符串（数组取最后一项，与 normalizeParams 口径一致），避免种子被数组传参绕过 */
+const pickRawValue = (input: unknown, name: string): string => {
+  if (!input || typeof input !== 'object') return ''
+  const raw = (input as Record<string, unknown>)[name]
+  if (typeof raw === 'string') return raw.trim()
+  if (Array.isArray(raw)) {
+    for (let i = raw.length - 1; i >= 0; i -= 1) {
+      const item = raw[i]
+      if (typeof item === 'string' && item.trim()) return item.trim()
+    }
   }
   return ''
 }
@@ -197,14 +210,18 @@ export default defineEventHandler(async (event) => {
   }
 
   const params = { ...queryParams, ...bodyParams }
-  const cookieText = [collectCookieText(rawQuery), collectCookieText(rawBody)]
-    .filter(Boolean)
-    .join('; ')
+  const cookieText = Array.from(
+    new Set([collectCookieText(rawQuery), collectCookieText(rawBody)].filter(Boolean))
+  ).join('; ')
+  const qrKey =
+    pickRawValue(rawQuery, 'key') ||
+    pickRawValue(rawBody, 'key') ||
+    (typeof params.key === 'string' ? params.key : '')
 
   // 首尔机房出口会被网易云判为海外，登录与账号接口直接失败；统一改写 X-Real-IP。
   // 客户端传入的 realIP 一律忽略，避免该代理变成任意 IP 伪造入口。
   if (isNeteaseRealIpEnabled()) {
-    params.realIP = resolveNeteaseRealIp(buildRealIpSeed(endpointPath, params, cookieText))
+    params.realIP = resolveNeteaseRealIp(buildRealIpSeed(endpointPath, qrKey, cookieText))
     if (process.env.NETEASE_REAL_IP_DEBUG === 'true') {
       console.log(`[Netease] ${endpointPath} 出口 IP: ${params.realIP}`)
     }
