@@ -127,14 +127,23 @@ for c in voicehub-postgres voicehub-redis voicehub-rewriter; do
 done
 
 # ---- 3) 磁盘保护：占用超阈值时清理悬空镜像与构建缓存 ----
-used=$(df -P / 2>/dev/null | awk 'NR==2 {gsub(/%/, "", $5); print $5}')
-if [ -n "${used:-}" ] && [ "$used" -ge "$DISK_MAX" ]; then
+# df 输出异常（非纯数字）时跳过，避免 [ -ge ] 语法报错中断脚本
+disk_pct() { df -P / 2>/dev/null | awk 'NR==2 {gsub(/%/, "", $5); print $5}'; }
+used=$(disk_pct)
+if [[ "${used:-}" =~ ^[0-9]+$ ]] && [ "$used" -ge "$DISK_MAX" ]; then
   log "根分区占用 ${used}% ≥ ${DISK_MAX}%，清理悬空镜像与构建缓存"
-  docker image prune -f >/dev/null 2>&1
-  docker builder prune -f >/dev/null 2>&1
-  RC=1
+  prune_rc=0
+  docker image prune -f >/dev/null 2>&1 || prune_rc=1
+  docker builder prune -f >/dev/null 2>&1 || prune_rc=1
+  after=$(disk_pct)
+  [[ "${after:-}" =~ ^[0-9]+$ ]] || after=$used
+  # 清理是预防性维护：只有清理命令失败、或清理后仍超阈值才算故障（RC=1），
+  # 否则每次清理都会让监控误报失败
+  if [ "$prune_rc" -ne 0 ] || [ "$after" -ge "$DISK_MAX" ]; then
+    RC=1
+  fi
   notify "[VoiceHub] 磁盘占用告警" "时间：$TS
-根分区占用：${used}%（阈值 ${DISK_MAX}%）
+根分区占用：${used}% → 清理后 ${after}%（阈值 ${DISK_MAX}%）
 已清理悬空镜像与构建缓存，请检查大文件与备份保留策略"
 fi
 
