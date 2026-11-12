@@ -4,7 +4,7 @@
 import bcrypt from 'bcryptjs'
 import { getRequestHeader } from 'h3'
 import { sendAccountEmail, formatMailTime, notifyLoginSuccess, notifyLoginFailure } from '~~/server/utils/accountNotifications'
-import { db, eq, users, userIdentities, and, systemSettings } from '~/drizzle/db'
+import { db, eq, users, userIdentities, and } from '~/drizzle/db'
 import { JWTEnhanced } from '~~/server/utils/jwt-enhanced'
 import {
   getIPBlockRemainingTime,
@@ -23,6 +23,7 @@ import { resolveRequirePasswordChange } from '~~/server/utils/system-settings-he
 import { verifyEsaCaptchaPass } from '~~/server/utils/esa-captcha-pass'
 import { getPasswordSetupState } from '~~/server/utils/initial-password-policy'
 import { resolveEffectivePages } from '~~/types/rolePages'
+import { getRolePagesCached } from '~~/server/utils/rolePagesSettings'
 
 // 导入验证码校验函数
 import { verifyAndConsumeCaptcha } from '~~/server/utils/captcha'
@@ -290,13 +291,10 @@ export default defineEventHandler(async (event) => {
     const passwordSetupState = getPasswordSetupState(user, requirePasswordChange)
 
     // 角色后台页面权限：可配置角色随登录下发生效页面（超管恒为全部页面）
+    // rolePages 走 60s 进程内缓存，避免高并发登录重复查询 SystemSettings
     let effectivePages: string[] | undefined
     if (['ADMIN', 'SONG_ADMIN', 'BROADCASTER', 'REVIEWER'].includes(user.role)) {
-      const settingsRow = await db
-        .select({ rolePages: systemSettings.rolePages })
-        .from(systemSettings)
-        .limit(1)
-      effectivePages = resolveEffectivePages(user.role, settingsRow[0]?.rolePages) ?? undefined
+      effectivePages = resolveEffectivePages(user.role, await getRolePagesCached()) ?? undefined
     }
 
     return {

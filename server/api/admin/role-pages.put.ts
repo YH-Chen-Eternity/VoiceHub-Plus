@@ -17,6 +17,7 @@ import { createApiError } from '~~/server/utils/apiError'
 import { writeAdminAudit } from '~~/server/utils/adminAudit'
 import { setHeader } from 'h3'
 import { CONFIGURABLE_ROLES, sanitizeRolePages } from '~~/types/rolePages'
+import { invalidateRolePagesCache } from '~~/server/utils/rolePagesSettings'
 
 export default defineEventHandler(async (event) => {
   requireSuperAdmin(event)
@@ -50,6 +51,10 @@ export default defineEventHandler(async (event) => {
       delete merged[role]
       continue
     }
+    // 值必须是数组（sanitize 只会静默剔除非法键，这里显式给出准确错误）
+    if (!Array.isArray(value)) {
+      throw createApiError(400, 'ROLE_PAGES_INVALID_PAGES', `${role} 的页面列表必须是数组`)
+    }
     if (!(role in sanitizedIncoming)) {
       throw createApiError(400, 'ROLE_PAGES_INVALID_PAGES', `${role} 的页面列表无效（包含未知的页面 id）`)
     }
@@ -61,6 +66,9 @@ export default defineEventHandler(async (event) => {
     .set({ rolePages: merged, updatedAt: new Date() })
     .where(eq(systemSettings.id, rows[0].id))
     .returning({ rolePages: systemSettings.rolePages })
+
+  // 登录/verify 读取走 60s 缓存，保存后立即失效保证配置即时生效
+  invalidateRolePagesCache()
 
   await writeAdminAudit(event, {
     action: 'ROLE_PAGES_UPDATE',

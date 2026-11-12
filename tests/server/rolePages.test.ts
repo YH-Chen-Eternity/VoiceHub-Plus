@@ -50,6 +50,14 @@ describe('types/rolePages.ts 共享定义', () => {
       assert.ok(!pages.includes('role-permissions'), `${role} 默认不应含 role-permissions`)
     }
   })
+
+  test('resolveEffectivePages 纵深防御：配置值中的超管专属页面被过滤', async () => {
+    const mod = await import('../../types/rolePages.ts')
+    const out = mod.resolveEffectivePages('ADMIN', {
+      ADMIN: ['overview', 'database', 'role-permissions', 'users']
+    })
+    assert.deepEqual(out, ['overview', 'users'], '即便配置被直改库注入超管页，生效值也必须剔除')
+  })
 })
 
 describe('role-pages 端点契约', () => {

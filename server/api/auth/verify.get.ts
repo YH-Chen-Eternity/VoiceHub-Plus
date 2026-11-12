@@ -1,13 +1,14 @@
 /* Modified by YH-Chen-Eternity on 2026-10-23 */
 
 import { db } from '~/drizzle/db'
-import { users, systemSettings } from '~/drizzle/schema'
+import { users } from '~/drizzle/schema'
 import { eq } from 'drizzle-orm'
 import { createApiError } from '~~/server/utils/apiError'
 import { resolveRequirePasswordChange } from '~~/server/utils/system-settings-helper'
 import { getPasswordSetupState } from '~~/server/utils/initial-password-policy'
 import { resolveAvatarSource } from '~~/server/utils/user-avatar'
 import { resolveEffectivePages } from '~~/types/rolePages'
+import { getRolePagesCached } from '~~/server/utils/rolePagesSettings'
 
 export default defineEventHandler(async (event) => {
   const authUser = event.context.user
@@ -59,13 +60,10 @@ export default defineEventHandler(async (event) => {
   const requirePasswordChange = await resolveRequirePasswordChange(dbUser)
 
   // 角色后台页面权限：仅可配置角色返回生效页面列表（超管恒为全部页面，无需下发）
+  // rolePages 走 60s 进程内缓存，避免高并发 verify 重复查询 SystemSettings
   let effectivePages: string[] | undefined
   if (['ADMIN', 'SONG_ADMIN', 'BROADCASTER', 'REVIEWER'].includes(dbUser.role)) {
-    const settingsRow = await db
-      .select({ rolePages: systemSettings.rolePages })
-      .from(systemSettings)
-      .limit(1)
-    effectivePages = resolveEffectivePages(dbUser.role, settingsRow[0]?.rolePages) ?? undefined
+    effectivePages = resolveEffectivePages(dbUser.role, await getRolePagesCached()) ?? undefined
   }
 
   const passwordSetupState = getPasswordSetupState(dbUser, requirePasswordChange)

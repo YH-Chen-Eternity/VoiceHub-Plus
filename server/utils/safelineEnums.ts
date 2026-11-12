@@ -12,6 +12,8 @@ export type SafelineTimeMode = 'timestamp' | 'epochMs' | 'epochSec'
 /** 候選表：攻擊偵測記錄（免費版在前，舊版攻擊事件表兜底）。 */
 export const SL: {
   attackTables: string[]
+  /** 帶 status_code 欄的舊版事件表（HTTP 流量回退統計專用；免費版 detect 表沒有該欄）。 */
+  eventTables: string[]
   aggTables: string[]
   ipTables: string[]
   timeMode: SafelineTimeMode
@@ -25,6 +27,7 @@ export const SL: {
   }
 } = {
   attackTables: ['mgt_detect_log_basic', 'mgt_attack_log'],
+  eventTables: ['mgt_attack_log'],
   aggTables: ['mgt_statistics_agg', 'statistics_basics'],
   ipTables: ['statistics_ips'],
   timeMode: 'epochSec',

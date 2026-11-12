@@ -1,0 +1,1 @@
+ALTER TABLE "SystemSettings" ALTER COLUMN "rolePages" SET DEFAULT '{}'::jsonb;
