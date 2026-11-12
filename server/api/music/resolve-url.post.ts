@@ -30,6 +30,10 @@ const HELLOWORLD_TX_URL = cfg('MUSIC_SRC_HELLOWORLD_URL', 'MUSIC_HELLOWORLD_TX_U
 // QQ 已知无效占位音频，命中说明源返回的是错误录音
 const INVALID_QQ_AUDIO_URL_SUFFIX = '/2149972737147268278.mp3'
 
+// vkeys 公共源（免登录）：腾讯系同时接受数字 songId（id=）与字母 songmid（mid=），
+// 是本项目在付费卡密源缺席、免费源域名失效时唯一可用的兜底链路
+const VKEYS_URL = cfg('MUSIC_SRC_VKEYS_URL', 'MUSIC_VKEYS_URL', 'https://api.vkeys.cn').replace(/\/+$/, '')
+
 const getHywCardKey = (): string => cfg('MUSIC_SRC_HYW_KEY', 'MUSIC_HYW_CARD_KEY')
 const getYuafengApiKey = (): string => cfg('MUSIC_SRC_YUAFENG_KEY', 'MUSIC_YUAFENG_APIKEY')
 
@@ -57,6 +61,38 @@ const extractTxAudioUrl = (payload: unknown): string => {
 }
 
 const isValidTxAudioUrl = (url: string) => /^https?:\/\//i.test(url) && !url.includes(INVALID_QQ_AUDIO_URL_SUFFIX)
+
+/** vkeys 取腾讯直链：数字 id 用 id=，字母 songmid 用 mid=；失败换音质档位重试 */
+const resolveTxWithVkeys = async (musicId: string, quality?: unknown) => {
+  const idParam = /^\d+$/.test(musicId)
+    ? `id=${encodeURIComponent(musicId)}`
+    : `mid=${encodeURIComponent(musicId)}`
+  const requested = Number(quality)
+  const candidates = Array.from(new Set([Number.isFinite(requested) ? requested : 4, 4, 8]))
+  let lastError = '未返回播放链接'
+  for (const code of candidates) {
+    try {
+      const response = await fetch(`${VKEYS_URL}/v2/music/tencent?${idParam}&quality=${code}`, {
+        signal: AbortSignal.timeout(6000),
+        headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' }
+      })
+      if (!response.ok) {
+        lastError = `返回 ${response.status}`
+        continue
+      }
+      const payload: any = await response.json().catch(() => null)
+      const candidate = payload?.data?.url
+      if (payload?.code === 200 && typeof candidate === 'string' && isValidTxAudioUrl(candidate)) {
+        // 上游给的是 http 直链，https 页面加载会被浏览器按混合内容拦截，统一升级
+        return upgradeTxAudioUrl(candidate)
+      }
+      lastError = payload?.message || lastError
+    } catch (error: any) {
+      lastError = error?.message || String(error)
+    }
+  }
+  throw new Error(`vkeys ${lastError}`)
+}
 
 const resolveTxWithHyw = async (songmid: string, quality: unknown) => {
   const cardKey = getHywCardKey()
@@ -331,6 +367,9 @@ export default defineEventHandler(async (event) => {
     // 统一走后端以规避前端 CORS；无卡密时付费源自动跳过，免费源仍可兜底
     if (strategy === 'aggregator') {
       const attempts: Array<{ id: string; run: () => Promise<string> }> = []
+      if (!excludedSources.has('vkeys')) {
+        attempts.push({ id: 'vkeys', run: () => resolveTxWithVkeys(resolvedMusicId, body?.quality) })
+      }
       if (!excludedSources.has('yuafeng-tx')) {
         attempts.push({ id: 'yuafeng-tx', run: () => resolveTxWithYuafeng(resolvedMusicId, body?.quality) })
       }
@@ -410,6 +449,9 @@ export default defineEventHandler(async (event) => {
     // 第三方兜底链：HYW → 玉宁熙 → HelloWorld，任一成功即返回
     // 前两个源无卡密时自动跳过；HelloWorld 为免费源，配合后端补齐的歌名兜底
     const fallbackAttempts: Array<{ id: string; run: () => Promise<string> }> = []
+    if (!excludedSources.has('vkeys')) {
+      fallbackAttempts.push({ id: 'vkeys', run: () => resolveTxWithVkeys(resolvedMusicId, body?.quality) })
+    }
     if (!excludedSources.has('hyw-tx')) {
       fallbackAttempts.push({ id: 'hyw-tx', run: () => resolveTxWithHyw(resolvedMusicId, body?.quality) })
     }
