@@ -123,7 +123,7 @@ export async function queryAttackAgg(
   const result = await safelineQuery(async (sql) => {
     const [byType, ipTop, regions, total] = await Promise.all([
       // 僅統計真實攻擊分類（attack_type >= 0；負值為白名單/非攻擊等流量標記）
-      sql`SELECT ${sql(SL.col.type)}::int AS "code", count(*)::int AS "value"
+      sql`SELECT ${sql(SL.col.type)}::int AS "name", count(*)::int AS "value"
             FROM ${sql(table)}
            WHERE ${sql(SL.col.time)} >= ${from} AND ${sql(SL.col.type)} >= 0
            GROUP BY ${sql(SL.col.type)}
