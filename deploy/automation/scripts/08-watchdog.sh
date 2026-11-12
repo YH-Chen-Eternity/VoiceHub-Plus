@@ -65,6 +65,7 @@ else
           ;;
       esac
       if [ "$rc" -ne 0 ]; then
+        RC=1
         log "容器恢复命令失败（退出码 $rc）"
         notify "[VoiceHub] 自动恢复命令失败" "时间：$TS
 命令退出码：$rc
@@ -103,18 +104,24 @@ for c in voicehub-postgres voicehub-redis voicehub-rewriter; do
     *)
       log "依赖容器 $c 状态异常（${st:-不存在}），尝试拉起"
       # 先单容器 start，避免 compose up 连带拉起 voicehub；start 失败再走 compose
-      if ! docker start "$c" >/dev/null 2>&1; then
-        if ! ( cd "$VH_HOME" && docker compose up -d "${c#voicehub-}" ) >/dev/null 2>&1; then
-          RC=1
-          log "依赖容器 $c 拉起失败"
-          notify "[VoiceHub] 依赖容器拉起失败" "时间：$TS
-容器：$c
-请登录主机检查 compose 配置与容器日志"
-        fi
+      started=0
+      if docker start "$c" >/dev/null 2>&1; then
+        started=1
+      elif ( cd "$VH_HOME" && docker compose up -d "${c#voicehub-}" ) >/dev/null 2>&1; then
+        started=1
       fi
-      notify "[VoiceHub] 依赖容器已自动拉起" "时间：$TS
+      # 成功/失败通知互斥：两种方式都失败时不能再发「已自动拉起」，否则运维会收到互相矛盾的告警
+      if [ "$started" -eq 1 ]; then
+        notify "[VoiceHub] 依赖容器已自动拉起" "时间：$TS
 容器：$c
 原状态：${st:-不存在}"
+      else
+        RC=1
+        log "依赖容器 $c 拉起失败"
+        notify "[VoiceHub] 依赖容器拉起失败" "时间：$TS
+容器：$c
+请登录主机检查 compose 配置与容器日志"
+      fi
       ;;
   esac
 done
