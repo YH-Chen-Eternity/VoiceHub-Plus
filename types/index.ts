@@ -19,6 +19,8 @@ export interface User {
   has2FA?: boolean
   email?: string | null
   emailVerified?: boolean
+  /** 可配置角色的后台生效页面列表（verify/login 下发；超管恒为全部页面，不下发） */
+  effectivePages?: string[]
   identities?: Array<{
     id: number
     provider: string

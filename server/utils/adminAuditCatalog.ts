@@ -19,6 +19,7 @@ export interface AdminAuditDescriptor {
 const LEGACY_ACTIONS: Record<string, string> = {
   // 运维看板写操作（Agent G 手动写审计，动作键固定）
   OPS_BOARD_SETTINGS_UPDATE: '更新运维看板设置',
+  ROLE_PAGES_UPDATE: '更新角色后台页面权限',
   OPS_BOARD_LOG_CLEANUP_PREVIEW: '预览运维日志清理',
   OPS_BOARD_LOG_CLEANUP_EXECUTE: '执行运维日志清理',
   SONG_MARK_PLAYED_BULK: '批量标记歌曲已播放',

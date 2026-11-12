@@ -2622,7 +2622,8 @@ export const admin = {
       communityArchive: 'Community Archive',
       communitySettings: 'Community Settings',
       edgeProtection: 'Edge Protection',
-      opsNotification: 'Ops Notifications'
+      opsNotification: 'Ops Notifications',
+      rolePermissions: 'Role Permissions'
     },
     roles: {
       USER: 'User',
@@ -5892,6 +5893,24 @@ export const admin = {
     observeConfirmTitle: 'Toggle observe mode',
     observeConfirmOn: 'Turn on global observe mode? All blocks will be logged only and the site will be unprotected.',
     observeConfirmOff: 'Turn off global observe mode? All blocking rules take effect again.',
+  },
+  rolePermissions: {
+    title: 'Role Permissions',
+    desc: 'Configure which admin pages each role can access; changes apply on next login or refresh.',
+    scopeHint: 'Database and role-permission pages are super-admin only and excluded from configuration. Settings control admin page visibility; API-level role floors (write operations, database, etc.) remain enforced.',
+    refresh: 'Refresh',
+    loading: 'Loading...',
+    retry: 'Retry',
+    loadFailed: 'Failed to load configuration',
+    defaultTag: 'Default',
+    customTag: 'Custom',
+    selectedLabel: 'Selected',
+    resetRole: 'Reset to default',
+    unsaved: 'Unsaved changes',
+    save: 'Save',
+    saving: 'Saving...',
+    saved: 'Role permissions saved; applies on next login or refresh',
+    saveFailed: 'Save failed'
   },
   opsNotification: {
     title: 'Ops Notifications',
