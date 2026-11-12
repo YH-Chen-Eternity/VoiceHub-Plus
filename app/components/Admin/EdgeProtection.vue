@@ -23,7 +23,8 @@
           :disabled="loading"
           @click="loadAll"
         >
-          <RefreshCw :size="14" :class="loading ? 'animate-spin' : ''" />
+          <AppSpinner v-if="loading" :size="14" />
+          <RefreshCw v-else :size="14" />
           {{ L('refresh') }}
         </button>
       </div>
@@ -39,7 +40,7 @@
     </div>
 
     <div v-if="loading" class="flex items-center justify-center gap-2 py-16 text-xs text-text-tertiary">
-      <RefreshCw :size="16" class="animate-spin" /> {{ L('loading') }}
+      <AppSpinner :size="16" /> {{ L('loading') }}
     </div>
 
     <template v-else>
@@ -487,6 +488,7 @@ import {
 } from '@lucide/vue'
 import ConfirmDialog from '~/components/UI/ConfirmDialog.vue'
 import { useLocale } from '~/utils/locale'
+import AppSpinner from '~/components/UI/Common/AppSpinner.vue'
 import { useToast } from '~/composables/useToast'
 import { usePermissions } from '~/composables/usePermissions'
 import { formatDateTime } from '~/utils/timeUtils'

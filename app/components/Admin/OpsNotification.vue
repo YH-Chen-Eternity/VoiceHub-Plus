@@ -23,14 +23,15 @@
           :disabled="loading"
           @click="load"
         >
-          <RefreshCw :size="14" :class="loading ? 'animate-spin' : ''" />
+          <AppSpinner v-if="loading" :size="14" />
+          <RefreshCw v-else :size="14" />
           {{ L('refresh') }}
         </button>
       </div>
     </div>
 
     <div v-if="loading" class="flex items-center justify-center gap-2 py-16 text-xs text-text-tertiary">
-      <RefreshCw :size="16" class="animate-spin" /> {{ L('loading') }}
+      <AppSpinner :size="16" /> {{ L('loading') }}
     </div>
 
     <div
@@ -190,7 +191,7 @@
         <button
           type="button"
           class="inline-flex items-center gap-2 rounded-xl border border-border-secondary bg-bg-secondary-30 px-4 py-2.5 text-xs font-bold text-text-secondary transition-all hover:bg-bg-secondary-50 disabled:opacity-50 disabled:cursor-not-allowed"
-          :title="!smtpConfigured || parsed.valid.length === 0 ? L('testDisabledHint') : ''"
+          :title="!smtpConfigured || parsed.valid.length === 0 ? L('testDisabledHint') : (parsed.invalid.length > 0 ? L('invalidLabel') : '')"
           :disabled="!isSuperAdmin || !smtpConfigured || testing || saving || parsed.invalid.length > 0 || parsed.valid.length === 0"
           @click="sendTest"
         >
@@ -227,6 +228,8 @@ import {
   Users
 } from '@lucide/vue'
 import { useLocale } from '~/utils/locale'
+import { formatLocaleValue } from '~/composables/useLocaleText'
+import AppSpinner from '~/components/UI/Common/AppSpinner.vue'
 import { useToast } from '~/composables/useToast'
 import { usePermissions } from '~/composables/usePermissions'
 
@@ -324,10 +327,11 @@ const sendTest = async () => {
     const sent = Number(result?.sent || 0)
     const failed = Number(result?.failed || 0)
     if (failed > 0) {
-      const msg = typeof L('testPartial') === 'function' ? L('testPartial')(sent, failed) : L('testPartial')
+      // 词典里的函数型文案统一交给项目 helper 处理（formatLocaleValue 会调用函数并传参）
+      const msg = formatLocaleValue(t.value?.testPartial, sent, failed) || L('testPartial')
       showToast(msg, 'warning')
     } else {
-      const msg = typeof L('testSent') === 'function' ? L('testSent')(sent) : L('testSent')
+      const msg = formatLocaleValue(t.value?.testSent, sent) || L('testSent')
       showToast(msg, 'success')
     }
   } catch (error) {
