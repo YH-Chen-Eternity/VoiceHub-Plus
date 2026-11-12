@@ -33,7 +33,10 @@
         <div class="ob-bar tq-bar">
           <div class="ob-bar-fill" :style="{ width: quotaPct + '%', background: quotaColor }" />
         </div>
-        <div class="ob-subtle tq-quota-foot">已用 {{ quotaPct.toFixed(1) }}%</div>
+        <div class="ob-subtle tq-quota-foot">
+          {{ quotaSourceLabel }}已用 {{ quotaPct.toFixed(1) }}%
+        </div>
+        <div v-if="quotaResetText" class="ob-subtle tq-quota-foot">{{ quotaResetText }}</div>
       </div>
 
       <div class="tq-rank">
@@ -86,6 +89,16 @@ const quotaText = computed(() =>
     ? `${formatBytes(quotaTotal.value)} / ${formatBytes(quotaUsed.value)} / ${formatBytes(quotaRemaining.value)}`
     : '未配置资源包'
 )
+const quotaSourceLabel = computed(() =>
+  quota.value.source === 'lighthouse' ? '腾讯云真实口径 · ' : ''
+)
+const quotaResetText = computed(() => {
+  if (quota.value.source !== 'lighthouse' || !t.value?.lighthouse?.periodEnd) return ''
+  const end = new Date(t.value.lighthouse.periodEnd)
+  if (Number.isNaN(end.getTime())) return ''
+  const days = Math.max(0, Math.ceil((end.getTime() - Date.now()) / 86400000))
+  return `计费周期 ${end.getMonth() + 1} 月 ${end.getDate()} 日重置（剩 ${days} 天）`
+})
 
 const rank = computed(() => toTopItems(metered.value.rank).slice(0, 5))
 const rankMax = computed(() => Math.max(1, ...rank.value.map((r) => Math.abs(toNumber(r.value)))))
