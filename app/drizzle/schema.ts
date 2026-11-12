@@ -369,7 +369,8 @@ export const systemSettings = pgTable('SystemSettings', {
   // 运维告警收件人（逗号分隔邮箱；NULL=回落 automation.env 的 VH_MAIL_TO）；发件人复用站内 SMTP 的 smtpFromEmail/smtpFromName
   opsAlertRecipients: text('opsAlertRecipients'),
   // 角色后台页面权限配置（超管可改；NULL/缺角色键=使用内置默认）；键为角色名，值为页面 id 数组
-  rolePages: jsonb('rolePages').$type<Record<string, string[]>>().default({}),
+  // 角色 → 页面 id 数组，另含 __version（结构版本号，见 types/rolePages RolePagesConfig）
+  rolePages: jsonb('rolePages').$type<Record<string, string[] | number>>().default({}),
   astrbotEnabled: boolean('astrbotEnabled').default(false).notNull(),
   astrbotPlatforms: jsonb('astrbotPlatforms').$type<{ qq: boolean; wecom: boolean; dingtalk: boolean; lark: boolean }>()
     .default({ qq: false, wecom: false, dingtalk: false, lark: false }).notNull(),
