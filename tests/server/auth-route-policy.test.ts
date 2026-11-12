@@ -115,3 +115,9 @@ test('机器人免 Cookie 路由与实际端点文件逐项一致', () => {
   assert.deepEqual([...BOT_ROUTES].sort(), expected.sort())
   assert.equal(BOT_ROUTES.has('POST /api/bot/voicehub/weekly-schedule'), false)
 })
+
+test('存活探针匿名可访问且仅放行 GET', () => {
+  assert.equal(isPublicApiPath('/api/health', 'GET'), true)
+  assert.equal(shouldBypassPublicApiAuthentication('/api/health', 'GET', false), true)
+  assert.equal(isPublicApiPath('/api/health', 'POST'), false)
+})

@@ -1,0 +1,17 @@
+# VoiceHub-Plus — 非官方社区版（基于 laoshuikaixue/VoiceHub，GPL-3.0）
+# Copyright (C) 2026 YH-Chen-Eternity  |  SPDX-License-Identifier: GPL-3.0-only
+# 社区版新增模板；完整许可证见仓库根目录 LICENSE。
+#
+# 主机看门狗定时器：开机 3 分钟后首跑，之后每 2 分钟一次
+
+[Unit]
+Description=Run VoiceHub watchdog every 2 minutes
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=2min
+AccuracySec=15s
+Unit=voicehub-watchdog.service
+
+[Install]
+WantedBy=timers.target

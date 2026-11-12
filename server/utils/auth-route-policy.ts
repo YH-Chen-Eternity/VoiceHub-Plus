@@ -22,6 +22,8 @@ export const PASSWORD_CHANGE_ALLOWED_ROUTES: readonly RoutePolicy[] = [
 ]
 
 export const PUBLIC_API_EXACT_ROUTES: readonly RoutePolicy[] = [
+  // 存活探针：容器 healthcheck 与宿主机看门狗匿名访问，仅返回 { status: 'ok' }
+  { path: '/api/health', methods: GET_METHODS },
   { path: '/api/legal-consent', methods: ['GET', 'POST'] },
   { path: '/api/legal-documents', methods: GET_METHODS },
   { path: '/api/music-source-plugins/media', methods: GET_METHODS },
