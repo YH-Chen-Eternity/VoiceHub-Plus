@@ -29,6 +29,14 @@ const BROADCASTER_ALLOWED_PATTERNS = [
   /^\/api\/admin\/play-times(?:\/|$)/
 ]
 
+// 数据库页面仅超管可见（SUPER_ADMIN_ONLY_PAGES），其端点同步只允许超管：
+// 这些接口可清空/重置数据，不能只依赖页面隐藏
+const SUPER_ADMIN_ONLY_PATTERNS = [
+  /^\/api\/admin\/database(?:\/|$)/,
+  /^\/api\/admin\/db-status$/,
+  /^\/api\/admin\/fix-sequence$/
+]
+
 const SONG_ADMIN_ALLOWED_PATTERNS = [
   /^\/api\/admin\/schedule(?:\/|$)/,
   /^\/api\/admin\/songs(?:\/|$)/,
@@ -73,6 +81,12 @@ export default defineEventHandler(async (event) => {
   // 这里不再提前返回，让其继续走到下方的写入/审计流程；越权访问由各 community 子接口自行校验。
 
   const method = getMethod(event).toUpperCase()
+
+  // 超管专属端点（数据库运维）：ADMIN 一律拒绝，与其页面权限保持一致
+  if (role !== 'SUPER_ADMIN' && SUPER_ADMIN_ONLY_PATTERNS.some((pattern) => pattern.test(lower))) {
+    throw createApiError(403, 'AUTH_PAGE_FORBIDDEN', '该接口仅超级管理员可访问')
+  }
+
   if (role === 'SONG_ADMIN' && !SONG_ADMIN_ALLOWED_PATTERNS.some((pattern) => pattern.test(lower))) {
     throw createApiError(403, 'AUTH_FORBIDDEN', '该接口仅系统管理员可访问')
   }

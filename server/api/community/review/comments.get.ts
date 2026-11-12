@@ -13,6 +13,7 @@ import {
   buildCommunityIdentity,
   getReviewableBoardIds,
   isCommunityAdmin,
+  assertReviewPageAccess,
   requireCommunityReviewer
 } from '~~/server/utils/community'
 import { createApiError } from '~~/server/utils/apiError'
@@ -21,6 +22,7 @@ const STATUSES = ['PENDING', 'APPROVED', 'REJECTED', 'BLOCKED']
 
 export default defineEventHandler(async (event) => {
   const user = requireCommunityReviewer(event)
+  await assertReviewPageAccess(user, 'community-comment-review')
   const query = getQuery(event)
   const status = STATUSES.includes(String(query.status || '').toUpperCase())
     ? String(query.status).toUpperCase()
