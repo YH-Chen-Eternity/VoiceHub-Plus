@@ -16,7 +16,7 @@ import { requireSuperAdmin } from '~~/server/utils/requireAdmin'
 import { createApiError } from '~~/server/utils/apiError'
 import { writeAdminAudit } from '~~/server/utils/adminAudit'
 import { setHeader } from 'h3'
-import { CONFIGURABLE_ROLES, sanitizeRolePages } from '~~/types/rolePages'
+import { CONFIGURABLE_ROLES, ROLE_PAGES_SCHEMA_VERSION, sanitizeRolePages } from '~~/types/rolePages'
 import { invalidateRolePagesCache } from '~~/server/utils/rolePagesSettings'
 
 export default defineEventHandler(async (event) => {
@@ -60,6 +60,10 @@ export default defineEventHandler(async (event) => {
     }
     merged[role] = sanitizedIncoming[role]
   }
+
+  // 保存即定格为当前结构版本：此后新增页面的自动补齐不再影响本次选择，
+  // 超管取消勾选的页面保持取消状态（见 types/rolePages PAGES_ADDED_IN_VERSION）
+  ;(merged as Record<string, unknown>).__version = ROLE_PAGES_SCHEMA_VERSION
 
   const updated = await db
     .update(systemSettings)

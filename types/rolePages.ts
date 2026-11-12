@@ -75,14 +75,41 @@ export const sanitizeRolePages = (input: unknown): Record<string, string[]> => {
   return out
 }
 
+/**
+ * 配置结构版本 & 各版本新增的可配置页面。
+ *
+ * 背景：rolePages 一旦保存就是「全量快照」，后续版本新增的页面 id 不在快照里，
+ * 会被当成「超管未开通」而静默吞掉（运维看板 ops-board 即如此：上线前保存的
+ * ADMIN 快照里没有该 id，导致 ADMIN 看不到新看板、端点 403）。
+ * 因此新增页面时必须登记到对应版本，读取时对版本更早的快照做**增量补齐**
+ * （仅补该角色默认就含的页面）；超管在配置页重新保存后版本升到当前值，
+ * 之后再取消勾选不会被自动补回。
+ */
+export const ROLE_PAGES_SCHEMA_VERSION = 2
+export const PAGES_ADDED_IN_VERSION: Record<number, readonly string[]> = {
+  2: ['ops-board']
+}
+
 /** 计算某角色生效页面：配置含该角色键则用配置值，否则用内置默认。
  *  纵深防御：无论数据来源，一律过滤超管专属页面（防止绕过 API 直改库获得超管页）。 */
 export const resolveEffectivePages = (role: string, rolePages: Record<string, string[]> | null | undefined): string[] | null => {
   if (!(CONFIGURABLE_ROLES as readonly string[]).includes(role)) return null
   const configured = rolePages?.[role]
-  const pages = Array.isArray(configured)
-    ? configured
-    : DEFAULT_ROLE_PAGES[role as ConfigurableRole] || []
+  const defaults = DEFAULT_ROLE_PAGES[role as ConfigurableRole] || []
+  let pages: string[]
+  if (Array.isArray(configured)) {
+    // 快照 + 版本增量补齐：只补该角色默认就含的新增页面，显式取消的其他页面不动
+    pages = [...configured]
+    const storedVersion = Number((rolePages as Record<string, unknown> | null | undefined)?.__version ?? 1)
+    const from = Number.isFinite(storedVersion) ? Math.max(1, storedVersion) : 1
+    for (let v = from + 1; v <= ROLE_PAGES_SCHEMA_VERSION; v++) {
+      for (const pid of PAGES_ADDED_IN_VERSION[v] || []) {
+        if (defaults.includes(pid) && !pages.includes(pid)) pages.push(pid)
+      }
+    }
+  } else {
+    pages = defaults
+  }
   return [...new Set(pages.filter((p) => !(SUPER_ADMIN_ONLY_PAGES as readonly string[]).includes(p)))]
 }
 
