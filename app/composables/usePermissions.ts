@@ -3,7 +3,7 @@
 // Modified by YH-Chen on 2026-10-17
 import { computed } from 'vue'
 import { useAuth } from './useAuth'
-import { DEFAULT_ROLE_PAGES } from '~/types/rolePages'
+import { DEFAULT_ROLE_PAGES } from '~~/types/rolePages'
 
 export const usePermissions = () => {
   const auth = useAuth()
