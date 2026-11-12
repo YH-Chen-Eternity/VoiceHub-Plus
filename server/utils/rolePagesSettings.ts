@@ -7,6 +7,11 @@
  * login/verify 每次都会读取 SystemSettings.rolePages 计算生效页面，
  * 高并发登录下会产生大量重复查询；这里加 60 秒进程内缓存，
  * 保存配置（role-pages PUT）时主动失效，变更最迟 60 秒生效。
+ *
+ * ⚠️ 部署形态限制：当前生产为单容器单实例，进程内缓存即全局缓存；
+ * 若未来改为多实例/多容器部署，各实例缓存不自动同步，
+ * 权限变更在其他实例上最迟 60 秒生效。如需强一致性，
+ * 请改用 Redis（已有 voicehub-redis）共享缓存或直接取消缓存。
  */
 import { db } from '~/drizzle/db'
 import { systemSettings } from '~/drizzle/schema'

@@ -73,7 +73,8 @@ describe('role-pages 端点契约', () => {
     const src = read('server/api/admin/role-pages.put.ts')
     assert.match(src, /ROLE_PAGES_INVALID_ROLE/, '应有不支持角色的错误码')
     assert.match(src, /ROLE_PAGES_INVALID_PAGES/, '应有非法页面列表的错误码')
-    assert.match(src, /null/, '应支持 null 恢复默认')
+    assert.match(src, /Array\.isArray\(value\)/, '角色值必须是数组的显式校验')
+    assert.match(src, /invalidateRolePagesCache\(\)/, '保存后应失效 60s 进程内缓存，保证配置即时生效')
     assert.match(src, /ROLE_PAGES_UPDATE/, '应写管理审计日志')
   })
 

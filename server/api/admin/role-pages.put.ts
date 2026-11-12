@@ -56,7 +56,7 @@ export default defineEventHandler(async (event) => {
       throw createApiError(400, 'ROLE_PAGES_INVALID_PAGES', `${role} 的页面列表必须是数组`)
     }
     if (!(role in sanitizedIncoming)) {
-      throw createApiError(400, 'ROLE_PAGES_INVALID_PAGES', `${role} 的页面列表无效（包含未知的页面 id）`)
+      throw createApiError(400, 'ROLE_PAGES_INVALID_PAGES', `${role} 的页面列表无效（页面 id 均不在白名单内）`)
     }
     merged[role] = sanitizedIncoming[role]
   }
