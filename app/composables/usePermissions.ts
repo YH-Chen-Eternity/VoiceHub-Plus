@@ -3,6 +3,7 @@
 // Modified by YH-Chen on 2026-10-17
 import { computed } from 'vue'
 import { useAuth } from './useAuth'
+import { DEFAULT_ROLE_PAGES } from '~/types/rolePages'
 
 export const usePermissions = () => {
   const auth = useAuth()
@@ -34,27 +35,8 @@ export const usePermissions = () => {
       return effective.includes(page) && page !== 'database' && page !== 'role-permissions'
     }
 
-    // 回退：内置默认页面（与后端 DEFAULT_ROLE_PAGES 保持一致）
-    if (role === 'ADMIN') {
-      return ['overview', 'schedule', 'print', 'songs', 'users', 'grade-class', 'notifications', 'smtp-config', 'playtimes', 'request-times', 'semesters', 'blacklist', 'site-config', 'api-keys', 'data-analysis', 'card-codes', 'music-source', 'review-notes', 'review-users', 'announcement', 'system-board', 'attack-logs', 'edge-protection', 'ops-notification', 'community-review', 'community-comment-review', 'community-archive', 'community-boards', 'community-titles', 'community-users', 'community-settings', 'community-reports', 'community-overview'].includes(page)
-    }
-
-    // 歌曲管理员可以访问的页面
-    if (role === 'SONG_ADMIN') {
-      return ['overview', 'schedule', 'print', 'songs', 'playtimes', 'request-times', 'semesters', 'data-analysis', 'card-codes'].includes(page)
-    }
-
-    // 放歌员仅能查看概览、排期与打印
-    if (role === 'BROADCASTER') {
-      return ['overview', 'schedule', 'print'].includes(page)
-    }
-
-    // 审帖员 = 帖子/评论审核 + 举报与申诉处理（社区归档记录已收权至 ADMIN/SUPER_ADMIN）
-    if (role === 'REVIEWER') {
-      return ['community-review', 'community-comment-review', 'community-reports'].includes(page)
-    }
-
-    return false
+    // 回退：内置默认页面（单一来源 types/rolePages DEFAULT_ROLE_PAGES，与后端一致）
+    return (DEFAULT_ROLE_PAGES as Record<string, string[]>)[role]?.includes(page) ?? false
   }
 
   // 获取用户可访问的页面列表
@@ -107,14 +89,15 @@ export const usePermissions = () => {
           'community-reports',
           'community-overview'
         ]
+      // 可配置角色默认页统一取自 types/rolePages DEFAULT_ROLE_PAGES（单一来源）
       case 'ADMIN':
-        return ['overview', 'schedule', 'print', 'songs', 'users', 'grade-class', 'notifications', 'smtp-config', 'playtimes', 'request-times', 'semesters', 'blacklist', 'site-config', 'api-keys', 'data-analysis', 'card-codes', 'music-source', 'review-notes', 'review-users', 'announcement', 'system-board', 'attack-logs', 'edge-protection', 'ops-notification', 'community-review', 'community-comment-review', 'community-archive', 'community-boards', 'community-titles', 'community-users', 'community-settings', 'community-reports', 'community-overview']
+        return [...DEFAULT_ROLE_PAGES.ADMIN]
       case 'SONG_ADMIN':
-        return ['overview', 'schedule', 'print', 'songs', 'playtimes', 'request-times', 'semesters', 'data-analysis', 'card-codes']
+        return [...DEFAULT_ROLE_PAGES.SONG_ADMIN]
       case 'BROADCASTER':
-        return ['overview', 'schedule', 'print']
+        return [...DEFAULT_ROLE_PAGES.BROADCASTER]
       case 'REVIEWER':
-        return ['community-review', 'community-comment-review', 'community-reports']
+        return [...DEFAULT_ROLE_PAGES.REVIEWER]
       default:
         return []
     }

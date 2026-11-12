@@ -9,7 +9,8 @@ import { fileURLToPath } from 'node:url'
  *
  * 端点由 Agent G 并行实现，依赖 DB / Redis / 独立 PG / 云监控，CI 无法起服务做集成测试，
  * 故按仓库 policy 测试惯例读取端点源码断言：
- *  - 每个端点首行 requireAdmin(event)（对应 USER→403 / ADMIN→200 契约）；
+ *  - 每个 GET 端点 await requireOpsBoardViewer(event)（SUPER_ADMIN 恒可；
+ *    可配置角色按 rolePages 生效页面含 ops-board 放行，USER→401 / 未授权→403）；
  *  - 写操作（PUT/POST/DELETE）额外 requireSuperAdmin(event)；
  *  - 统一 setHeader no-store、defineEventHandler（§10）。
  * 目录尚未创建或无端点文件时 t.skip，保证 pnpm test 不崩。
@@ -37,7 +38,7 @@ test('看板路由前缀独立于 /api/admin（避免 zz-admin-guard 白名单�
   assert.ok(!ROOT.includes('/api/admin'))
 })
 
-test('ops-board GET 端点均 requireAdmin + no-store（USER 403 / ADMIN 200 契约）', (t) => {
+test('ops-board GET 端点均 requireOpsBoardViewer + no-store（角色可配置可见性契约）', (t) => {
   const gets = files.filter((f) => f.endsWith('.get.ts'))
   if (gets.length === 0) {
     t.skip('依赖模块尚未就绪：server/api/ops-board/ 尚无 GET 端点（Agent G 负责）')
@@ -45,10 +46,21 @@ test('ops-board GET 端点均 requireAdmin + no-store（USER 403 / ADMIN 200 契
   }
   for (const f of gets) {
     const src = readFileSync(f, 'utf8')
-    assert.match(src, /requireAdmin\s*\(/, `${short(f)} 首行应 requireAdmin(event)`)
+    assert.match(src, /await\s+requireOpsBoardViewer\s*\(/, `${short(f)} 应 await requireOpsBoardViewer(event)`)
+    assert.doesNotMatch(src, /requireAdmin\s*\(/, `${short(f)} 不应再直接 requireAdmin（角色可配置可见性）`)
     assert.match(src, /(no-store|setOpsBoardNoStore)/, `${short(f)} 应设置 Cache-Control: no-store（可直接写或调用统一封装）`)
     assert.match(src, /defineEventHandler/, `${short(f)} 应使用 defineEventHandler`)
   }
+})
+
+test('requireOpsBoardViewer：SUPER_ADMIN 直通 + 可配置角色按生效页面 + 其余 403', () => {
+  const src = readFileSync(fileURLToPath(new URL('../../server/utils/opsBoardViewer.ts', import.meta.url)), 'utf8')
+  assert.match(src, /SUPER_ADMIN/, '应放行 SUPER_ADMIN')
+  assert.match(src, /CONFIGURABLE_ROLES/, '应遍历可配置角色')
+  assert.match(src, /resolveEffectivePages/, '应按生效页面判定')
+  assert.match(src, /includes\(['"]ops-board['"]\)/, '应检查 ops-board 页面 id')
+  assert.match(src, /getRolePagesCached/, 'rolePages 应走缓存读取')
+  assert.match(src, /403/, '未授权应 403')
 })
 
 test('ops-board 写端点额外 requireSuperAdmin + no-store', (t) => {

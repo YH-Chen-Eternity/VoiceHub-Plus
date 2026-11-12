@@ -13,7 +13,7 @@ import { defineEventHandler } from 'h3'
 import { and, count, sql } from 'drizzle-orm'
 import { db } from '~/drizzle/db'
 import { attackLogs, loginAttempts } from '~/drizzle/schema'
-import { requireAdmin } from '~~/server/utils/requireAdmin'
+import { requireOpsBoardViewer } from '~~/server/utils/opsBoardViewer'
 import { queryHttpTrafficAgg } from '~~/server/utils/safelineTables'
 import {
   parseOpsRange,
@@ -25,7 +25,7 @@ import {
 } from './_shared'
 
 export default defineEventHandler(async (event) => {
-  requireAdmin(event)
+  await requireOpsBoardViewer(event)
   setOpsBoardNoStore(event)
 
   const info = parseOpsRange(event)

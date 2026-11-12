@@ -14,6 +14,8 @@ import {
   type AdminAuditPayload
 } from '~~/server/utils/adminAudit'
 import { describeAdminAction, isAuditedGetPath } from '~~/server/utils/adminAuditCatalog'
+import { getRolePagesCached } from '~~/server/utils/rolePagesSettings'
+import { ADMIN_PAGE_ROUTES, CONFIGURABLE_ROLES, resolveEffectivePages, type ConfigurableRole } from '~~/types/rolePages'
 
 // 与歌曲管理员后台可见页面一致；这些路由内部仍各自校验 SONG_ADMIN 及以上权限
 // 放歌员：只读概览与排期，不允许改任何数据
@@ -80,6 +82,25 @@ export default defineEventHandler(async (event) => {
     if (!isMarkPlayed) {
       if (method !== 'GET' || !BROADCASTER_ALLOWED_PATTERNS.some((pattern) => pattern.test(lower))) {
         throw createApiError(403, 'AUTH_FORBIDDEN', '放歌员仅可查看排期相关信息')
+      }
+    }
+  }
+
+  // ── 角色权限（rolePages）端点级强制 ──
+  // 超管在「角色权限」页配置的不只是页面可见性：可配置角色请求的路径若
+  // 映射到某页面 id（ADMIN_PAGE_ROUTES），该页面必须在其生效页面内。
+  // SUPER_ADMIN 直通；未映射路径不强制（保持既有角色判定）；rolePages
+  // 走 60s 进程内缓存，保存配置后立即失效。判定在审计写入之前，被拒
+  // 请求不产生审计记录（由登录尝试/运行日志覆盖）。
+  if (role !== 'SUPER_ADMIN' && CONFIGURABLE_ROLES.includes(role as ConfigurableRole)) {
+    const effective = resolveEffectivePages(role, await getRolePagesCached())
+    if (effective) {
+      const allowed = new Set(effective)
+      const hitPages = ADMIN_PAGE_ROUTES
+        .filter(([, patterns]) => patterns.some((p) => p.test(lower)))
+        .map(([pid]) => pid)
+      if (hitPages.length > 0 && !hitPages.some((pid) => allowed.has(pid))) {
+        throw createApiError(403, 'AUTH_PAGE_FORBIDDEN', `无权访问「${hitPages.join(' / ')}」相关接口（角色权限未开通）`)
       }
     }
   }

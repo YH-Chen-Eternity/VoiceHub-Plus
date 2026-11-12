@@ -3,12 +3,12 @@
  * 目錄未掛載或檔案不存在時由 readHostMetrics 回傳 available:false，不拋錯。
  */
 import { defineEventHandler } from 'h3'
-import { requireAdmin } from '~~/server/utils/requireAdmin'
+import { requireOpsBoardViewer } from '~~/server/utils/opsBoardViewer'
 import { readHostMetrics } from '~~/server/utils/hostMetrics'
 import { parseOpsRange, setOpsBoardNoStore } from './_shared'
 
 export default defineEventHandler(async (event) => {
-  requireAdmin(event)
+  await requireOpsBoardViewer(event)
   setOpsBoardNoStore(event)
 
   const info = parseOpsRange(event)

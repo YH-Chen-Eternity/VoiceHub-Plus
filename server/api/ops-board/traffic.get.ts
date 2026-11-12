@@ -7,14 +7,14 @@
  *               total=OpsBoardSettings.cosQuotaBytes / used=metered.month（月度估算）
  */
 import { defineEventHandler } from 'h3'
-import { requireAdmin } from '~~/server/utils/requireAdmin'
+import { requireOpsBoardViewer } from '~~/server/utils/opsBoardViewer'
 import { getTrafficStats } from '~~/server/utils/trafficMeter'
 import { getCosOfficialTraffic } from '~~/server/utils/tencentMonitor'
 import { getLighthouseTrafficPackage } from '~~/server/utils/lighthouseTraffic'
 import { readOpsBoardSettings, setOpsBoardNoStore } from './_shared'
 
 export default defineEventHandler(async (event) => {
-  requireAdmin(event)
+  await requireOpsBoardViewer(event)
   setOpsBoardNoStore(event)
 
   const [metered, official, settings, lighthouse] = await Promise.all([

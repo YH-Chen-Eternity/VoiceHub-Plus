@@ -165,7 +165,7 @@ const PAGE_MENU_KEYS = {
   'data-analysis': 'dataAnalysis', 'card-codes': 'cardCodes', 'music-source': 'musicSource',
   'review-notes': 'reviewNotes', 'review-users': 'reviewUsers', announcement: 'announcement',
   'system-board': 'systemBoard', 'attack-logs': 'attackLogs', 'edge-protection': 'edgeProtection',
-  'ops-notification': 'opsNotification', 'community-review': 'communityReview',
+  'ops-notification': 'opsNotification', 'ops-board': 'opsBoard', 'community-review': 'communityReview',
   'community-comment-review': 'communityCommentReview', 'community-archive': 'communityArchive',
   'community-boards': 'communityBoards', 'community-titles': 'communityTitles',
   'community-users': 'communityUsers', 'community-settings': 'communitySettings',

@@ -758,6 +758,7 @@ export const pages = {
       'attack-logs': '攻击日志',
       'edge-protection': '边缘防护',
       'ops-notification': '运维通知',
+      'ops-board': '运维看板',
       'community-review': '社区帖子审核',
       'community-boards': '社区板块',
       'community-titles': '社区称号',

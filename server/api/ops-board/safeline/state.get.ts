@@ -4,7 +4,7 @@
  *    SAFELINE_STATE_ENDPOINTS 與本檔 pick() 的候選鍵）。
  */
 import { defineEventHandler } from 'h3'
-import { requireAdmin } from '~~/server/utils/requireAdmin'
+import { requireOpsBoardViewer } from '~~/server/utils/opsBoardViewer'
 import {
   safelineRequest,
   SAFELINE_STATE_ENDPOINTS
@@ -44,7 +44,7 @@ function countArray(source: any): number | null {
 }
 
 export default defineEventHandler(async (event) => {
-  requireAdmin(event)
+  await requireOpsBoardViewer(event)
   setOpsBoardNoStore(event)
 
   const [system, license, sites, cert, cc] = await Promise.all([

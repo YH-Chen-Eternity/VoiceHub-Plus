@@ -41,6 +41,7 @@ export const CONFIGURABLE_PAGE_IDS = [
   'attack-logs',
   'edge-protection',
   'ops-notification',
+  'ops-board',
   'community-review',
   'community-comment-review',
   'community-archive',
@@ -84,3 +85,48 @@ export const resolveEffectivePages = (role: string, rolePages: Record<string, st
     : DEFAULT_ROLE_PAGES[role as ConfigurableRole] || []
   return [...new Set(pages.filter((p) => !(SUPER_ADMIN_ONLY_PAGES as readonly string[]).includes(p)))]
 }
+
+/**
+ * 页面 id → /api/admin/* 路由模式映射：角色权限配置的**端点级强制**依据。
+ * zz-admin-guard 对可配置角色的请求做映射检查：请求路径命中的页面集合中
+ * 若没有任何一个在生效页面内 → 403（SUPER_ADMIN 直通；未映射路径不强制，
+ * 保持既有角色判定，避免误伤跨页面辅助端点与超管专属页面）。
+ * 一个端点可属于多个页面（任一生效即可访问）。
+ *
+ * 注意：ops-board 不在本映射中——其端点位于 /api/ops-board/ 而非
+ * /api/admin/，由 server/utils/opsBoardViewer.requireOpsBoardViewer
+ * 按 rolePages 生效页面独立把关（口径与本映射一致）。
+ */
+export const ADMIN_PAGE_ROUTES: ReadonlyArray<readonly [string, RegExp[]]> = [
+  ['overview', [/^\/api\/admin\/activities$/, /^\/api\/admin\/stats$/, /^\/api\/admin\/replay-requests(?:\/|$)/]],
+  ['schedule', [/^\/api\/admin\/schedule(?:\/|$)/, /^\/api\/admin\/songs\/mark-played$/, /^\/api\/admin\/play-times(?:\/|$)/, /^\/api\/admin\/semesters(?:\/|$)/, /^\/api\/admin\/replay-requests(?:\/|$)/]],
+  ['songs', [/^\/api\/admin\/songs(?:\/|$)/]],
+  ['users', [/^\/api\/admin\/users(?:\/|$)/]],
+  ['grade-class', [/^\/api\/admin\/grade-class(?:\/|$)/]],
+  ['notifications', [/^\/api\/admin\/notifications(?:\/|$)/, /^\/api\/admin\/email-templates(?:\/|$)/]],
+  ['smtp-config', [/^\/api\/admin\/smtp(?:\/|$)/]],
+  ['playtimes', [/^\/api\/admin\/play-times(?:\/|$)/]],
+  ['request-times', [/^\/api\/admin\/request-times(?:\/|$)/]],
+  ['semesters', [/^\/api\/admin\/semesters(?:\/|$)/]],
+  ['blacklist', [/^\/api\/admin\/blacklist(?:\/|$)/, /^\/api\/admin\/ban-ip$/, /^\/api\/admin\/permanent-bans(?:\/|$)/]],
+  ['site-config', [/^\/api\/admin\/system-settings(?:\/|$)/, /^\/api\/admin\/geo-lock(?:\/|$)/, /^\/api\/admin\/trusted-ips(?:\/|$)/]],
+  ['api-keys', [/^\/api\/admin\/api-keys(?:\/|$)/]],
+  ['data-analysis', [/^\/api\/admin\/stats(?:\/|$)/]],
+  ['card-codes', [/^\/api\/admin\/card-codes(?:\/|$)/]],
+  ['music-source', [/^\/api\/admin\/music-source-plugins(?:\/|$)/]],
+  ['review-notes', [/^\/api\/admin\/review\/notes(?:\/|$)/]],
+  ['review-users', [/^\/api\/admin\/review\/users(?:\/|$)/]],
+  ['announcement', [/^\/api\/admin\/announcements(?:\/|$)/]],
+  ['system-board', [/^\/api\/admin\/system-board(?:\/|$)/, /^\/api\/admin\/bot-scores(?:\/|$)/]],
+  ['attack-logs', [/^\/api\/admin\/attack-logs(?:\/|$)/]],
+  ['edge-protection', [/^\/api\/admin\/edge-config(?:\/|$)/, /^\/api\/admin\/edge-stats(?:\/|$)/]],
+  ['ops-notification', [/^\/api\/admin\/ops-notification(?:\/|$)/]],
+  ['community-review', [/^\/api\/admin\/community\/review(?:\/|$)/, /^\/api\/admin\/community\/posts(?:\/|$)/, /^\/api\/admin\/community\/boards(?:\/|$)/]],
+  ['community-archive', [/^\/api\/admin\/community\/archive(?:\/|$)/]],
+  ['community-boards', [/^\/api\/admin\/community\/boards(?:\/|$)/]],
+  ['community-titles', [/^\/api\/admin\/community\/titles(?:\/|$)/]],
+  ['community-users', [/^\/api\/admin\/community\/users(?:\/|$)/]],
+  ['community-reports', [/^\/api\/admin\/community\/reports(?:\/|$)/, /^\/api\/admin\/community\/appeals(?:\/|$)/]],
+  ['community-settings', [/^\/api\/admin\/community\/settings(?:\/|$)/]],
+  ['community-overview', [/^\/api\/admin\/community\/overview(?:\/|$)/]]
+] as const
