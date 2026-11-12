@@ -29,7 +29,7 @@ export default defineEventHandler(async (event) => {
   const rows = await db.select().from(systemSettings).limit(1)
   const settings = rows[0]
   const smtpConfigured = Boolean(
-    settings?.smtpEnabled && settings?.smtpHost && settings?.smtpFromEmail
+    settings?.smtpEnabled && settings?.smtpHost && (settings?.smtpFromEmail || settings?.smtpUsername)
   )
   if (!smtpConfigured) {
     throw createApiError(503, 'OPS_ALERT_SMTP_NOT_CONFIGURED', '站内 SMTP 未配置，无法发送测试邮件')

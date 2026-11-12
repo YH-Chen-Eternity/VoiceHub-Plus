@@ -77,7 +77,7 @@ export default defineEventHandler(async (event) => {
   }
 
   const smtpConfigured = Boolean(
-    saved?.smtpEnabled && saved?.smtpHost && saved?.smtpFromEmail
+    saved?.smtpEnabled && saved?.smtpHost && (saved?.smtpFromEmail || saved?.smtpUsername)
   )
   const fromEmail = saved?.smtpFromEmail || saved?.smtpUsername || ''
   const fromName = saved?.smtpFromName || '校园广播站'

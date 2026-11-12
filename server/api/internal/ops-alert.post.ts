@@ -58,8 +58,9 @@ export default defineEventHandler(async (event) => {
   const settings = rows[0]
 
   // 应用侧 SMTP 未配置：明确回 503，让调用方知道邮件通道不具备
+  // 发件地址与 smtpService 口径一致：smtpFromEmail 为空时回退发件账号
   const smtpConfigured = Boolean(
-    settings?.smtpEnabled && settings?.smtpHost && settings?.smtpFromEmail
+    settings?.smtpEnabled && settings?.smtpHost && (settings?.smtpFromEmail || settings?.smtpUsername)
   )
   if (!smtpConfigured) {
     throw createApiError(503, 'OPS_ALERT_SMTP_NOT_CONFIGURED', '站内 SMTP 未配置，无法发送运维告警邮件')
