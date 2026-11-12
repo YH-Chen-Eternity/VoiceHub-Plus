@@ -330,6 +330,14 @@ Modified by YH-Chen on 2026-10-17
             >
               <LazyAdminOpsNotification />
             </div>
+
+            <!-- 角色权限（仅超管） -->
+            <div
+              v-if="activeTab === 'role-permissions' && permissions.canAccessPage('role-permissions')"
+              class="animate-in fade-in slide-in-from-bottom-4 duration-500"
+            >
+              <LazyAdminRolePermissions />
+            </div>
           </div>
         </main>
       </div>

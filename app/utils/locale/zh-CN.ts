@@ -2570,7 +2570,8 @@ export const admin = {
       communityArchive: '社区归档记录',
       communitySettings: '社区配置',
       edgeProtection: '边缘防护',
-      opsNotification: '运维通知'
+      opsNotification: '运维通知',
+      rolePermissions: '角色权限'
     },
     roles: {
       USER: '普通用户',
@@ -5734,6 +5735,24 @@ export const admin = {
     observeConfirmTitle: '切换观察模式',
     observeConfirmOn: '确定开启全站观察模式？开启后所有拦截仅记录、不实际拦截，站点将处于不设防状态。',
     observeConfirmOff: '确定关闭全站观察模式？关闭后所有拦截规则恢复实际生效。',
+  },
+  rolePermissions: {
+    title: '角色权限',
+    desc: '为管理员及以下角色配置可访问的后台页面；保存后下次登录或刷新生效。',
+    scopeHint: '数据库操作与角色权限配置页为超级管理员专属，不参与配置。角色生效后仅约束后台页面可见性，API 层仍保留各自的角色底线（写操作、数据库等）。',
+    refresh: '刷新',
+    loading: '加载中...',
+    retry: '重试',
+    loadFailed: '配置加载失败',
+    defaultTag: '内置默认',
+    customTag: '自定义',
+    selectedLabel: '已选',
+    resetRole: '恢复默认',
+    unsaved: '有未保存的更改',
+    save: '保存配置',
+    saving: '保存中...',
+    saved: '角色权限已保存，成员下次登录或刷新后生效',
+    saveFailed: '保存失败'
   },
   opsNotification: {
     title: '运维通知',

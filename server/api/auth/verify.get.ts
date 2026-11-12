@@ -1,12 +1,13 @@
 /* Modified by YH-Chen-Eternity on 2026-10-23 */
 
 import { db } from '~/drizzle/db'
-import { users } from '~/drizzle/schema'
+import { users, systemSettings } from '~/drizzle/schema'
 import { eq } from 'drizzle-orm'
 import { createApiError } from '~~/server/utils/apiError'
 import { resolveRequirePasswordChange } from '~~/server/utils/system-settings-helper'
 import { getPasswordSetupState } from '~~/server/utils/initial-password-policy'
 import { resolveAvatarSource } from '~~/server/utils/user-avatar'
+import { resolveEffectivePages } from '~~/types/rolePages'
 
 export default defineEventHandler(async (event) => {
   const authUser = event.context.user
@@ -57,6 +58,16 @@ export default defineEventHandler(async (event) => {
   // 与登录接口保持一致：按系统开关与用户状态计算强制改密及首次设置密码状态
   const requirePasswordChange = await resolveRequirePasswordChange(dbUser)
 
+  // 角色后台页面权限：仅可配置角色返回生效页面列表（超管恒为全部页面，无需下发）
+  let effectivePages: string[] | undefined
+  if (['ADMIN', 'SONG_ADMIN', 'BROADCASTER', 'REVIEWER'].includes(dbUser.role)) {
+    const settingsRow = await db
+      .select({ rolePages: systemSettings.rolePages })
+      .from(systemSettings)
+      .limit(1)
+    effectivePages = resolveEffectivePages(dbUser.role, settingsRow[0]?.rolePages) ?? undefined
+  }
+
   const passwordSetupState = getPasswordSetupState(dbUser, requirePasswordChange)
 
   // 构建返回的用户对象，只包含需要的字段
@@ -76,7 +87,8 @@ export default defineEventHandler(async (event) => {
     has2FA: dbUser.identities?.some((id: any) => id.provider === 'totp') || false,
     avatar: avatarSource?.url ?? null,
     email: dbUser.email ?? null,
-    emailVerified: !!dbUser.emailVerified
+    emailVerified: !!dbUser.emailVerified,
+    effectivePages
   }
 
   return {

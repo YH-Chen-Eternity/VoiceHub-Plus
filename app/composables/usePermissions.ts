@@ -15,6 +15,8 @@ export const usePermissions = () => {
   })
 
   // 检查用户是否可以访问指定页面
+  // 可配置角色（ADMIN/SONG_ADMIN/BROADCASTER/REVIEWER）优先后端下发的 effectivePages
+  // （超管在「角色权限」页配置，登录/verify 时随用户返回）；未下发时回退内置默认。
   const canAccessPage = (page: string): boolean => {
     if (!auth.user.value) return false
 
@@ -23,9 +25,16 @@ export const usePermissions = () => {
     // 超级管理员可以访问所有页面
     if (role === 'SUPER_ADMIN') return true
 
-    // 管理员可以访问的页面
+    // 数据库与角色权限配置页为超管专属
+    if (page === 'database' || page === 'role-permissions') return false
+
+    const effective = auth.user.value.effectivePages
+    if (Array.isArray(effective)) {
+      return effective.includes(page)
+    }
+
+    // 回退：内置默认页面（与后端 DEFAULT_ROLE_PAGES 保持一致）
     if (role === 'ADMIN') {
-      // 与超管唯一区别：无数据库（database）页
       return ['overview', 'schedule', 'print', 'songs', 'users', 'grade-class', 'notifications', 'smtp-config', 'playtimes', 'request-times', 'semesters', 'blacklist', 'site-config', 'api-keys', 'data-analysis', 'card-codes', 'music-source', 'review-notes', 'review-users', 'announcement', 'system-board', 'attack-logs', 'edge-protection', 'ops-notification', 'community-review', 'community-comment-review', 'community-archive', 'community-boards', 'community-titles', 'community-users', 'community-settings', 'community-reports', 'community-overview'].includes(page)
     }
 
@@ -53,6 +62,12 @@ export const usePermissions = () => {
 
     const role = auth.user.value.role
 
+    // 可配置角色优先后端下发的生效页面
+    const effective = auth.user.value.effectivePages
+    if (role !== 'SUPER_ADMIN' && Array.isArray(effective)) {
+      return [...effective]
+    }
+
     switch (role) {
       case 'SUPER_ADMIN':
         return [
@@ -70,6 +85,7 @@ export const usePermissions = () => {
           'blacklist',
           'site-config',
           'database',
+          'role-permissions',
           'api-keys',
           'data-analysis',
           'music-source',

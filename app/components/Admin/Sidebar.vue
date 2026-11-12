@@ -269,7 +269,8 @@ const menuGroups = computed(() => [
       { icon: Activity, label: locale.value.menu?.systemBoard || '系统看板', id: 'system-board' },
       { icon: ShieldAlert, label: locale.value.menu?.attackLogs || '攻击日志', id: 'attack-logs' },
       { icon: ShieldCheck, label: locale.value.menu?.edgeProtection || '边缘防护', id: 'edge-protection' },
-      { icon: Send, label: locale.value.menu?.opsNotification || '运维通知', id: 'ops-notification' }
+      { icon: Send, label: locale.value.menu?.opsNotification || '运维通知', id: 'ops-notification' },
+      { icon: Settings, label: locale.value.menu?.rolePermissions || '角色权限', id: 'role-permissions' }
     ]
   },
   {

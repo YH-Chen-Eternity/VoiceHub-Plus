@@ -15,8 +15,14 @@ export default defineEventHandler(async (event) => {
   if (!Number.isInteger(userId) || userId <= 0) {
     throw createApiError(400, 'COMMUNITY_USER_INVALID', '用户参数不正确')
   }
-  const targetRows = await db.select({ id: users.id }).from(users).where(eq(users.id, userId)).limit(1)
+  const targetRows = await db.select({ id: users.id, role: users.role }).from(users).where(eq(users.id, userId)).limit(1)
   if (!targetRows[0]) throw createApiError(404, 'USER_NOT_FOUND', '用户不存在')
+  // 越级保护：管理员不得对超级管理员执行禁言/解禁/重置违规等管理动作
+  const targetRole = targetRows[0].role
+  const actor = event.context.user
+  if (targetRole === 'SUPER_ADMIN' && actor?.role !== 'SUPER_ADMIN') {
+    throw createApiError(403, 'COMMUNITY_USER_PRIVILEGE_ESCALATION', '权限不足：不能对超级管理员执行社区管理操作')
+  }
 
   await ensureCommunityProfile(userId)
   // 重置违规时同时清空违规记录，保证「近 30 天」窗口从零开始
