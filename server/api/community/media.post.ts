@@ -4,6 +4,7 @@ import { db } from '~/drizzle/db'
 import { mediaAssets } from '~/drizzle/schema'
 import {
   assertCommunityNotMuted,
+  isCommunityRateLimitExempt,
   requireCommunityEnabled,
   requireCommunityUser
 } from '~~/server/utils/community'
@@ -25,13 +26,16 @@ export default defineEventHandler(async (event) => {
   }
   await assertCommunityNotMuted(user.id)
 
-  const since = new Date(Date.now() - 24 * 60 * 60 * 1000)
-  const used = await db
-    .select({ value: count() })
-    .from(mediaAssets)
-    .where(and(eq(mediaAssets.uploadedBy, user.id), gte(mediaAssets.createdAt, since)))
-  if (Number(used[0]?.value || 0) >= DAILY_LIMIT) {
-    throw createApiError(429, 'COMMUNITY_MEDIA_DAILY_LIMIT', '今天上传的图片太多了，请明天再试')
+  // 发稿员（CONTRIBUTOR）豁免每日上传张数限流；禁言/格式/内容校验一律保留
+  if (!isCommunityRateLimitExempt(user)) {
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000)
+    const used = await db
+      .select({ value: count() })
+      .from(mediaAssets)
+      .where(and(eq(mediaAssets.uploadedBy, user.id), gte(mediaAssets.createdAt, since)))
+    if (Number(used[0]?.value || 0) >= DAILY_LIMIT) {
+      throw createApiError(429, 'COMMUNITY_MEDIA_DAILY_LIMIT', '今天上传的图片太多了，请明天再试')
+    }
   }
 
   // multipart 会整体读入内存，先按声明的长度拒绝明显超限的请求

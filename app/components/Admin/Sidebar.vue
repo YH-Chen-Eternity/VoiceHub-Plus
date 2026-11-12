@@ -152,7 +152,9 @@ import {
   LayoutGrid,
   Award,
   Settings,
-  Flag
+  Flag,
+  ShieldCheck,
+  Send
 } from '@lucide/vue'
 import { useLocale } from '~/utils/locale'
 
@@ -265,7 +267,9 @@ const menuGroups = computed(() => [
       { icon: Globe, label: locale.value.menu?.siteConfig || '站点配置', id: 'site-config' },
       { icon: Database, label: locale.value.menu?.database || '数据库', id: 'database' },
       { icon: Activity, label: locale.value.menu?.systemBoard || '系统看板', id: 'system-board' },
-      { icon: ShieldAlert, label: locale.value.menu?.attackLogs || '攻击日志', id: 'attack-logs' }
+      { icon: ShieldAlert, label: locale.value.menu?.attackLogs || '攻击日志', id: 'attack-logs' },
+      { icon: ShieldCheck, label: locale.value.menu?.edgeProtection || '边缘防护', id: 'edge-protection' },
+      { icon: Send, label: locale.value.menu?.opsNotification || '运维通知', id: 'ops-notification' }
     ]
   },
   {

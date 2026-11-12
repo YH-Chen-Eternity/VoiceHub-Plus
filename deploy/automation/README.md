@@ -1,8 +1,8 @@
-# VoiceHub 运维自动化（腾讯云 TAT）
+# VoiceHub 运维自动化（腾讯云自动化助手 TAT）
 
-这里存放可选的定时运维脚本与配置说明。脚本可由 TAT（自动化助手）等调度工具按计划执行，覆盖数据库备份、异地同步、安全巡检、攻击监控、慢查询周报，以及放行 IP 库更新。
+这里存放可选的定时运维脚本与配置说明。**调度方式**：腾讯云自动化助手（TAT）远程执行 SHELL 命令，并用 Cron 定时调度这些运维脚本，覆盖数据库备份、异地同步、安全巡检、攻击监控、慢查询周报，以及放行 IP 库更新。**告警邮件**：由 `voicehub-mailer` 经应用内部接口交 VoiceHub 站内 SMTP 发出——TAT 只负责触发脚本，与邮件发送链路相互独立；发件人复用站内 SMTP，收件人在后台「运维通知」配置。
 
-**核心约定：仓库里没有任何凭据。** 密钥、口令、令牌、私钥、站点标识全部通过外部配置文件或环境变量注入，脚本内只有占位符和默认值。配置方法见第 2、5 节。
+**核心约定：仓库里没有任何凭据。** 密钥、口令、令牌、私钥、站点标识全部通过外部配置文件或环境变量注入，脚本内只有占位符和默认值。配置方法见第 2、5 节。**凭据边界**：站内 SMTP 账号/授权码由管理员在 VoiceHub 后台「SMTP 设置」维护、存于应用数据库；自动化侧仅 `ATTACK_LOG_TOKEN`（与应用 env 同值）放在 `/etc/voicehub/automation.env`（`chmod 600`）或以环境变量传入。这些凭据只存在于受控载体（应用数据库 / env 600 文件），**都不写入仓库、不进版本控制、不写进任何脚本或模板、不出现在日志**，本目录下只有占位符与路径引用。
 
 ---
 
@@ -32,11 +32,15 @@
 | 用途 | 载体（主机上） | 配置项 | 权限 | 说明 |
 | --- | --- | --- | --- | --- |
 | COS `SecretId` / `SecretKey` | `/root/.cos.conf`（coscmd 配置） | `VH_COS_CONF` | `600`，仅 root | 由 `coscmd` 自行读取，脚本不接触值 |
-| 邮件 SMTP 账号 / 授权码 | 邮件发送脚本自带的配置 | `VH_MAIL_BIN` | `600` | 脚本只调用该程序，不传凭据 |
+| 站内 SMTP 账号 / 授权码 | VoiceHub 后台「SMTP 设置」→ 应用数据库 | — | 应用侧管理 | 告警邮件发件人复用站内 SMTP；自动化脚本不接触该凭据，仓库不保存 |
+| 运维告警内部接口令牌 | `/etc/voicehub/automation.env`（600）或环境变量 | `ATTACK_LOG_TOKEN` | `600` | `voicehub-mailer` 经 `x-attack-token` 携带；脚本只引用路径、不打印值 |
 | 数据库口令 | compose 的 `.env` → 容器内环境变量 | — | `600` | 脚本用 `docker exec` 在容器内免密执行 |
 | 腾讯云 API 密钥 | 环境变量（仅同步工具使用） | — | 环境变量 | `TENCENTCLOUD_SECRET_ID` / `TENCENTCLOUD_SECRET_KEY`，建议临时密钥 |
 | SSH 私钥 | 运维终端本地 | — | `600` | 绝不入库 |
 | 站点域名 / 验证文件 / 公网 IP | `/etc/voicehub/automation.env` | `VH_*` | `600` | 非凭据，但也不写入公开仓库 |
+
+**令牌轮换**：`ATTACK_LOG_TOKEN` 建议每 90 天轮换一次（或发生疑似泄露时立即轮换），
+应用 env 与 `/etc/voicehub/automation.env` 必须同步更新，否则告警邮件会被内部接口拒绝。
 
 ### 禁止事项
 
@@ -55,6 +59,8 @@ deploy/automation/
 ├── automation.env.example     # 配置模板（全占位符）
 ├── .gitignore                 # 防止本地配置误入库
 ├── sync-to-tat.py             # 可选：把脚本同步为 TAT 命令
+├── mailer/
+│   └── voicehub-mailer.py     # 运维告警投递模板（经应用内部接口交站内 SMTP 代发）
 └── scripts/
     ├── 01-db-backup.sh
     ├── 02-backup-cos.sh
@@ -89,7 +95,8 @@ sudo chmod 600 /etc/voicehub/automation.env
 sudo vi /etc/voicehub/automation.env      # 把所有 <...> 换成实际值
 ```
 
-关键项：`VH_HOME`、`VH_SITE_URL`、`VH_SITE_HOST`、`VH_WWW_URL`、`VH_VERIFY_PATH`、`VH_VERIFY_SHA`、`VH_COS_CONF`、`VH_MAIL_BIN`、`VH_EXPECTED_PORTS`（含 `|`，值必须加引号）。
+关键项：`VH_HOME`、`VH_SITE_URL`、`VH_SITE_HOST`、`VH_WWW_URL`、`VH_VERIFY_PATH`、`VH_VERIFY_SHA`、`VH_COS_CONF`、`VH_MAIL_BIN`、`ATTACK_LOG_TOKEN`、`VH_EXPECTED_PORTS`（含 `|`，值必须加引号）。
+`ATTACK_LOG_TOKEN` 必须与应用 env 同值；运维告警收件人在 VoiceHub 后台「运维通知」配置，`VH_MAIL_TO` 仅作回落（后台未配置收件人时生效）。
 未配置时脚本用中性默认值，巡检与告警会提示异常——所以**务必填写**。
 
 ### Step 2 · 准备凭据载体
@@ -99,8 +106,9 @@ sudo vi /etc/voicehub/automation.env      # 把所有 <...> 换成实际值
 sudo coscmd config -a <SecretId> -s <SecretKey> -b <bucket> -r <region>
 sudo chmod 600 /root/.cos.conf
 
-# 邮件：部署你自己的发送脚本，凭据放该脚本同目录配置，权限 600
-#       路径填入 VH_MAIL_BIN
+# 运维告警：把仓库 deploy/automation/mailer/voicehub-mailer.py 复制到主机并设为可执行，
+#           路径填入 VH_MAIL_BIN；它不含 SMTP 凭据，只经应用内部接口交站内 SMTP 代发
+#           ATTACK_LOG_TOKEN 写在上面的 automation.env（600），不要写进脚本或提交到仓库
 ```
 
 > 数据库口令由 compose 的 `.env` 提供，脚本不读取，无需额外配置。
@@ -221,7 +229,7 @@ unset TENCENTCLOUD_SECRET_ID TENCENTCLOUD_SECRET_KEY     # 用完清除
 | 命令输出 `FAIL 工作目录 ... 不存在` | `VH_HOME` 是否指向实际部署目录 |
 | 巡检「公网链路异常」 | `VH_SITE_URL` / `VH_VERIFY_PATH` / `VH_VERIFY_SHA` 是否与站点验证文件一致 |
 | 巡检「证书 SAN 不含 ...」 | `VH_SITE_HOST` 是否为证书实际签发主机名 |
-| 告警邮件没收到 | `VH_MAIL_BIN` 是否存在且可执行、其自身配置是否正确、是否处于冷却期 |
+| 告警邮件没收到 | `VH_MAIL_BIN` 是否指向 `voicehub-mailer.py` 且可执行、`ATTACK_LOG_TOKEN` 与应用是否一致、应用内部接口是否可达、后台「运维通知」收件人与站内 SMTP 是否已配置、是否处于冷却期 |
 | COS 任务 `SKIP` | `VH_COS_CONF` 指向的文件是否存在、`coscmd` 是否可用 |
 | 周报提示扩展未启用 | 在数据库启用 `pg_stat_statements` 并重启 |
 | 巡检「存在非预期公网监听端口」 | 用 `ss -lntp` 确认监听地址是否为 `0.0.0.0` / `[::]`；内部服务应只绑定 `127.0.0.1`，核对 ufw 规则与 compose 端口映射 |
@@ -234,5 +242,6 @@ unset TENCENTCLOUD_SECRET_ID TENCENTCLOUD_SECRET_KEY     # 用完清除
 
 | 日期 | 内容 |
 | --- | --- |
+| 2026-11-12 | 运维告警收件人改为后台「运维通知」可配、复用站内 SMTP 代发；新增 `voicehub-mailer.py` 投递模板（去掉自带 SMTP 凭据、改 POST 应用内部接口）；统一腾讯云自动化助手（TAT）职责表述与凭据边界说明（仅文案与措辞，调度方式不变） |
 | 2026-11-08 | 运维脚本统一配置外置与占位符化；更新放行 IP 库脚本；巡检补充公网监听端口检查；整理脚本集与配置说明、同步工具 |
 | 2026-10-25 | 备份完整性校验、COS 查重重试、巡检与告警增强、慢查询周报 |

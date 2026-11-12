@@ -470,6 +470,7 @@ export const PERMISSIONS = {
 // 用户角色常量
 export const USER_ROLES = {
   USER: 'USER',
+  CONTRIBUTOR: 'CONTRIBUTOR',
   BROADCASTER: 'BROADCASTER',
   REVIEWER: 'REVIEWER',
   SONG_ADMIN: 'SONG_ADMIN',
@@ -480,6 +481,8 @@ export const USER_ROLES = {
 // 角色等级：仅用于判断操作者能否管理目标账号，数值越大权限越高
 export const ROLE_RANK: Record<string, number> = {
   USER: 0,
+  // 发稿员仍是普通用户层级（仅豁免社区限流），不因此获得任何管理能力
+  CONTRIBUTOR: 0,
   BROADCASTER: 1,
   REVIEWER: 1,
   SONG_ADMIN: 2,

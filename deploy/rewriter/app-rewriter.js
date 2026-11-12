@@ -72,11 +72,160 @@ function envInt(name, dflt) {
   const v = parseInt(process.env[name] || '', 10);
   return Number.isFinite(v) && v >= 0 ? v : dflt;
 }
-const LIMIT_MUSIC = envInt('RL_MUSIC_PER_MIN', 60);    // 音乐/搜索等外链代理接口（≈1 req/s）
-const LIMIT_AUTH = envInt("RL_AUTH_PER_MIN", 30);      // 登录/注册/验证码
-const LIMIT_GLOBAL = envInt('RL_GLOBAL_PER_MIN', 1800);
-const LIMIT_SEARCH = envInt("RL_SEARCH_PER_MIN", 60);   // 用户搜索：防批量枚举账号
-const LIMIT_ADMIN = envInt("RL_ADMIN_PER_MIN", 120);     // 管理端接口：防扫接口 // 站点整体兜底：校园/运营商共享出口 IP 多，给足余量
+
+// ============================================================
+//  动态运行时配置（观察模式 / 逐规则开关 / 可调阈值）
+//  与 server/config/edgeRules.ts 的 EdgeConfig 结构保持一致：
+//  { observeMode, ruleSwitches:Record<string,boolean>, rateLimits:Record<string,number> }
+//  rewriter 是独立 node:22-alpine 容器、无 TS/构建，此处为纯 JS 等价实现，不能 import TS。
+//  启动从 state/edge-config.json 载入（缺省回落 env 默认值），/__internal/config 可热更新。
+// ============================================================
+const EDGE_CONFIG_FILE = '/app/state/edge-config.json';
+const RULE_KEYS = ['script', 'brute_force', 'enumeration', 'banned', 'region', 'bot', 'sameOrigin'];
+// 各阈值允许的取值区间（POST 校验时 clamp；与 server/config/edgeRules.ts 的
+// EDGE_RATE_LIMIT_META min/max 保持一致，rewriter 无 TS 故保有一份纯 JS 副本）
+const RATE_LIMIT_BOUNDS = {
+  RL_MUSIC_PER_MIN: [10, 100000],
+  RL_AUTH_PER_MIN: [5, 100000],
+  RL_SEARCH_PER_MIN: [10, 100000],
+  RL_ADMIN_PER_MIN: [10, 100000],
+  RL_GLOBAL_PER_MIN: [100, 1000000],
+  ATK_LOGIN_MAX: [3, 10000],
+  ATK_FAIL_MAX: [3, 10000],
+  ATK_SEARCH_MAX: [3, 10000],
+  ATK_PERMA_FAILS: [3, 100000],
+  BOT_BLOCK_SCORE: [1, 100]
+};
+const RATE_LIMIT_KEYS = Object.keys(RATE_LIMIT_BOUNDS);
+
+// env 默认值（数值照现有 env 默认值）
+function defaultEdgeConfig() {
+  return {
+    observeMode: false,
+    ruleSwitches: {
+      script: true,
+      brute_force: true,
+      enumeration: true,
+      banned: true,
+      region: String(process.env.GEO_GATE || '').trim() === '1',
+      bot: String(process.env.BOT_GUARD || '1') === '1',
+      sameOrigin: process.env.GATE_PROXY_SAME_ORIGIN !== '0'
+    },
+    rateLimits: {
+      RL_MUSIC_PER_MIN: envInt('RL_MUSIC_PER_MIN', 60),
+      RL_AUTH_PER_MIN: envInt('RL_AUTH_PER_MIN', 30),
+      RL_SEARCH_PER_MIN: envInt('RL_SEARCH_PER_MIN', 60),
+      RL_ADMIN_PER_MIN: envInt('RL_ADMIN_PER_MIN', 120),
+      RL_GLOBAL_PER_MIN: envInt('RL_GLOBAL_PER_MIN', 1800),
+      ATK_LOGIN_MAX: envInt('ATK_LOGIN_MAX', 45),
+      ATK_FAIL_MAX: envInt('ATK_FAIL_MAX', 18),
+      ATK_SEARCH_MAX: envInt('ATK_SEARCH_MAX', 20),
+      ATK_PERMA_FAILS: envInt('ATK_PERMA_FAILS', 30),
+      BOT_BLOCK_SCORE: envInt('BOT_BLOCK_SCORE', 9)
+    }
+  };
+}
+
+// 严格校验：只接受白名单键、正确类型与合理范围；非法/越界值 clamp 或回落 base。
+function sanitizeEdgeConfig(raw, base) {
+  const dflt = base || defaultEdgeConfig();
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return dflt;
+  const out = {
+    observeMode: typeof raw.observeMode === 'boolean' ? raw.observeMode : dflt.observeMode,
+    ruleSwitches: {},
+    rateLimits: {}
+  };
+  const rs = raw.ruleSwitches && typeof raw.ruleSwitches === 'object' ? raw.ruleSwitches : {};
+  for (const k of RULE_KEYS) {
+    out.ruleSwitches[k] = typeof rs[k] === 'boolean' ? rs[k] : dflt.ruleSwitches[k];
+  }
+  const rl = raw.rateLimits && typeof raw.rateLimits === 'object' ? raw.rateLimits : {};
+  for (const k of RATE_LIMIT_KEYS) {
+    const v = rl[k];
+    const [min, max] = RATE_LIMIT_BOUNDS[k];
+    out.rateLimits[k] = (typeof v === 'number' && Number.isFinite(v))
+      ? Math.min(max, Math.max(min, Math.round(v)))
+      : dflt.rateLimits[k];
+  }
+  return out;
+}
+
+let runtimeConfig = defaultEdgeConfig();
+
+function loadEdgeConfig() {
+  let loaded = false;
+  try {
+    runtimeConfig = sanitizeEdgeConfig(JSON.parse(fs.readFileSync(EDGE_CONFIG_FILE, 'utf8')));
+    loaded = true;
+    console.log('[edge-config] 已从 state 恢复动态配置');
+  } catch (e) {
+    runtimeConfig = defaultEdgeConfig();
+  }
+  // 兼容旧版：仅当尚无 edge-config.json 时，用 geo-lock.json 初始化 region 开关
+  if (!loaded) {
+    try {
+      const g = JSON.parse(fs.readFileSync('/app/state/geo-lock.json', 'utf8'));
+      if (typeof g.enabled === 'boolean') runtimeConfig.ruleSwitches.region = g.enabled;
+    } catch (e) {}
+  }
+}
+
+// 原子写：先写临时文件再 rename，避免半截 JSON
+function saveEdgeConfig() {
+  try {
+    fs.mkdirSync('/app/state', { recursive: true });
+    const tmp = EDGE_CONFIG_FILE + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(runtimeConfig, null, 2), 'utf8');
+    fs.renameSync(tmp, EDGE_CONFIG_FILE);
+    return true;
+  } catch (e) {
+    console.error('[edge-config] 写入失败:', e.message);
+    return false;
+  }
+}
+
+// 把 runtimeConfig 同步到各运行时变量（这些标识符仍被既有逻辑直接引用）。
+// 仅在所有 let 声明之后执行（启动前 / 配置热更新时）。
+function applyEdgeConfig() {
+  LIMIT_MUSIC = runtimeConfig.rateLimits.RL_MUSIC_PER_MIN;
+  LIMIT_AUTH = runtimeConfig.rateLimits.RL_AUTH_PER_MIN;
+  LIMIT_SEARCH = runtimeConfig.rateLimits.RL_SEARCH_PER_MIN;
+  LIMIT_ADMIN = runtimeConfig.rateLimits.RL_ADMIN_PER_MIN;
+  LIMIT_GLOBAL = runtimeConfig.rateLimits.RL_GLOBAL_PER_MIN;
+  ATK_LOGIN_MAX = runtimeConfig.rateLimits.ATK_LOGIN_MAX;
+  ATK_FAIL_MAX = runtimeConfig.rateLimits.ATK_FAIL_MAX;
+  ATK_SEARCH_MAX = runtimeConfig.rateLimits.ATK_SEARCH_MAX;
+  ATK_PERMA_FAILS = runtimeConfig.rateLimits.ATK_PERMA_FAILS;
+  BOT_BLOCK_SCORE = runtimeConfig.rateLimits.BOT_BLOCK_SCORE;
+  GATE_PROXY = runtimeConfig.ruleSwitches.sameOrigin;
+  BOT_GUARD = runtimeConfig.ruleSwitches.bot;
+  geoLockEnabled = runtimeConfig.ruleSwitches.region;
+}
+
+// 观察模式 / 逐规则开关：统一判断是否真正拦截。
+// 全站 observeMode 或该规则 ruleSwitches[kind] === false → 不拦截（只记录）。
+// 未登记的规则（如限流 'rateLimit'）不受逐规则开关影响，仅受 observeMode 影响。
+const warnedRuleKinds = new Set();
+function shouldBlock(ruleKind) {
+  // 未登記的規則只受觀察模式影響；記一次告警，提醒開發者補進 RULE_KEYS。
+  if (ruleKind && !RULE_KEYS.includes(ruleKind) && !warnedRuleKinds.has(ruleKind)) {
+    warnedRuleKinds.add(ruleKind);
+    console.warn('[edge] unregistered rule kind (observeMode only):', ruleKind);
+  }
+  if (runtimeConfig.observeMode) return false;
+  if (ruleKind && Object.prototype.hasOwnProperty.call(runtimeConfig.ruleSwitches, ruleKind)) {
+    return runtimeConfig.ruleSwitches[ruleKind] !== false;
+  }
+  return true;
+}
+loadEdgeConfig();
+
+// 阈值改为可变（由 runtimeConfig 驱动，applyEdgeConfig 热更新）
+let LIMIT_MUSIC = runtimeConfig.rateLimits.RL_MUSIC_PER_MIN;   // 音乐/搜索等外链代理接口（≈1 req/s）
+let LIMIT_AUTH = runtimeConfig.rateLimits.RL_AUTH_PER_MIN;     // 登录/注册/验证码
+let LIMIT_GLOBAL = runtimeConfig.rateLimits.RL_GLOBAL_PER_MIN;
+let LIMIT_SEARCH = runtimeConfig.rateLimits.RL_SEARCH_PER_MIN;  // 用户搜索：防批量枚举账号
+let LIMIT_ADMIN = runtimeConfig.rateLimits.RL_ADMIN_PER_MIN;    // 管理端接口：防扫接口
 const WINDOW_MS = 60000;
 const MAX_KEYS = 20000;
 
@@ -84,7 +233,7 @@ const MAX_KEYS = 20000;
 // 依据：实测本站这些接口的**全部**浏览器请求（134/134）都带 Sec-Fetch-Site: same-origin；
 //      而 Sec-Fetch-* 是浏览器自动添加的**禁改头**，普通脚本/第三方抓取不会带或带成 cross-site。
 // 设 GATE_PROXY_SAME_ORIGIN=0 可一键关闭（应急回滚用）。
-const GATE_PROXY = process.env.GATE_PROXY_SAME_ORIGIN !== '0';
+let GATE_PROXY = runtimeConfig.ruleSwitches.sameOrigin;
 const PROXY_PATH_RE = /^\/api\/(native-api|api-enhanced)\//;
 
 const buckets = new Map();
@@ -294,10 +443,10 @@ function loadTrustedIpsState() {
 loadTrustedIpsState();
 
 // 可调阈值（默认值按校园共享出口放宽）
-const ATK_LOGIN_MAX = envInt('ATK_LOGIN_MAX', 45);     // 10 分钟内登录请求数
-const ATK_FAIL_MAX = envInt('ATK_FAIL_MAX', 18);       // 10 分钟内登录失败数
-const ATK_SEARCH_MAX = envInt('ATK_SEARCH_MAX', 20);   // 1 分钟内用户搜索数
-const ATK_PERMA_FAILS = envInt('ATK_PERMA_FAILS', 30); // 1 小时内失败数 -> 永久封禁
+let ATK_LOGIN_MAX = runtimeConfig.rateLimits.ATK_LOGIN_MAX;     // 10 分钟内登录请求数
+let ATK_FAIL_MAX = runtimeConfig.rateLimits.ATK_FAIL_MAX;       // 10 分钟内登录失败数
+let ATK_SEARCH_MAX = runtimeConfig.rateLimits.ATK_SEARCH_MAX;   // 1 分钟内用户搜索数
+let ATK_PERMA_FAILS = runtimeConfig.rateLimits.ATK_PERMA_FAILS; // 1 小时内失败数 -> 永久封禁
 
 const permanentBans = new Map();
 
@@ -673,7 +822,7 @@ async function isVerifiedSearchBot(realIp, ua) {
 
 // 地域闸运行时开关：默认由 GEO_GATE 环境变量决定，可由后台管理运行时切换并持久化
 const GEO_LOCK_FILE = '/app/state/geo-lock.json'
-let geoLockEnabled = String(process.env.GEO_GATE || '').trim() === '1'
+let geoLockEnabled = runtimeConfig.ruleSwitches.region
 function loadGeoLockState() {
   try {
     const j = JSON.parse(fs.readFileSync(GEO_LOCK_FILE, 'utf8'))
@@ -758,8 +907,8 @@ loadGeoLockState();
 //  正常浏览器：每请求一次 HMAC 校验（~0.1ms），无网络调用
 //  无 JS / 脚本：拿不到签名，累计评分后仅对敏感接口拦截
 // ============================================================
-const BOT_GUARD = String(process.env.BOT_GUARD || '1') === '1';
-const BOT_BLOCK_SCORE = envInt('BOT_BLOCK_SCORE', 9);
+let BOT_GUARD = runtimeConfig.ruleSwitches.bot;
+let BOT_BLOCK_SCORE = runtimeConfig.rateLimits.BOT_BLOCK_SCORE;
 // 管理接口需要有效 JWT 会话，误伤站长会直接锁死后台；这里不再用行为评分拦截 /api/admin/，
 // 登录/搜索/点歌/音源等未登录或高价值接口仍保留机器人拦截。
 const BOT_SENSITIVE_RE = /^\/api\/(user\/export|songs\/request|music\/)/;
@@ -1630,10 +1779,38 @@ function handleInternalAdmin(req, res, pathname) {
       let j = {};
       try { j = JSON.parse(body || '{}'); } catch (e) {}
       const enabled = j.enabled === true || j.enabled === 'true' || j.enabled === 1;
-      geoLockEnabled = !!enabled;
+      // region 开关与既有 geo-lock 端点保持同源，避免两个来源互相打架
+      runtimeConfig.ruleSwitches.region = !!enabled;
+      applyEdgeConfig();
+      saveEdgeConfig();
       saveGeoLockState();
       console.log('[geo] 地域锁已切换为: ' + (geoLockEnabled ? '开启(仅中国)' : '关闭(所有IP)'));
       sendJson(res, 200, { success: true, enabled: geoLockEnabled });
+    });
+    return;
+  }
+  // ---- 动态运行时配置：GET 读取 / POST 热更新（观察模式 / 逐规则开关 / 阈值）----
+  if (pathname === '/__internal/config' && req.method === 'GET') {
+    sendJson(res, 200, { success: true, config: runtimeConfig });
+    return;
+  }
+  if (pathname === '/__internal/config' && req.method === 'POST') {
+    let body = '';
+    req.on('data', (c) => { if (body.length < 8192) body += c; });
+    req.on('end', () => {
+      let j = null;
+      try { j = JSON.parse(body || '{}'); } catch (e) {}
+      if (!j || typeof j !== 'object' || Array.isArray(j)) {
+        sendJson(res, 400, { success: false, message: 'invalid config body' });
+        return;
+      }
+      // 严格校验字段类型 / 键白名单 / 取值范围，立即生效 + 原子写盘
+      runtimeConfig = sanitizeEdgeConfig(j, runtimeConfig);
+      applyEdgeConfig();
+      const ok = saveEdgeConfig();
+      saveGeoLockState();
+      console.log('[edge-config] 已热更新: observeMode=' + runtimeConfig.observeMode);
+      sendJson(res, 200, { success: ok, config: runtimeConfig });
     });
     return;
   }
@@ -1669,14 +1846,14 @@ async function handleRequest(req, res) {
   const cookieFp = getCookie(req, 'vh_fp');
 
   // ---- 内部管理接口：优先于封禁/地域闸判定 ----
-  if (pathname === '/__internal/bans' || pathname === '/__internal/unban' || pathname === '/__internal/geo-lock' || pathname === '/__internal/bot-scores' || pathname === '/__internal/ban' || pathname === '/__internal/trusted-ips') {
+  if (pathname === '/__internal/bans' || pathname === '/__internal/unban' || pathname === '/__internal/geo-lock' || pathname === '/__internal/bot-scores' || pathname === '/__internal/ban' || pathname === '/__internal/trusted-ips' || pathname === '/__internal/config') {
     handleInternalAdmin(req, res, pathname);
     return;
   }
 
   // ---- 设备指纹上报端点（由攻击声明页 JS 调用）----
   if (pathname === '/__fp') {
-    if (hit(ip, 'fp', 10, Date.now()).blocked) {
+    if (hit(ip, 'fp', 10, Date.now()).blocked && shouldBlock('brute_force')) {
       res.writeHead(429, { 'cache-control': 'no-store' });
       res.end();
       return;
@@ -1703,24 +1880,33 @@ async function handleRequest(req, res) {
   if (SENSITIVE_PATH_RE.test(pathname)) {
     const scriptReason = looksLikeScript(req);
     if (scriptReason && !botOK && !isTrusted(ip)) {
-      console.log('[script] BLOCK ip=' + ip + ' ' + scriptReason + ' ' + pathname);
-      lockIp(ip, 'script');
+      if (shouldBlock('script')) {
+        console.log('[script] BLOCK ip=' + ip + ' ' + scriptReason + ' ' + pathname);
+        lockIp(ip, 'script');
+        reportAttack({ ip, kind: 'script', path: pathname, count: 0, userAgent: ua,
+          fingerprint: cookieFp, action: 'attack_page', detail: '脚本工具访问（' + scriptReason + '）' });
+        const left = isIpLocked(ip);
+        res.writeHead(403, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+        res.end(attackPageHtml('使用自动化脚本访问接口', ip, 0, '—', left));
+        return;
+      }
+      // 观察模式 / 规则关闭：只记录不拦截
       reportAttack({ ip, kind: 'script', path: pathname, count: 0, userAgent: ua,
-        fingerprint: cookieFp, action: 'attack_page', detail: '脚本工具访问（' + scriptReason + '）' });
-      const left = isIpLocked(ip);
-      res.writeHead(403, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
-      res.end(attackPageHtml('使用自动化脚本访问接口', ip, 0, '—', left));
-      return;
+        fingerprint: cookieFp, action: 'observe', detail: '脚本工具访问（' + scriptReason + '）' });
     }
   }
 
   // ---- 永久封禁：命中直接返回声明页（持久化，重启不丢）----
   if (!isTrusted(ip) && isPermanentlyBanned(ip)) {
-    console.log('[perma] BLOCK ip=' + ip + ' ' + pathname);
-    const left = isIpLocked(ip);
-    res.writeHead(403, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
-    res.end(attackPageHtml('已被永久封禁的攻击来源', ip, permanentBans.get(ip)?.count || 0, '历史记录', left > 0 ? left : ATTACK_LOCK_MS));
-    return;
+    if (shouldBlock('banned')) {
+      console.log('[perma] BLOCK ip=' + ip + ' ' + pathname);
+      const left = isIpLocked(ip);
+      res.writeHead(403, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+      res.end(attackPageHtml('已被永久封禁的攻击来源', ip, permanentBans.get(ip)?.count || 0, '历史记录', left > 0 ? left : ATTACK_LOCK_MS));
+      return;
+    }
+    reportAttack({ ip, kind: 'banned', path: pathname, count: 0, userAgent: ua,
+      fingerprint: cookieFp, action: 'observe', detail: '命中永久封禁名单' });
   }
 
   // ---- 受信任出口：跳过攻击锁定（仍记录便于审计）----
@@ -1732,8 +1918,12 @@ async function handleRequest(req, res) {
   // ---- 已锁定：IP 或设备指纹命中 → 直接返回声明页 ----
   const fpLeft = trusted ? 0 : isFpLocked(cookieFp);
   if (fpLeft > 0 && !isIpLocked(ip)) {
-    lockIp(ip, 'fp-follow');
-    reportAttack({ ip, kind: 'brute_force', path: pathname, count: 0, userAgent: ua, fingerprint: cookieFp, action: 'attack_page', detail: '设备指纹命中（换 IP 仍识别）' });
+    if (shouldBlock('brute_force')) {
+      lockIp(ip, 'fp-follow');
+      reportAttack({ ip, kind: 'brute_force', path: pathname, count: 0, userAgent: ua, fingerprint: cookieFp, action: 'attack_page', detail: '设备指纹命中（换 IP 仍识别）' });
+    } else {
+      reportAttack({ ip, kind: 'brute_force', path: pathname, count: 0, userAgent: ua, fingerprint: cookieFp, action: 'observe', detail: '设备指纹命中（观察）' });
+    }
   }
   let ipLeft = trusted ? 0 : isIpLocked(ip);
 
@@ -1741,70 +1931,96 @@ async function handleRequest(req, res) {
   if (pathname === '/api/auth/login') noteAttack(ip, 'login');
   else if (pathname === '/api/users/search') noteAttack(ip, 'search');
   const atk = trusted ? null : detectAttack(ip);
-  if (atk) {
-    if (ipLeft <= 0) {
+  if (atk && ipLeft <= 0) {
+    if (shouldBlock(atk.kind)) {
       lockIp(ip, atk.kind, atk.kind === 'enumeration' ? 5 * 60 * 1000 : ATTACK_LOCK_MS);
       reportAttack({ ip, kind: atk.kind, path: pathname, count: atk.count, userAgent: ua, fingerprint: cookieFp, action: 'attack_page', detail: atk.label + ' ' + atk.count + ' 次/' + atk.window });
+      ipLeft = isIpLocked(ip);
+    } else {
+      reportAttack({ ip, kind: atk.kind, path: pathname, count: atk.count, userAgent: ua, fingerprint: cookieFp, action: 'observe', detail: atk.label + ' ' + atk.count + ' 次/' + atk.window });
     }
-    ipLeft = isIpLocked(ip);
   }
 
   if (ipLeft > 0) {
-    console.log('[attack-page] ' + ip + ' remain=' + Math.ceil(ipLeft / 60000) + 'min ' + pathname);
-    res.writeHead(403, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
-    res.end(attackPageHtml(atk ? atk.label : '攻击行为', ip, atk ? atk.count : 0, atk ? atk.window : '历史记录', ipLeft));
-    return;
+    const lockKind = atk ? atk.kind : 'brute_force';
+    if (shouldBlock(lockKind)) {
+      console.log('[attack-page] ' + ip + ' remain=' + Math.ceil(ipLeft / 60000) + 'min ' + pathname);
+      res.writeHead(403, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+      res.end(attackPageHtml(atk ? atk.label : '攻击行为', ip, atk ? atk.count : 0, atk ? atk.window : '历史记录', ipLeft));
+      return;
+    }
+    reportAttack({ ip, kind: lockKind, path: pathname, count: atk ? atk.count : 0, userAgent: ua, fingerprint: cookieFp, action: 'observe', detail: atk ? atk.label : '命中锁定（观察）' });
   }
 
   if (!trusted && BAN_IPS.has(ip)) {
-    console.log('[ban] BLOCK ip=' + ip + ' ' + req.url);
-    lockIp(ip, 'banned');
-    reportAttack({ ip, kind: 'banned', path: pathname, count: 0, userAgent: ua, fingerprint: cookieFp, action: 'attack_page', detail: '命中封禁名单' });
-    const left = isIpLocked(ip);
-    res.writeHead(403, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
-    res.end(attackPageHtml('已被封禁的攻击来源', ip, 0, '历史记录', left));
-    return;
+    if (shouldBlock('banned')) {
+      console.log('[ban] BLOCK ip=' + ip + ' ' + req.url);
+      lockIp(ip, 'banned');
+      reportAttack({ ip, kind: 'banned', path: pathname, count: 0, userAgent: ua, fingerprint: cookieFp, action: 'attack_page', detail: '命中封禁名单' });
+      const left = isIpLocked(ip);
+      res.writeHead(403, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+      res.end(attackPageHtml('已被封禁的攻击来源', ip, 0, '历史记录', left));
+      return;
+    }
+    reportAttack({ ip, kind: 'banned', path: pathname, count: 0, userAgent: ua,
+      fingerprint: cookieFp, action: 'observe', detail: '命中封禁名单' });
   }
 
   // ---- 地域闸：非中国大陆 / 非 CDN 回源 IP 一律拒绝（不展示声明页，直接无法访问）----
   if (geoLockEnabled && !isChinaAllowed(ip) && !botOK) {
-    console.log('[geo] BLOCK ip=' + ip + ' ' + req.url);
-    reportAttack({ ip, kind: 'region', path: pathname, count: 0, userAgent: ua, fingerprint: cookieFp, action: 'blocked', detail: '境外/非授权地区' });
-    res.writeHead(403, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
-    res.end('Forbidden');
-    return;
+    if (shouldBlock('region')) {
+      console.log('[geo] BLOCK ip=' + ip + ' ' + req.url);
+      reportAttack({ ip, kind: 'region', path: pathname, count: 0, userAgent: ua, fingerprint: cookieFp, action: 'blocked', detail: '境外/非授权地区' });
+      res.writeHead(403, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
+      res.end('Forbidden');
+      return;
+    }
+    reportAttack({ ip, kind: 'region', path: pathname, count: 0, userAgent: ua,
+      fingerprint: cookieFp, action: 'observe', detail: '境外/非授权地区' });
   }
 
 
   // ---- 机器人评分拦截：仅高置信度 + 敏感接口 ----
   if (botGuardCheck(req, ip, pathname, req.method || 'GET')) {
-    res.writeHead(403, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
-    res.end(JSON.stringify({ success: false, message: '检测到自动化访问，请刷新页面后重试', code: 'AUTOMATION_SUSPECTED' }));
-    return;
+    if (shouldBlock('bot')) {
+      res.writeHead(403, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+      res.end(JSON.stringify({ success: false, message: '检测到自动化访问，请刷新页面后重试', code: 'AUTOMATION_SUSPECTED' }));
+      return;
+    }
+    reportAttack({ ip, kind: 'bot', path: pathname, count: 0, userAgent: ua,
+      fingerprint: cookieFp, action: 'observe', detail: '高评分自动化访问' });
   }
 
   // ---- 同源闸：音乐/QQ 代理接口不接受站外/脚本调用 ----
   if (GATE_PROXY && PROXY_PATH_RE.test(pathname) && !sameOrigin(req)) {
-    console.log('[gate] BLOCK ip=' + ip + ' sfs="' + String(req.headers['sec-fetch-site'] || '') +
-      '" ua="' + String(req.headers['user-agent'] || '').slice(0, 60) + '" ' + req.url);
-    res.writeHead(403, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
-    res.end(JSON.stringify({ success: false, message: '该接口仅限本站页面调用', code: 'SAME_ORIGIN_REQUIRED' }));
-    return;
+    if (shouldBlock('sameOrigin')) {
+      console.log('[gate] BLOCK ip=' + ip + ' sfs="' + String(req.headers['sec-fetch-site'] || '') +
+        '" ua="' + String(req.headers['user-agent'] || '').slice(0, 60) + '" ' + req.url);
+      res.writeHead(403, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+      res.end(JSON.stringify({ success: false, message: '该接口仅限本站页面调用', code: 'SAME_ORIGIN_REQUIRED' }));
+      return;
+    }
+    reportAttack({ ip, kind: 'sameOrigin', path: pathname, count: 0, userAgent: ua,
+      fingerprint: cookieFp, action: 'observe', detail: '同源闸未通过' });
   }
 
   // ---- 限流（按真实 IP）----
   const [cat, limit] = classify(pathname);
   const r = hit(ip, cat, limit, Date.now());
   if (r.blocked) {
-    console.log('[rl] BLOCK ip=' + ip + ' cat=' + cat + ' ' + r.count + '/' + r.limit + ' ' + req.url);
-    const body = JSON.stringify({ success: false, message: '请求过于频繁，请稍后再试', code: 'RATE_LIMITED' });
-    res.writeHead(429, {
-      'content-type': 'application/json; charset=utf-8',
-      'cache-control': 'no-store',
-      'retry-after': String(Math.max(1, r.retry || 60)),
-    });
-    res.end(body);
-    return;
+    // 'rateLimit' 未登记在 ruleSwitches，仅受全站 observeMode 影响（平时正常拦截）
+    if (shouldBlock('rateLimit')) {
+      console.log('[rl] BLOCK ip=' + ip + ' cat=' + cat + ' ' + r.count + '/' + r.limit + ' ' + req.url);
+      const body = JSON.stringify({ success: false, message: '请求过于频繁，请稍后再试', code: 'RATE_LIMITED' });
+      res.writeHead(429, {
+        'content-type': 'application/json; charset=utf-8',
+        'cache-control': 'no-store',
+        'retry-after': String(Math.max(1, r.retry || 60)),
+      });
+      res.end(body);
+      return;
+    }
+    console.log('[rl] OBSERVE ip=' + ip + ' cat=' + cat + ' ' + r.count + '/' + r.limit + ' ' + req.url);
   }
 
   if (req.url === COMBINED || String(req.url).split('?')[0] === COMBINED) {
@@ -1821,19 +2037,24 @@ async function handleRequest(req, res) {
     // ---- 登录失败计数：慢速撞库（每分钟 1 次）也能在 6 次失败后锁定 ----
     if (pathname === '/api/auth/login' && (pres.statusCode === 400 || pres.statusCode === 401 || pres.statusCode === 423)) {
       noteAttack(ip, 'loginFail');
-      if (countLoginFails(ip, 3600000) >= ATK_PERMA_FAILS && !isPermanentlyBanned(ip)) {
-        permanentBan(ip, countLoginFails(ip, 3600000), ua, cookieFp);
-      }
-      const failAtk = detectAttack(ip);
-      if (failAtk && isIpLocked(ip) <= 0) {
-        const hourFails = countLoginFails(ip, 3600000);
-        if (hourFails >= ATK_PERMA_FAILS) {
-          permanentBan(ip, hourFails, ua, cookieFp);
-        } else {
-          lockIp(ip, failAtk.kind);
-          reportAttack({ ip, kind: failAtk.kind, path: pathname, count: failAtk.count, userAgent: ua, fingerprint: cookieFp, action: 'attack_page', detail: failAtk.label + ' ' + failAtk.count + ' 次/' + failAtk.window });
-          console.log('[attack-lock] ' + ip + ' 连续登录失败 ' + failAtk.count + ' 次 → 已锁定 30 分钟');
+      // 观察模式 / 规则关闭：仍累计统计，但不落永久封禁与锁定（避免"只记录不拦截"被后续请求实际拦住）
+      if (shouldBlock('brute_force')) {
+        if (countLoginFails(ip, 3600000) >= ATK_PERMA_FAILS && !isPermanentlyBanned(ip)) {
+          permanentBan(ip, countLoginFails(ip, 3600000), ua, cookieFp);
         }
+        const failAtk = detectAttack(ip);
+        if (failAtk && isIpLocked(ip) <= 0) {
+          const hourFails = countLoginFails(ip, 3600000);
+          if (hourFails >= ATK_PERMA_FAILS) {
+            permanentBan(ip, hourFails, ua, cookieFp);
+          } else {
+            lockIp(ip, failAtk.kind);
+            reportAttack({ ip, kind: failAtk.kind, path: pathname, count: failAtk.count, userAgent: ua, fingerprint: cookieFp, action: 'attack_page', detail: failAtk.label + ' ' + failAtk.count + ' 次/' + failAtk.window });
+            console.log('[attack-lock] ' + ip + ' 连续登录失败 ' + failAtk.count + ' 次 → 已锁定 30 分钟');
+          }
+        }
+      } else {
+        reportAttack({ ip, kind: 'brute_force', path: pathname, count: countLoginFails(ip, 3600000), userAgent: ua, fingerprint: cookieFp, action: 'observe', detail: '登录失败累计（观察）' });
       }
     }
     const ct = String(pres.headers['content-type'] || '');
@@ -1909,6 +2130,8 @@ async function handleRequest(req, res) {
   preq.on('error', () => { res.writeHead(502, { 'content-type': 'text/plain; charset=utf-8' }); res.end('rewriter upstream error'); });
   req.pipe(preq);
 }
+// 启动前把 runtimeConfig（state 载入 / env 默认值）同步到各运行时变量，确保立即生效
+applyEdgeConfig();
 const server = http.createServer((req, res) => {
   handleRequest(req, res).catch((e) => {
     console.error("[req] error:", e && e.message);

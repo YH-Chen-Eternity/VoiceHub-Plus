@@ -51,7 +51,7 @@
         <div>
           <span>{{ t.muted }}</span>
           <span v-if="ban.permanent" class="mute-extra">· {{ t.permanent }}</span>
-          <span v-else-if="ban.until" class="mute-extra">· {{ t.muteUntil }} {{ formatDate(ban.until) }}</span>
+          <span v-else-if="ban.until" class="mute-extra">· {{ t.muteUntil }} {{ formatDateOnly(ban.until) }}</span>
           <span v-if="ban.reason" class="mute-extra">· {{ ban.reason }}</span>
         </div>
       </div>
@@ -150,7 +150,7 @@
                 </button>
                 <span class="post-time">
                   <span v-if="post.pinned" class="pinned-badge"><Pin :size="11" />{{ t.pinnedBadge }}</span>
-                  {{ formatTime(post.createdAt) }}
+                  {{ formatDateOnly(post.createdAt) }}
                 </span>
               </header>
 
@@ -327,6 +327,29 @@
               <div class="publish-as">
                 <span class="publish-as-label">{{ t.publishAs }}</span>
                 <span class="publish-as-name">{{ me?.user?.displayName || '—' }}</span>
+              </div>
+
+              <div v-if="nameModeOptions.length" class="field">
+                <div class="field-title">
+                  <UserRound :size="15" />
+                  <span>{{ t.nameMode?.label }}</span>
+                </div>
+                <div class="board-picker">
+                  <button
+                    v-for="option in nameModeOptions"
+                    :key="option.value"
+                    :class="{ active: publishForm.nameMode === option.value }"
+                    class="board-chip"
+                    type="button"
+                    @click="publishForm.nameMode = option.value"
+                  >
+                    {{ option.label }}
+                  </button>
+                </div>
+                <p v-if="publishForm.nameMode === 'anon'" class="field-hint name-mode-anon-hint">
+                  <Info :size="12" />
+                  <span>{{ t.nameMode?.hint || t.pendingHint }}</span>
+                </p>
               </div>
 
               <div class="board-picker">
@@ -518,7 +541,7 @@
                   <span v-if="selectedPost.author.title" class="identity-title">
                     {{ selectedPost.author.title }}
                   </span>
-                  <span class="post-time">{{ formatTime(selectedPost.createdAt) }}</span>
+                  <span class="post-time">{{ formatDateOnly(selectedPost.createdAt) }}</span>
                 </span>
               </button>
 
@@ -709,7 +732,7 @@
                     <p class="profile-name">{{ profile.user.displayName }}</p>
                     <p v-if="profile.user.title" class="me-title">{{ profile.user.title }}</p>
                     <p v-if="profile.user.joinedAt" class="profile-joined">
-                      {{ t.joinedAt }} {{ formatDate(profile.user.joinedAt) }}
+                      {{ t.joinedAt }} {{ formatDateOnly(profile.user.joinedAt) }}
                     </p>
                   </div>
                 </div>
@@ -877,10 +900,11 @@ import {
   isCommunityImageType
 } from '~/utils/communityImage'
 import CommunityImageViewer from '~/components/Community/CommunityImageViewer.vue'
+import { formatDateOnly } from '~/utils/timeUtils'
 
 type AnyRecord = Record<string, any>
 
-const { community: communityLocale, currentLocale } = useLocale()
+const { community: communityLocale } = useLocale()
 const t = computed<AnyRecord>(() => communityLocale.value || {})
 const uiT = useNewUi()
 const { showToast } = useToast()
@@ -976,7 +1000,17 @@ const publishForm = reactive<AnyRecord>({
   boardId: 0,
   content: '',
   song: null as AnyRecord | null,
-  images: [] as AnyRecord[]
+  images: [] as AnyRecord[],
+  nameMode: 'semi'
+})
+// 发帖显示模式：受后台三个开关约束，semi 为默认；开关缺省（后端尚未下发）时按允许处理
+const nameModeOptions = computed(() => {
+  const nm = t.value.nameMode || {}
+  const options: AnyRecord[] = []
+  if (settings.value.allowSemi !== false) options.push({ value: 'semi', label: nm.semi })
+  if (settings.value.allowRealname !== false) options.push({ value: 'real', label: nm.real })
+  if (settings.value.allowAnonymous !== false) options.push({ value: 'anon', label: nm.anon })
+  return options
 })
 const canSubmit = computed(
   () =>
@@ -1040,33 +1074,6 @@ function apiMessage(error: any, fallback: string) {
     error?.message ||
     fallback
   )
-}
-
-function formatDate(value: string | Date | null | undefined) {
-  if (!value) return ''
-  const date = value instanceof Date ? value : new Date(value)
-  if (Number.isNaN(date.getTime())) return ''
-  return new Intl.DateTimeFormat(currentLocale.value || 'zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit'
-  }).format(date)
-}
-
-function formatTime(value: string | Date | null | undefined) {
-  if (!value) return ''
-  const date = value instanceof Date ? value : new Date(value)
-  if (Number.isNaN(date.getTime())) return ''
-  const diff = Date.now() - date.getTime()
-  const minute = 60 * 1000
-  const hour = 60 * minute
-  const day = 24 * hour
-  if (diff < minute) return t.value.timeJustNow || '刚刚'
-  if (diff < hour) return `${Math.floor(diff / minute)}${t.value.timeMinutes || '分钟前'}`
-  if (diff < day) return `${Math.floor(diff / hour)}${t.value.timeHours || '小时前'}`
-  if (diff < 7 * day) return `${Math.floor(diff / day)}${t.value.timeDays || '天前'}`
-  return formatDate(date)
 }
 
 function statusText(value: string) {
@@ -1479,6 +1486,7 @@ function openPublish() {
   publishForm.content = ''
   publishForm.song = null
   publishForm.images = []
+  publishForm.nameMode = nameModeOptions.value[0]?.value || 'semi'
   songQuery.value = ''
   songResults.value = []
   songSearched.value = false
@@ -1586,6 +1594,7 @@ async function submitPost() {
       body: {
         boardId: publishForm.boardId,
         content: publishForm.content,
+        nameMode: publishForm.nameMode,
         songId: publishForm.song?.id ?? null,
         imageIds: publishForm.images.map((image: AnyRecord) => image.id)
       }
@@ -2874,6 +2883,13 @@ onUnmounted(() => {
 .field-hint {
   font-size: 0.64rem;
   color: var(--text-quaternary);
+}
+
+.name-mode-anon-hint {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  color: var(--warning);
 }
 
 .search-field {

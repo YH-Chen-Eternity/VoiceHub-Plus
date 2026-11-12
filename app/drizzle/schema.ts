@@ -366,6 +366,8 @@ export const systemSettings = pgTable('SystemSettings', {
   smtpPassword: text('smtpPassword'),
   smtpFromEmail: text('smtpFromEmail'),
   smtpFromName: text('smtpFromName').default('校园广播站'),
+  // 运维告警收件人（逗号分隔邮箱；NULL=回落 automation.env 的 VH_MAIL_TO）；发件人复用站内 SMTP 的 smtpFromEmail/smtpFromName
+  opsAlertRecipients: text('opsAlertRecipients'),
   astrbotEnabled: boolean('astrbotEnabled').default(false).notNull(),
   astrbotPlatforms: jsonb('astrbotPlatforms').$type<{ qq: boolean; wecom: boolean; dingtalk: boolean; lark: boolean }>()
     .default({ qq: false, wecom: false, dingtalk: false, lark: false }).notNull(),
@@ -1150,6 +1152,8 @@ export const communityPosts = pgTable('CommunityPost', {
   likeCount: integer('likeCount').default(0).notNull(),
   // 正文规范化后的 hash，用于重复/刷屏检测（可空，历史帖无）
   contentHash: text('contentHash'),
+  // 发帖身份显示模式：semi=半实名(隐去中间字，默认) / real=实名(全名) / anon=匿名(只显示第一个字)
+  nameMode: text('nameMode').default('semi').notNull(),
 }, (table) => [
   index('CommunityPost_feed_idx').on(table.status, table.createdAt),
   index('CommunityPost_board_feed_idx').on(table.boardId, table.status, table.createdAt),
@@ -1349,6 +1353,18 @@ export const communitySettings = pgTable('CommunitySettings', {
   aliyunReadTimeoutMs: integer('aliyunReadTimeoutMs').default(6000).notNull(),
   // 命中内容安全时：MANUAL=转人工复核（默认）/ BLOCK=直接拦截
   moderationHitAction: text('moderationHitAction').default('MANUAL').notNull(),
+  // 发帖身份显示模式全局开关（管理员配置）；匿名帖强制先审后发
+  allowSemi: boolean('allowSemi').default(true).notNull(),
+  allowRealname: boolean('allowRealname').default(true).notNull(),
+  allowAnonymous: boolean('allowAnonymous').default(true).notNull(),
+});
+
+// 数据运维看板设置（单例）：COS 流量包总量、日志清理保留天数
+export const opsBoardSettings = pgTable('OpsBoardSettings', {
+  id: integer('id').primaryKey().default(1),
+  cosQuotaBytes: bigint('cosQuotaBytes', { mode: 'number' }),
+  logRetentionDays: integer('logRetentionDays').default(30).notNull(),
+  updatedAt: timestamp('updatedAt').defaultNow().notNull(),
 });
 
 export type CommunityBoard = typeof communityBoards.$inferSelect;

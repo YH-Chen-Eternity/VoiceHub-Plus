@@ -192,3 +192,17 @@ export function getDaysBetween(startStr: string, endStr: string): number {
   const end = new Date(Date.UTC(Number(endMatch[1]), Number(endMatch[2]) - 1, Number(endMatch[3]))).getTime()
   return Math.round((end - start) / 86400000)
 }
+
+
+/**
+ * 只显示日期（YYYY/M/D，北京时间），用于社区帖子/评论/歌曲投稿的前台时间展示。
+ * 后台管理组件继续使用完整时间函数，不要调用本函数。
+ * 参数为 null / undefined / 空串 / 非法日期时统一返回空串。
+ */
+export function formatDateOnly(value: Date | string | number | null | undefined): string {
+  if (value === null || value === undefined || value === '') return ''
+  const date = value instanceof Date ? value : new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  const d = dayjs(date).tz(BEIJING_TIMEZONE)
+  return `${d.year()}/${d.month() + 1}/${d.date()}`
+}

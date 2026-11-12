@@ -6,6 +6,12 @@ const ROLES = {
     pages: [], // 不能访问后台页面
     canAccessAdmin: false
   },
+  CONTRIBUTOR: {
+    displayName: '发稿员',
+    description: '普通用户权限 + 社区发帖/评论/图片不限频（不进入管理后台）',
+    pages: [], // 不能访问后台页面
+    canAccessAdmin: false
+  },
   SONG_ADMIN: {
     displayName: '歌曲管理员',
     description: '负责歌曲和排期管理',

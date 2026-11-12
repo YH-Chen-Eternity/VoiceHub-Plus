@@ -111,6 +111,35 @@
         </div>
       </section>
 
+      <!-- 发帖显示模式 -->
+      <section class="rounded-2xl border border-border-secondary-50 bg-bg-secondary-30 p-4 md:p-5">
+        <h3 class="text-sm font-black text-text-primary">{{ nameModeLabel }}</h3>
+        <div class="mt-4 grid gap-4 sm:grid-cols-3">
+          <label
+            v-for="sw in nameModeSwitches"
+            :key="sw.key"
+            class="flex items-center justify-between gap-3 rounded-xl border border-border-secondary bg-bg-primary-40 p-3"
+          >
+            <span class="min-w-0">
+              <span class="block text-xs font-bold text-text-primary">{{ sw.label }}</span>
+            </span>
+            <button
+              type="button"
+              role="switch"
+              :aria-checked="form[sw.key]"
+              class="relative h-5 w-10 shrink-0 rounded-full transition-colors"
+              :class="form[sw.key] ? 'bg-primary-hover' : 'bg-bg-tertiary'"
+              @click="form[sw.key] = !form[sw.key]"
+            >
+              <span
+                class="absolute top-1 h-3 w-3 rounded-full bg-bg-secondary transition-all"
+                :class="form[sw.key] ? 'left-6' : 'left-1'"
+              />
+            </button>
+          </label>
+        </div>
+      </section>
+
       <!-- 内容审核 -->
       <section class="rounded-2xl border border-border-secondary-50 bg-bg-secondary-30 p-4 md:p-5">
         <div class="flex items-center gap-2">
@@ -312,8 +341,16 @@ import CustomSelect from '~/components/UI/Common/CustomSelect.vue'
 import { useLocale } from '~/utils/locale'
 import { useToast } from '~/composables/useToast'
 
-const { community: communityLocale } = useLocale()
+const { community: communityLocale, admin: adminLocale } = useLocale()
 const t = computed(() => communityLocale.value?.admin || {})
+// 显示模式三个开关文案：兼容主 agent 可能采用的词典层级（顶层 admin / community.admin 嵌套 / 平铺）
+const cs = computed(() => adminLocale.value?.communitySettings || t.value.communitySettings || t.value || {})
+const nameModeLabel = computed(() => communityLocale.value?.nameMode?.label || '')
+const nameModeSwitches = computed(() => [
+  { key: 'allowSemi', label: cs.value.allowSemi },
+  { key: 'allowRealname', label: cs.value.allowRealname },
+  { key: 'allowAnonymous', label: cs.value.allowAnonymous }
+])
 const { showToast } = useToast()
 
 const form = reactive({
@@ -329,7 +366,10 @@ const form = reactive({
   aliyunTextService: 'comment_detection_pro',
   aliyunImageService: 'baselineCheck',
   aliyunConnectTimeoutMs: 3000,
-  aliyunReadTimeoutMs: 6000
+  aliyunReadTimeoutMs: 6000,
+  allowSemi: true,
+  allowRealname: true,
+  allowAnonymous: true
 })
 
 const secrets = reactive({ accessKeyId: '', accessKeySecret: '' })

@@ -314,6 +314,22 @@ Modified by YH-Chen on 2026-10-17
             >
               <LazyAdminAttackLogs />
             </div>
+
+            <!-- 边缘防护 -->
+            <div
+              v-if="activeTab === 'edge-protection' && permissions.canAccessPage('edge-protection')"
+              class="animate-in fade-in slide-in-from-bottom-4 duration-500"
+            >
+              <LazyAdminEdgeProtection />
+            </div>
+
+            <!-- 运维通知 -->
+            <div
+              v-if="activeTab === 'ops-notification' && permissions.canAccessPage('ops-notification')"
+              class="animate-in fade-in slide-in-from-bottom-4 duration-500"
+            >
+              <LazyAdminOpsNotification />
+            </div>
           </div>
         </main>
       </div>

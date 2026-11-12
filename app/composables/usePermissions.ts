@@ -25,7 +25,7 @@ export const usePermissions = () => {
 
     // 管理员可以访问的页面
     if (role === 'ADMIN') {
-      return ['overview', 'schedule', 'print', 'songs', 'users', 'grade-class', 'playtimes', 'request-times', 'semesters', 'data-analysis', 'card-codes', 'music-source', 'review-notes', 'review-users', 'announcement', 'attack-logs', 'community-review', 'community-comment-review', 'community-archive', 'community-boards', 'community-titles', 'community-users', 'community-settings', 'community-reports', 'community-overview'].includes(page)
+      return ['overview', 'schedule', 'print', 'songs', 'users', 'grade-class', 'playtimes', 'request-times', 'semesters', 'data-analysis', 'card-codes', 'music-source', 'review-notes', 'review-users', 'announcement', 'attack-logs', 'edge-protection', 'ops-notification', 'community-review', 'community-comment-review', 'community-archive', 'community-boards', 'community-titles', 'community-users', 'community-settings', 'community-reports', 'community-overview'].includes(page)
     }
 
     // 歌曲管理员可以访问的页面
@@ -77,6 +77,8 @@ export const usePermissions = () => {
           'announcement',
           'system-board',
           'attack-logs',
+          'edge-protection',
+          'ops-notification',
           'community-review',
           'community-comment-review',
           'community-archive',
@@ -88,7 +90,7 @@ export const usePermissions = () => {
           'community-overview'
         ]
       case 'ADMIN':
-        return ['overview', 'schedule', 'print', 'songs', 'users', 'grade-class', 'playtimes', 'request-times', 'semesters', 'data-analysis', 'card-codes', 'music-source', 'review-notes', 'review-users', 'announcement', 'attack-logs', 'community-review', 'community-comment-review', 'community-archive', 'community-boards', 'community-titles', 'community-users', 'community-settings', 'community-reports', 'community-overview']
+        return ['overview', 'schedule', 'print', 'songs', 'users', 'grade-class', 'playtimes', 'request-times', 'semesters', 'data-analysis', 'card-codes', 'music-source', 'review-notes', 'review-users', 'announcement', 'attack-logs', 'edge-protection', 'ops-notification', 'community-review', 'community-comment-review', 'community-archive', 'community-boards', 'community-titles', 'community-users', 'community-settings', 'community-reports', 'community-overview']
       case 'SONG_ADMIN':
         return ['overview', 'schedule', 'print', 'songs', 'playtimes', 'request-times', 'semesters', 'data-analysis', 'card-codes']
       case 'BROADCASTER':
@@ -102,6 +104,8 @@ export const usePermissions = () => {
 
   // 角色检查
   const isUser = computed(() => auth.user.value?.role === 'USER')
+  // 发稿员：普通用户层级，仅豁免社区发帖/评论/图片限流，不进入管理后台
+  const isContributor = computed(() => auth.user.value?.role === 'CONTRIBUTOR')
   const isSongAdmin = computed(() => auth.user.value?.role === 'SONG_ADMIN')
   const isBroadcaster = computed(() => auth.user.value?.role === 'BROADCASTER')
   const isReviewer = computed(() => auth.user.value?.role === 'REVIEWER')
@@ -125,7 +129,7 @@ export const usePermissions = () => {
 
     // 只有超级管理员可以分配角色
     if (auth.user.value.role === 'SUPER_ADMIN') {
-      return ['USER', 'SONG_ADMIN', 'BROADCASTER', 'REVIEWER', 'ADMIN'].includes(targetRole)
+      return ['USER', 'CONTRIBUTOR', 'SONG_ADMIN', 'BROADCASTER', 'REVIEWER', 'ADMIN'].includes(targetRole)
     }
 
     return false
@@ -154,6 +158,7 @@ export const usePermissions = () => {
 
     // 角色检查
     isUser,
+    isContributor,
     isSongAdmin,
     isBroadcaster,
     isReviewer,

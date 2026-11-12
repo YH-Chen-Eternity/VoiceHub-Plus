@@ -44,6 +44,15 @@ export function isCommunityReviewer(user: any): boolean {
   return isCommunityAdmin(user) || String(user.role || '') === COMMUNITY_REVIEWER_ROLE
 }
 
+/**
+ * 发稿员（CONTRIBUTOR）豁免社区发帖/评论/传图的频率限流。
+ * 只跳过限流本身：审核、查重、禁言、内容校验等仍由各端点照常执行。
+ * 角色常量由主 agent 在 constants.ts 注册，这里按契约用字符串判断。
+ */
+export function isCommunityRateLimitExempt(user: any): boolean {
+  return !!user && String(user.role || '') === 'CONTRIBUTOR'
+}
+
 export function requireCommunityAdmin(event: H3Event): void {
   const user = event.context.user
   if (!user) throw createApiError(401, 'AUTH_UNAUTHORIZED', '请先登录')
@@ -147,6 +156,9 @@ export function toPublicCommunitySettings(row: CommunitySettingsRow) {
     maxCommentLength: row.maxCommentLength,
     moderationEnabled: row.moderationEnabled,
     moderationConfigured: !!(row.aliyunAccessKeyId && row.aliyunAccessKeySecret),
+    allowSemi: row.allowSemi,
+    allowRealname: row.allowRealname,
+    allowAnonymous: row.allowAnonymous,
     reviewRequired: true
   }
 }
@@ -180,24 +192,61 @@ export function formatCommunityClass(grade: string | null | undefined, klass: st
 /** 查看者上下文：用于决定社区内能看到的身份粒度 */
 export type CommunityViewer = { id?: number | null; role?: string | null } | null | undefined
 
+/** 合法显示模式；非法/缺失一律回退到最严格的 semi（半实名） */
+export const COMMUNITY_NAME_MODES = ['semi', 'real', 'anon'] as const
+export type CommunityNameMode = (typeof COMMUNITY_NAME_MODES)[number]
+
+/** 收敛任意输入为合法显示模式，缺省 semi。 */
+export function resolveNameMode(value: unknown): CommunityNameMode {
+  return value === 'real' || value === 'anon' ? value : 'semi'
+}
+
+/**
+ * 按显示模式格式化真实姓名（仅用于「其他人」视角；管理员/本人不走这里）。
+ * semi=隐中间字（两字名隐第二字）、anon=只保留首字 + *、real=全名。
+ */
+export function formatNameByMode(name: string | null | undefined, mode: unknown): string {
+  const trimmed = String(name || '').trim()
+  if (!trimmed) return maskCommunityName(name)
+  const resolved = resolveNameMode(mode)
+  if (resolved === 'real') return trimmed
+  if (resolved === 'anon') return `${Array.from(trimmed)[0]}*`
+  return maskCommunityName(trimmed)
+}
+
+/** 第 4 参兼容：既可为 options 对象（含 allowReviewer / nameMode），也可直接传 nameMode 字符串。 */
+type CommunityIdentityOptions =
+  | { allowReviewer?: boolean; nameMode?: string | null }
+  | string
+  | null
+  | undefined
+
+function normalizeIdentityOptions(
+  options: CommunityIdentityOptions
+): { allowReviewer?: boolean; nameMode: CommunityNameMode } {
+  if (typeof options === 'string') return { nameMode: resolveNameMode(options) }
+  return { allowReviewer: options?.allowReviewer, nameMode: resolveNameMode(options?.nameMode) }
+}
+
 /**
  * 社区身份展示，按查看者权限分级：
- * - 管理员 / 超级管理员：班级 + 全名（如「高一1班陈奕翰」）
- * - 本人：全名（如「陈奕翰」）
- * - 其他所有人：脱敏名且不带班级（如「陈*翰」）
- * 未传查看者时按最严格的脱敏处理，避免漏传导致真实姓名泄露。
+ * - 管理员 / 超级管理员 / 审核场景（审帖员）/ 本人：不受显示模式影响，始终可见真实姓名
+ *   （管理员与审核场景为「班级 + 全名」，本人为全名）
+ * - 其他人按内容所属帖子的 nameMode：semi=脱敏名（隐中间字）、anon=首字+*、real=全名
+ * 未传查看者或 nameMode 时按最严格的半实名脱敏处理，避免漏传导致真实姓名泄露。
  */
 export function buildCommunityIdentity(
   user: { id?: number | null; name?: string | null; grade?: string | null; class?: string | null },
   titleName?: string | null,
   viewer?: CommunityViewer,
-  options?: { allowReviewer?: boolean }
+  options?: CommunityIdentityOptions
 ) {
+  const opts = normalizeIdentityOptions(options)
   const className = formatCommunityClass(user.grade, user.class)
   const maskedName = maskCommunityName(user.name)
   const fullName = String(user.name || '').trim()
   // 审核队列里审帖员需要看到真实身份才能判断，故该场景下将 REVIEWER 视为可见全名者
-  const staffRoles = options?.allowReviewer
+  const staffRoles = opts.allowReviewer
     ? ['ADMIN', 'SUPER_ADMIN', 'REVIEWER']
     : ['ADMIN', 'SUPER_ADMIN']
   const viewerRole = String(viewer?.role || '')
@@ -207,7 +256,12 @@ export function buildCommunityIdentity(
   let displayName: string
   if (isStaff) displayName = `${className}${fullName}`.trim()
   else if (isSelf) displayName = fullName
-  else displayName = maskedName
+  else if (opts.nameMode === 'real') displayName = fullName
+  else if (opts.nameMode === 'anon') {
+    // 匿名：只保留首字并补一个 *；空姓名回退到半实名占位
+    const firstChar = Array.from(fullName)[0]
+    displayName = firstChar ? `${firstChar}*` : maskedName
+  } else displayName = maskedName
 
   return {
     className: isStaff ? className : '',

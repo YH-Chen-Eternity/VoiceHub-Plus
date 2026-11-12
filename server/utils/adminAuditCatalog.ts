@@ -17,6 +17,10 @@ export interface AdminAuditDescriptor {
 }
 
 const LEGACY_ACTIONS: Record<string, string> = {
+  // 运维看板写操作（Agent G 手动写审计，动作键固定）
+  OPS_BOARD_SETTINGS_UPDATE: '更新运维看板设置',
+  OPS_BOARD_LOG_CLEANUP_PREVIEW: '预览运维日志清理',
+  OPS_BOARD_LOG_CLEANUP_EXECUTE: '执行运维日志清理',
   SONG_MARK_PLAYED_BULK: '批量标记歌曲已播放',
   USER_RESET_PASSWORD: '重置用户密码',
   USER_EXPORT: '导出用户数据',
@@ -257,6 +261,12 @@ function actionLabelForPath(method: string, pathname: string): string | null {
   if (p === '/api/admin/grade-class/initialize' && m === 'POST') return '初始化年级班级'
 
   if (p === '/api/admin/permanent-bans' && m === 'POST') return '解除封禁'
+
+  // 边缘防护与运维通知（本轮新增配置面）
+  if (p === '/api/admin/edge-config' && m === 'PUT') return '更新边缘防护配置'
+  if (p === '/api/admin/ops-notification' && m === 'PUT') return '更新运维通知收件人'
+  if (p === '/api/admin/ops-notification/test' && m === 'POST') return '发送运维测试邮件'
+  if (p === '/api/admin/community/settings' && m === 'PUT') return '更新社区配置'
 
   return null
 }

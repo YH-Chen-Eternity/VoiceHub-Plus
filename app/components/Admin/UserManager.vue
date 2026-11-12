@@ -1923,6 +1923,7 @@ const getRoleName = (role) => {
     SONG_ADMIN: 'songAdmin',
     BROADCASTER: 'broadcaster',
     REVIEWER: 'reviewer',
+    CONTRIBUTOR: 'contributor',
     ADMIN: 'admin',
     SUPER_ADMIN: 'superAdmin'
   }
@@ -1982,6 +1983,7 @@ const currentSort = computed({
 // 硬编码角色定义
 const allRoles = computed(() => [
   { name: 'USER', displayName: getRoleName('USER') },
+  { name: 'CONTRIBUTOR', displayName: getRoleName('CONTRIBUTOR') },
   { name: 'SONG_ADMIN', displayName: getRoleName('SONG_ADMIN') },
   { name: 'BROADCASTER', displayName: getRoleName('BROADCASTER') },
   { name: 'REVIEWER', displayName: getRoleName('REVIEWER') },
@@ -2137,7 +2139,7 @@ const canManageUser = (user) => {
 const availableRoles = computed(() => {
   let roles
   if (isSuperAdmin.value) {
-    // 超级管理员可以分配除自己以外的所有角色
+    // 超级管理员可以分配除自己以外的所有角色（含发稿员 CONTRIBUTOR，由 allRoles 带入）
     roles = allRoles.value.filter((role) => role.name !== 'SUPER_ADMIN')
   } else if (isAdmin.value) {
     // 管理员只能分配用户和歌曲管理员角色（与后端用户接口的角色限制一致）
@@ -3237,7 +3239,7 @@ const handleFileUpload = async (event) => {
           }
 
           // 确保角色有效
-          const validRoles = ['USER', 'ADMIN', 'SONG_ADMIN', 'SUPER_ADMIN']
+          const validRoles = ['USER', 'CONTRIBUTOR', 'ADMIN', 'SONG_ADMIN', 'SUPER_ADMIN']
           if (!validRoles.includes(role)) {
             role = 'USER'
           }

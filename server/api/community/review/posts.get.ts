@@ -19,6 +19,10 @@ export default defineEventHandler(async (event) => {
     ? String(query.status).toUpperCase()
     : 'PENDING'
   const requestedBoardId = Number(query.boardId || 0) || undefined
+  // 审核队列支持按显示模式筛选（semi/real/anon）；非法值视为不筛选
+  const nameMode = ['semi', 'real', 'anon'].includes(String(query.nameMode || ''))
+    ? String(query.nameMode)
+    : undefined
 
   const scopedBoardIds = await getReviewableBoardIds(user)
   if (requestedBoardId && scopedBoardIds && !scopedBoardIds.includes(requestedBoardId)) {
@@ -37,6 +41,7 @@ export default defineEventHandler(async (event) => {
     viewerId: user.id,
     viewerRole: user.role,
     moderationView: true,
+    nameMode,
     status,
     boardId: requestedBoardId,
     boardIds: requestedBoardId ? undefined : scopedBoardIds || undefined,
@@ -46,7 +51,13 @@ export default defineEventHandler(async (event) => {
   const statsRows = await db
     .select({ status: communityPosts.status, value: count() })
     .from(communityPosts)
-    .where(and(isNull(communityPosts.deletedAt), boardFilter))
+    .where(
+      and(
+        isNull(communityPosts.deletedAt),
+        boardFilter,
+        nameMode ? eq(communityPosts.nameMode, nameMode) : undefined
+      )
+    )
     .groupBy(communityPosts.status)
 
   const stats: Record<string, number> = { PENDING: 0, APPROVED: 0, REJECTED: 0, BLOCKED: 0 }
@@ -68,6 +79,7 @@ export default defineEventHandler(async (event) => {
     posts,
     stats,
     boards,
+    nameMode: nameMode || null,
     scope: {
       limited: !isCommunityAdmin(user) && !!scopedBoardIds,
       boardIds: scopedBoardIds
