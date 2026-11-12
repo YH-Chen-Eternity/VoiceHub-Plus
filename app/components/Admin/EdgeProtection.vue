@@ -16,7 +16,7 @@
       </div>
       <div class="flex flex-wrap items-center gap-3">
         <span class="text-[11px] font-semibold text-text-disabled">
-          {{ isSuperAdmin ? L('superAdminHint') : L('readOnlyHint') }}
+          {{ isAdminOrAbove ? L('superAdminHint') : L('readOnlyHint') }}
         </span>
         <button
           class="flex items-center gap-2 px-3 py-2 rounded-xl text-[11px] font-bold bg-bg-primary-40 border border-border-secondary text-text-tertiary hover:text-text-primary hover:border-border-tertiary transition-all disabled:opacity-50"
@@ -62,7 +62,7 @@
             :aria-checked="form.observeMode"
             class="relative h-5 w-10 shrink-0 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             :class="form.observeMode ? 'bg-warning' : 'bg-bg-tertiary'"
-            :disabled="!isSuperAdmin"
+            :disabled="!isAdminOrAbove"
             @click="askObserveToggle"
           >
             <span
@@ -124,7 +124,7 @@
                 :aria-label="L('rule_' + rule.key + '_label')"
                 class="relative h-5 w-10 shrink-0 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 :class="form.ruleSwitches[rule.key] ? 'bg-primary-hover' : 'bg-bg-tertiary'"
-                :disabled="!isSuperAdmin"
+                :disabled="!isAdminOrAbove"
                 @click="form.ruleSwitches[rule.key] = !form.ruleSwitches[rule.key]"
               >
                 <span
@@ -163,7 +163,7 @@
                   type="number"
                   :min="rule.min"
                   :max="rule.max"
-                  :disabled="!isSuperAdmin"
+                  :disabled="!isAdminOrAbove"
                   class="w-full rounded-xl border border-border-secondary bg-bg-primary px-3 py-2 text-xs text-text-primary focus:border-primary-30 focus:outline-none disabled:opacity-50"
                 >
               </label>
@@ -204,7 +204,7 @@
             :aria-checked="geoEnabled"
             class="relative h-5 w-10 shrink-0 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             :class="geoEnabled ? 'bg-primary-hover' : 'bg-bg-tertiary'"
-            :disabled="!isSuperAdmin || geoBusy"
+            :disabled="!isAdminOrAbove || geoBusy"
             @click="askGeoToggle"
           >
             <span
@@ -255,13 +255,13 @@
             <input
               v-model="banInput"
               :placeholder="L('banPlaceholder')"
-              :disabled="!isSuperAdmin"
+              :disabled="!isAdminOrAbove"
               class="w-44 rounded-xl border border-border-secondary bg-bg-primary-30 px-3 py-2 text-[11px] text-text-primary outline-none focus:border-primary disabled:opacity-50"
               @keyup.enter="askBanIp"
             >
             <button
               class="px-3 py-2 rounded-xl text-[11px] font-bold bg-error text-white hover:opacity-90 disabled:opacity-50"
-              :disabled="!isSuperAdmin || banBusy"
+              :disabled="!isAdminOrAbove || banBusy"
               @click="askBanIp"
             >
               {{ L('banButton') }}
@@ -298,7 +298,7 @@
                   <p v-if="item.detail" class="mt-0.5 text-[10px] text-text-disabled break-all">{{ item.detail }}</p>
                 </div>
                 <button
-                  v-if="isSuperAdmin"
+                  v-if="isAdminOrAbove"
                   class="shrink-0 text-[10px] font-bold text-primary hover:text-primary-hover disabled:opacity-50"
                   :disabled="banBusy"
                   @click="askUnban(bucket.key === 'fps' ? 'fp' : 'ip', bucket.key === 'fps' ? item.fp : item.ip)"
@@ -327,13 +327,13 @@
             <input
               v-model="trustedInput"
               :placeholder="L('trustedPlaceholder')"
-              :disabled="!isSuperAdmin"
+              :disabled="!isAdminOrAbove"
               class="w-44 rounded-xl border border-border-secondary bg-bg-primary-30 px-3 py-2 text-[11px] text-text-primary outline-none focus:border-primary disabled:opacity-50"
               @keyup.enter="addTrustedIp"
             >
             <button
               class="flex items-center gap-1.5 px-3 py-2 rounded-xl text-[11px] font-bold bg-primary text-white hover:bg-primary-hover disabled:opacity-50"
-              :disabled="!isSuperAdmin || trustedBusy"
+              :disabled="!isAdminOrAbove || trustedBusy"
               @click="addTrustedIp"
             >
               <Plus :size="13" /> {{ L('trustedAdd') }}
@@ -353,7 +353,7 @@
           >
             <span class="text-xs font-bold text-text-primary break-all">{{ ip }}</span>
             <button
-              v-if="isSuperAdmin"
+              v-if="isAdminOrAbove"
               class="text-[10px] font-bold text-error hover:opacity-80 disabled:opacity-50"
               :disabled="trustedBusy"
               @click="removeTrustedIp(ip)"
@@ -432,7 +432,7 @@
         <button
           type="button"
           class="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border-secondary text-xs font-bold text-text-secondary hover:text-text-primary hover:border-border-tertiary transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-          :disabled="!isSuperAdmin || saving"
+          :disabled="!isAdminOrAbove || saving"
           @click="askRestore"
         >
           <RotateCcw :size="14" /> {{ L('restore') }}
@@ -440,7 +440,7 @@
         <button
           type="button"
           class="inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-xs font-bold text-white shadow-lg shadow-[var(--primary-glow-20)] transition-all hover:bg-primary-hover disabled:opacity-50 disabled:cursor-not-allowed"
-          :disabled="!isSuperAdmin || saving"
+          :disabled="!isAdminOrAbove || saving"
           @click="save"
         >
           <Save :size="14" :class="{ 'animate-pulse': saving }" />
@@ -496,7 +496,7 @@ import { formatDateTime } from '~/utils/timeUtils'
 defineOptions({ name: 'AdminEdgeProtection' })
 
 const { showToast } = useToast()
-const { isSuperAdmin } = usePermissions()
+const { isAdminOrAbove } = usePermissions()
 const { admin } = useLocale()
 const t = computed(() => admin.value?.edgeProtection || {})
 
@@ -787,7 +787,7 @@ const runConfirm = async () => {
 }
 
 const askObserveToggle = () => {
-  if (!isSuperAdmin.value) return
+  if (!isAdminOrAbove.value) return
   const next = !form.observeMode
   askConfirm({
     title: L('observeConfirmTitle'),
@@ -797,7 +797,7 @@ const askObserveToggle = () => {
   })
 }
 const askRestore = () => {
-  if (!isSuperAdmin.value) return
+  if (!isAdminOrAbove.value) return
   askConfirm({
     title: L('restoreConfirmTitle'),
     message: L('restoreConfirmMsg'),
@@ -812,7 +812,7 @@ const askRestore = () => {
 }
 
 const save = async () => {
-  if (!isSuperAdmin.value || saving.value) return
+  if (!isAdminOrAbove.value || saving.value) return
   if (!configLoaded.value) {
     showToast(L('loadFailed'), 'error')
     return
@@ -839,7 +839,7 @@ const save = async () => {
 }
 
 const askGeoToggle = () => {
-  if (!isSuperAdmin.value || geoBusy.value) return
+  if (!isAdminOrAbove.value || geoBusy.value) return
   const next = !geoEnabled.value
   askConfirm({
     title: L('geoConfirmTitle'),
@@ -865,7 +865,7 @@ const askGeoToggle = () => {
 }
 
 const askBanIp = () => {
-  if (!isSuperAdmin.value || banBusy.value) return
+  if (!isAdminOrAbove.value || banBusy.value) return
   const ip = banInput.value.trim()
   if (!ip) return
   askConfirm({
@@ -891,7 +891,7 @@ const askBanIp = () => {
   })
 }
 const askUnban = (type, value) => {
-  if (!isSuperAdmin.value || banBusy.value || !value) return
+  if (!isAdminOrAbove.value || banBusy.value || !value) return
   askConfirm({
     title: L('unbanConfirmTitle'),
     message: `${L('unbanConfirmMsg')} ${value}`,
@@ -915,7 +915,7 @@ const askUnban = (type, value) => {
 }
 
 const updateTrustedIp = async (action, ip) => {
-  if (!isSuperAdmin.value || trustedBusy.value) return
+  if (!isAdminOrAbove.value || trustedBusy.value) return
   trustedBusy.value = true
   trustedError.value = ''
   try {

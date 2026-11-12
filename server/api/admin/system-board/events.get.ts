@@ -13,9 +13,9 @@ export default defineEventHandler(async (event) => {
   if (!authResult.success) {
     throw createApiError(401, SERVER_ERROR_CODES.AUTH_UNAUTHORIZED_ACCESS, '需要管理员权限')
   }
-  // 运行事件含异常堆栈与请求 5xx，仅限超级管理员
-  if (authResult.user?.role !== 'SUPER_ADMIN') {
-    throw createApiError(403, SERVER_ERROR_CODES.COMMON_INSUFFICIENT_PERMISSION, '需要超级管理员权限')
+  // 运行事件含异常堆栈与请求 5xx，管理员及以上可查看
+  if (!(authResult.user?.role === 'ADMIN' || authResult.user?.role === 'SUPER_ADMIN')) {
+    throw createApiError(403, SERVER_ERROR_CODES.COMMON_INSUFFICIENT_PERMISSION, '需要管理员及以上权限')
   }
 
   try {

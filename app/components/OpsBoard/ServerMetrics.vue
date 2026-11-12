@@ -5,7 +5,7 @@
       <span v-if="estimated" class="ob-est">应用侧估算</span>
     </header>
 
-    <div v-if="err && !m" class="ob-empty">数据暂不可用</div>
+    <div v-if="!m || (err && !m)" class="ob-empty">数据暂不可用</div>
     <div v-else-if="!available" class="ob-empty">未安装采集器</div>
 
     <template v-else>
@@ -56,7 +56,7 @@ const err = computed(() => ctx.errors.serverMetrics)
 const estimated = ctx.estimated
 
 // available 缺省视为已安装；仅显式 false 才降级（契约：不存在降级 available:false）
-const available = computed(() => m.value?.available !== false)
+const available = computed(() => !!m.value && m.value?.available !== false)
 const cpuRaw = computed(() => asPercentValue(m.value?.cpu) ?? 0)
 const memRaw = computed(() => asPercentValue(m.value?.memory) ?? 0)
 const cpuText = computed(() => formatPercent(m.value?.cpu))

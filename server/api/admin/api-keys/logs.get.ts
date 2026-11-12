@@ -5,12 +5,12 @@ import { ApiLogService } from '~~/server/services/apiLogService'
  * GET /api/admin/api-keys/logs
  */
 export default defineEventHandler(async (event) => {
-  // 检查用户权限 - 只有超级管理员可以查看 API 日志
+  // 检查用户权限 - 管理员及以上可以查看 API 日志
   const user = event.context.user
-  if (!user || user.role !== 'SUPER_ADMIN') {
+  if (!user || !['ADMIN', 'SUPER_ADMIN'].includes(user.role)) {
     throw createError({
       statusCode: 403,
-      message: '只有超级管理员可以查看 API 日志'
+      message: '仅管理员及以上可以查看 API 日志'
     })
   }
 

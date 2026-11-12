@@ -12,7 +12,7 @@ import { requireAdmin } from '~~/server/utils/requireAdmin'
 import { unbanRewriterTarget } from '~~/server/utils/rewriterBans'
 
 export default defineEventHandler(async (event) => {
-  requireAdmin(event, ['SUPER_ADMIN'])
+  requireAdmin(event, ['ADMIN', 'SUPER_ADMIN'])
 
   const body = await readBody(event).catch(() => null)
   const type = body?.type === 'fp' ? 'fp' : 'ip'

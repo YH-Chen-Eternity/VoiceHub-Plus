@@ -5,16 +5,16 @@
       <span class="state-pill" :class="available ? 'ok' : 'off'">{{ available ? '在线' : '不可用' }}</span>
     </header>
 
-    <div v-if="err && !s" class="ob-empty">数据暂不可用</div>
+    <div v-if="!s || (err && !s)" class="ob-empty">数据暂不可用</div>
     <div v-else-if="!available" class="ob-empty">雷池节点不可用</div>
 
     <div v-else class="ob-kv state-kv">
-      <div class="ob-kv-row"><span class="ob-kv-key">版本</span><span class="ob-kv-val">{{ val(s.version) }}</span></div>
-      <div class="ob-kv-row"><span class="ob-kv-key">授权</span><span class="ob-kv-val">{{ val(s.license) }}</span></div>
-      <div class="ob-kv-row"><span class="ob-kv-key">站点数</span><span class="ob-kv-val">{{ val(s.sites) }}</span></div>
+      <div class="ob-kv-row"><span class="ob-kv-key">版本</span><span class="ob-kv-val">{{ val(s?.version) }}</span></div>
+      <div class="ob-kv-row"><span class="ob-kv-key">授权</span><span class="ob-kv-val">{{ val(s?.license) }}</span></div>
+      <div class="ob-kv-row"><span class="ob-kv-key">站点数</span><span class="ob-kv-val">{{ val(s?.sites) }}</span></div>
       <div class="ob-kv-row"><span class="ob-kv-key">证书到期</span><span class="ob-kv-val">{{ certText }}</span></div>
-      <div class="ob-kv-row"><span class="ob-kv-key">CC 阈值</span><span class="ob-kv-val">{{ val(s.ccThreshold) }}</span></div>
-      <div class="ob-kv-row"><span class="ob-kv-key">容量</span><span class="ob-kv-val">{{ val(s.capacity) }}</span></div>
+      <div class="ob-kv-row"><span class="ob-kv-key">CC 阈值</span><span class="ob-kv-val">{{ val(s?.ccThreshold) }}</span></div>
+      <div class="ob-kv-row"><span class="ob-kv-key">容量</span><span class="ob-kv-val">{{ val(s?.capacity) }}</span></div>
     </div>
 
     <!-- 純唯讀展示：看板不提供任何雷池配置或寫入控件 -->
@@ -29,7 +29,7 @@ import { formatDate, pick } from './format.js'
 const ctx = inject('opsBoardContext')
 const s = computed(() => ctx.data.safeline)
 const err = computed(() => ctx.errors.safeline)
-const available = computed(() => s.value?.available !== false)
+const available = computed(() => !!s.value && s.value?.available !== false)
 
 const certText = computed(() => {
   const v = s.value?.certExpiry

@@ -4,13 +4,13 @@
  * SPDX-License-Identifier: GPL-3.0-only
  *
  * 运维通知：发送测试邮件，验证「站内 SMTP + 当前收件人配置」是否可用。
- * 仅超级管理员可调用；不复用 /api/internal/ops-alert（避免前台接触内部令牌）。
+ * 仅管理员及以上可调用；不复用 /api/internal/ops-alert（避免前台接触内部令牌）。
  * 本文件为社区版新增代码；完整许可证见仓库根目录 LICENSE。
  */
 
 import { db } from '~/drizzle/db'
 import { systemSettings } from '~/drizzle/schema'
-import { requireSuperAdmin } from '~~/server/utils/requireAdmin'
+import { requireAdmin } from '~~/server/utils/requireAdmin'
 import { createApiError } from '~~/server/utils/apiError'
 import { SmtpService } from '~~/server/services/smtpService'
 
@@ -23,7 +23,7 @@ const splitRecipients = (value: unknown): string[] =>
     .filter(Boolean)
 
 export default defineEventHandler(async (event) => {
-  requireSuperAdmin(event)
+  requireAdmin(event)
   setHeader(event, 'Cache-Control', 'no-store')
 
   const rows = await db.select().from(systemSettings).limit(1)

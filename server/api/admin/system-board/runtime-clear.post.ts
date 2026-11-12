@@ -9,9 +9,9 @@ export default defineEventHandler(async (event) => {
   if (!authResult.success) {
     throw createApiError(401, SERVER_ERROR_CODES.AUTH_UNAUTHORIZED_ACCESS, '需要管理员权限')
   }
-  // 清空进程内缓冲会影响排障现场，仅限超级管理员
-  if (authResult.user?.role !== 'SUPER_ADMIN') {
-    throw createApiError(403, SERVER_ERROR_CODES.COMMON_INSUFFICIENT_PERMISSION, '需要超级管理员权限')
+  // 清空进程内缓冲会影响排障现场，管理员及以上可操作
+  if (!(authResult.user?.role === 'ADMIN' || authResult.user?.role === 'SUPER_ADMIN')) {
+    throw createApiError(403, SERVER_ERROR_CODES.COMMON_INSUFFICIENT_PERMISSION, '需要管理员及以上权限')
   }
 
   try {
