@@ -15,7 +15,7 @@ import {
 } from '~~/server/utils/adminAudit'
 import { describeAdminAction, isAuditedGetPath } from '~~/server/utils/adminAuditCatalog'
 import { getRolePagesCached } from '~~/server/utils/rolePagesSettings'
-import { ADMIN_PAGE_ROUTES, resolveEffectivePages } from '~~/types/rolePages'
+import { ADMIN_PAGE_ROUTES, CONFIGURABLE_ROLES, resolveEffectivePages } from '~~/types/rolePages'
 
 // 与歌曲管理员后台可见页面一致；这些路由内部仍各自校验 SONG_ADMIN 及以上权限
 // 放歌员：只读概览与排期，不允许改任何数据
@@ -92,7 +92,7 @@ export default defineEventHandler(async (event) => {
   // SUPER_ADMIN 直通；未映射路径不强制（保持既有角色判定）；rolePages
   // 走 60s 进程内缓存，保存配置后立即失效。判定在审计写入之前，被拒
   // 请求不产生审计记录（由登录尝试/运行日志覆盖）。
-  if (role !== 'SUPER_ADMIN' && ['ADMIN', 'SONG_ADMIN', 'BROADCASTER', 'REVIEWER'].includes(role)) {
+  if (role !== 'SUPER_ADMIN' && (CONFIGURABLE_ROLES as readonly string[]).includes(role)) {
     const effective = resolveEffectivePages(role, await getRolePagesCached())
     if (effective) {
       const allowed = new Set(effective)

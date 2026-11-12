@@ -92,10 +92,14 @@ export const resolveEffectivePages = (role: string, rolePages: Record<string, st
  * 若没有任何一个在生效页面内 → 403（SUPER_ADMIN 直通；未映射路径不强制，
  * 保持既有角色判定，避免误伤跨页面辅助端点与超管专属页面）。
  * 一个端点可属于多个页面（任一生效即可访问）。
+ *
+ * 注意：ops-board 不在本映射中——其端点位于 /api/ops-board/ 而非
+ * /api/admin/，由 server/utils/opsBoardViewer.requireOpsBoardViewer
+ * 按 rolePages 生效页面独立把关（口径与本映射一致）。
  */
 export const ADMIN_PAGE_ROUTES: ReadonlyArray<readonly [string, RegExp[]]> = [
-  ['overview', [/^\/api\/admin\/stats(?:\/|$)/, /^\/api\/admin\/activities$/, /^\/api\/admin\/replay-requests(?:\/|$)/]],
-  ['schedule', [/^\/api\/admin\/schedule(?:\/|$)/, /^\/api\/admin\/songs\/mark-played$/, /^\/api\/admin\/play-times(?:\/|$)/, /^\/api\/admin\/semesters(?:\/|$)/]],
+  ['overview', [/^\/api\/admin\/activities$/, /^\/api\/admin\/stats$/, /^\/api\/admin\/replay-requests(?:\/|$)/]],
+  ['schedule', [/^\/api\/admin\/schedule(?:\/|$)/, /^\/api\/admin\/songs\/mark-played$/, /^\/api\/admin\/play-times(?:\/|$)/, /^\/api\/admin\/semesters(?:\/|$)/, /^\/api\/admin\/replay-requests(?:\/|$)/]],
   ['songs', [/^\/api\/admin\/songs(?:\/|$)/]],
   ['users', [/^\/api\/admin\/users(?:\/|$)/]],
   ['grade-class', [/^\/api\/admin\/grade-class(?:\/|$)/]],
@@ -107,7 +111,7 @@ export const ADMIN_PAGE_ROUTES: ReadonlyArray<readonly [string, RegExp[]]> = [
   ['blacklist', [/^\/api\/admin\/blacklist(?:\/|$)/, /^\/api\/admin\/ban-ip$/, /^\/api\/admin\/permanent-bans(?:\/|$)/]],
   ['site-config', [/^\/api\/admin\/system-settings(?:\/|$)/, /^\/api\/admin\/geo-lock(?:\/|$)/, /^\/api\/admin\/trusted-ips(?:\/|$)/]],
   ['api-keys', [/^\/api\/admin\/api-keys(?:\/|$)/]],
-  ['data-analysis', []],
+  ['data-analysis', [/^\/api\/admin\/stats(?:\/|$)/]],
   ['card-codes', [/^\/api\/admin\/card-codes(?:\/|$)/]],
   ['music-source', [/^\/api\/admin\/music-source-plugins(?:\/|$)/]],
   ['review-notes', [/^\/api\/admin\/review\/notes(?:\/|$)/]],

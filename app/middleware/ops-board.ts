@@ -1,4 +1,5 @@
 import { useAuth } from '~/composables/useAuth'
+import { CONFIGURABLE_ROLES } from '~/types/rolePages'
 
 // 运维看板可见性：SUPER_ADMIN 恒可见；可配置角色（ADMIN/SONG_ADMIN/BROADCASTER/
 // REVIEWER）按超管在「角色权限」页配置的生效页面（effectivePages 含 ops-board）
@@ -7,7 +8,6 @@ import { useAuth } from '~/composables/useAuth'
 // 注意：app/plugins/auth.server.ts 已停用，SSR 阶段 useState('user') 为空，
 // 因此服务端不做重定向，交由客户端 initAuth() 守卫 + API 鉴权双重把关，
 // 写法与 app/middleware/auth.global.ts 一致。
-const CONFIGURABLE_ROLES = ['ADMIN', 'SONG_ADMIN', 'BROADCASTER', 'REVIEWER']
 
 export default defineNuxtRouteMiddleware(async () => {
   const { user, isAuthenticated, initAuth } = useAuth()
