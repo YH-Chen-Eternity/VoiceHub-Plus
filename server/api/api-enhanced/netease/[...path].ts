@@ -218,7 +218,7 @@ export default defineEventHandler(async (event) => {
     pickRawValue(rawBody, 'key') ||
     (typeof params.key === 'string' ? params.key : '')
 
-  // 首尔机房出口会被网易云判为海外，登录与账号接口直接失败；统一改写 X-Real-IP。
+  // 境外出口会被网易云判为海外，登录与账号接口直接失败；统一改写 X-Real-IP。
   // 客户端传入的 realIP 一律忽略，避免该代理变成任意 IP 伪造入口。
   if (isNeteaseRealIpEnabled()) {
     params.realIP = resolveNeteaseRealIp(buildRealIpSeed(endpointPath, qrKey, cookieText))

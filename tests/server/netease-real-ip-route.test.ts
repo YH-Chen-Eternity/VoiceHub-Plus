@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { isGuangdongIp } from '../../server/utils/neteaseRealIp.ts'
 
 /**
- * 运行真实的网易云代理路由：证明首尔机房场景下
+ * 运行真实的网易云代理路由：证明境外部署场景下
  * - 所有请求都注入广东 realIP，客户端传入的 realIP 被忽略；
  * - 同一次扫码的 key/create/check 使用同一出口 IP；
  * - 同一账号（MUSIC_U）使用同一出口 IP；
