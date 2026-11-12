@@ -6,6 +6,7 @@ import { communityComments, communityPosts, notifications } from '~/drizzle/sche
 import {
   assertCommunityNotMuted,
   getReviewableBoardIds,
+  isCommunityRateLimitExempt,
   isCommunityReviewer,
   requireCommunityUser,
   requireCommunityEnabled
@@ -35,23 +36,26 @@ export default defineEventHandler(async (event) => {
   const settings = await requireCommunityEnabled()
   await assertCommunityNotMuted(user.id)
 
-  // 按用户限流：评论同样会触发付费文本审核
-  const minuteLimit = await checkDistributedRateLimit(
-    `community_comment:user:${user.id}`,
-    20,
-    60 * 1000
-  )
-  const dayLimit = await checkDistributedRateLimit(
-    `community_comment_day:user:${user.id}`,
-    200,
-    24 * 60 * 60 * 1000
-  )
-  if (!minuteLimit.isAllowed || !dayLimit.isAllowed) {
-    throw createApiError(
-      429,
-      SERVER_ERROR_CODES.COMMON_RATE_LIMITED_SECONDS,
-      '评论过于频繁，请稍后重试'
+  // 发稿员（CONTRIBUTOR）豁免频率限流；禁言/审核/内容校验一律保留
+  if (!isCommunityRateLimitExempt(user)) {
+    // 按用户限流：评论同样会触发付费文本审核
+    const minuteLimit = await checkDistributedRateLimit(
+      `community_comment:user:${user.id}`,
+      20,
+      60 * 1000
     )
+    const dayLimit = await checkDistributedRateLimit(
+      `community_comment_day:user:${user.id}`,
+      200,
+      24 * 60 * 60 * 1000
+    )
+    if (!minuteLimit.isAllowed || !dayLimit.isAllowed) {
+      throw createApiError(
+        429,
+        SERVER_ERROR_CODES.COMMON_RATE_LIMITED_SECONDS,
+        '评论过于频繁，请稍后重试'
+      )
+    }
   }
 
   const postId = Number(getRouterParam(event, 'id'))

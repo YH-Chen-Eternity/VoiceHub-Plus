@@ -33,6 +33,8 @@ type LoadOptions = {
   sort?: 'latest' | 'hot'
   /** 查看者是否管理员：管理员可看到影子封禁作者的内容 */
   viewerIsAdmin?: boolean
+  /** 按帖子的显示模式筛选（semi/real/anon），用于后台审核队列 */
+  nameMode?: string
 }
 
 export function serializeSong(
@@ -92,6 +94,7 @@ export async function loadCommunityPosts(options: LoadOptions) {
     )
   }
   if (options.authorId) conditions.push(eq(communityPosts.authorId, options.authorId))
+  if (options.nameMode) conditions.push(eq(communityPosts.nameMode, options.nameMode))
   if (options.beforeId) conditions.push(lt(communityPosts.id, options.beforeId))
   if (options.q) {
     const pattern = `%${String(options.q).replace(/[\\%_]/g, (char) => `\\${char}`)}%`
@@ -131,6 +134,7 @@ export async function loadCommunityPosts(options: LoadOptions) {
       boardName: communityBoards.name,
       content: communityPosts.content,
       status: communityPosts.status,
+      nameMode: communityPosts.nameMode,
       moderationLabel: communityPosts.moderationLabel,
       moderationDetail: communityPosts.moderationDetail,
       reviewNote: communityPosts.reviewNote,
@@ -246,13 +250,15 @@ export async function loadCommunityPosts(options: LoadOptions) {
       status: row.status,
       author: {
         id: row.authorId,
+        nameMode: row.nameMode,
         ...buildCommunityIdentity(
           { id: row.authorId, name: row.authorName, grade: row.authorGrade, class: row.authorClass },
           row.titleName,
           viewer,
-          identityOptions
+          { ...(identityOptions || {}), nameMode: row.nameMode }
         )
       },
+      nameMode: row.nameMode,
       song: serializeSong(song, viewerId, activeSemester, blacklistedSongIds),
       images: imagesByPost.get(row.id) || [],
       commentCount: Number(row.commentCount || 0),

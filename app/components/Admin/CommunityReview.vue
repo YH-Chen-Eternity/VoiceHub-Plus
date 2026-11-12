@@ -47,6 +47,9 @@
       <div class="w-48">
         <CustomSelect v-model="boardId" :options="boardOptions" :label="t.boardFilter" />
       </div>
+      <div class="w-48">
+        <CustomSelect v-model="nameMode" :options="nameModeOptions" :label="nm.label" />
+      </div>
     </div>
 
     <div v-if="loading" class="flex items-center justify-center gap-2 py-16 text-xs text-text-tertiary">
@@ -81,6 +84,12 @@
               {{ post.author.title }}
             </span>
             <span class="rounded bg-bg-tertiary px-1.5 py-0.5 text-text-tertiary">{{ post.board.name }}</span>
+            <span
+              v-if="postNameMode(post)"
+              class="rounded-full border border-primary-20 bg-primary-10 px-2 py-0.5 text-[10px] font-bold text-primary"
+            >
+              {{ nameModeLabel(post) }}
+            </span>
             <span class="text-text-disabled">{{ formatDate(post.createdAt) }}</span>
           </div>
           <span class="rounded-full px-2 py-0.5 text-[10px] font-bold" :class="statusClass(post.status)">
@@ -122,6 +131,14 @@
         >
           <ShieldAlert :size="14" class="mt-0.5 shrink-0" />
           <span class="break-all">{{ t.moderationHit }}：{{ post.moderationLabel }}</span>
+        </div>
+
+        <div
+          v-if="postNameMode(post) === 'anon' && post.status === 'PENDING'"
+          class="mt-3 flex items-start gap-2 rounded-xl border border-warning-20 bg-warning-10 p-3 text-[11px] text-warning"
+        >
+          <ShieldAlert :size="14" class="mt-0.5 shrink-0" />
+          <span>{{ nm.hint || t.statusPending }}</span>
         </div>
 
         <div v-if="post.reviewNote" class="mt-3 rounded-xl bg-bg-tertiary-40 p-3 text-[11px] text-text-tertiary">
@@ -210,6 +227,7 @@ const STATUSES = ['PENDING', 'APPROVED', 'REJECTED', 'BLOCKED']
 
 const status = ref('PENDING')
 const boardId = ref(0)
+const nameMode = ref('')
 const boards = ref([])
 const posts = ref([])
 const stats = reactive({ PENDING: 0, APPROVED: 0, REJECTED: 0, BLOCKED: 0 })
@@ -241,6 +259,16 @@ const boardOptions = computed(() => [
   ...boards.value.map((board) => ({ label: board.name, value: board.id }))
 ])
 
+const nm = computed(() => communityLocale.value?.nameMode || {})
+const nameModeOptions = computed(() => [
+  { label: t.value.all || '全部', value: '' },
+  { label: nm.value.real || '实名', value: 'real' },
+  { label: nm.value.semi || '半实名', value: 'semi' },
+  { label: nm.value.anon || '匿名', value: 'anon' }
+])
+const postNameMode = (post) => String(post?.nameMode || post?.author?.nameMode || '')
+const nameModeLabel = (post) => nm.value[postNameMode(post)] || postNameMode(post)
+
 const statusLabel = (value) => t.value[`status${value.charAt(0)}${value.slice(1).toLowerCase()}`] || value
 
 const statusClass = (value) => {
@@ -271,6 +299,7 @@ const load = async () => {
   try {
     const params = new URLSearchParams({ status: status.value })
     if (boardId.value) params.set('boardId', String(boardId.value))
+    if (nameMode.value) params.set('nameMode', nameMode.value)
     const data = await $fetch(`/api/community/review/posts?${params.toString()}`)
     posts.value = data?.posts || []
     boards.value = data?.boards || []
@@ -360,7 +389,7 @@ const runConfirm = async (reason) => {
   }
 }
 
-watch(boardId, () => {
+watch([boardId, nameMode], () => {
   if (!loading.value) load()
 })
 

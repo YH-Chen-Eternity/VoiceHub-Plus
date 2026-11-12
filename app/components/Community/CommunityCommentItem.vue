@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { Flag, Heart, Trash2 } from '@lucide/vue'
 import { useLocale } from '~/utils/locale'
+import { formatDateOnly } from '~/utils/timeUtils'
 
 type AnyRecord = Record<string, any>
 
@@ -52,21 +53,6 @@ function statusText(value: string) {
   return map[value] || value
 }
 
-function formatTime(value: string | Date | null | undefined) {
-  if (!value) return ''
-  const date = value instanceof Date ? value : new Date(value)
-  if (Number.isNaN(date.getTime())) return ''
-  const diff = Date.now() - date.getTime()
-  const minute = 60 * 1000
-  const hour = 60 * minute
-  const day = 24 * hour
-  if (diff < minute) return t.value.justNow || '刚刚'
-  if (diff < hour) return `${Math.floor(diff / minute)}${t.value.minutesAgo || '分钟前'}`
-  if (diff < day) return `${Math.floor(diff / hour)}${t.value.hoursAgo || '小时前'}`
-  if (diff < 30 * day) return `${Math.floor(diff / day)}${t.value.daysAgo || '天前'}`
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
-}
 </script>
 
 <template>
@@ -129,7 +115,7 @@ function formatTime(value: string | Date | null | undefined) {
     <p v-if="comment.reviewNote" class="comment-note">
       {{ t.reviewNoteLabel }}：{{ comment.reviewNote }}
     </p>
-    <span class="comment-time">{{ formatTime(comment.createdAt) }}</span>
+    <span class="comment-time">{{ formatDateOnly(comment.createdAt) }}</span>
 
     <div
       v-if="comment.replies && comment.replies.length"

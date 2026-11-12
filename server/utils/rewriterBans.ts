@@ -7,6 +7,7 @@
  */
 
 import { createApiError } from './apiError'
+import type { EdgeConfig } from '~~/server/config/edgeRules'
 
 export interface RewriterBansSnapshot {
   permanent: { ip: string; at: number; count: number; detail: string }[]
@@ -106,4 +107,17 @@ export async function updateTrustedIps(action: 'add' | 'remove', ip: string): Pr
     body: { action, ip }
   })
   return { ips: Array.isArray(result?.ips) ? result.ips : [], removed: result?.removed }
+}
+
+// ---- 边缘层动态配置：观察模式 / 逐规则开关 / 阈值 ----
+export async function getEdgeConfig(): Promise<EdgeConfig> {
+  const result = await callRewriter<{ config?: EdgeConfig }>('/__internal/config')
+  return result?.config as EdgeConfig
+}
+
+export async function setEdgeConfig(cfg: EdgeConfig): Promise<void> {
+  await callRewriter('/__internal/config', {
+    method: 'POST',
+    body: cfg as unknown as Record<string, unknown>
+  })
 }

@@ -776,6 +776,8 @@ export const pages = {
       'card-codes': 'Card Codes',
       'system-board': 'System Board',
       'attack-logs': 'Attack Logs',
+      'edge-protection': 'Edge Protection',
+      'ops-notification': 'Ops Notifications',
       'community-review': 'Community Review',
       'community-boards': 'Community Boards',
       'community-titles': 'Community Titles',
@@ -784,6 +786,7 @@ export const pages = {
     },
     roles: {
       USER: 'User',
+      CONTRIBUTOR: 'Contributor',
       SONG_ADMIN: 'Song Administrator',
       BROADCASTER: 'Broadcaster',
       REVIEWER: 'Post Reviewer',
@@ -973,6 +976,21 @@ export const pages = {
     titleLoading: 'Loading'
   },
   community: {
+    // Post author display mode (admins may disable individual modes in community settings)
+    nameMode: {
+      label: 'Post identity',
+      hint: 'Choose how others see your name; admins always see class and full name',
+      semi: 'Semi-real (middle character hidden)',
+      real: 'Real name (full name)',
+      anon: 'Anonymous (first character only)',
+      anonPendingHint: 'Anonymous posts are published only after review',
+      disabledHint: 'This display mode has been disabled by the administrator'
+    },
+    allowSemi: 'Allow semi-real posts',
+    allowRealname: 'Allow real-name posts',
+    allowAnonymous: 'Allow anonymous posts',
+    nameModeTitle: 'Post identity display',
+    nameModeSettingsHint: 'Disabled modes cannot be selected; anonymous posts always require review',
     tab: 'Community',
     title: 'Echo Community',
     subtitle: 'Leave the words you want to say on campus',
@@ -2602,10 +2620,13 @@ export const admin = {
       communityTitles: 'Community Titles',
       communityUsers: 'Community Users',
       communityArchive: 'Community Archive',
-      communitySettings: 'Community Settings'
+      communitySettings: 'Community Settings',
+      edgeProtection: 'Edge Protection',
+      opsNotification: 'Ops Notifications'
     },
     roles: {
       USER: 'User',
+      CONTRIBUTOR: 'Contributor',
       SONG_ADMIN: 'Song Admin',
       BROADCASTER: 'Broadcaster',
       REVIEWER: 'Post Reviewer',
@@ -5058,6 +5079,8 @@ export const admin = {
     },
     roles: {
       user: 'User',
+      contributor: 'Contributor',
+      CONTRIBUTOR: 'Contributor',
       songAdmin: 'Song Admin',
       broadcaster: 'Broadcaster',
       reviewer: 'Reviewer',
@@ -5719,6 +5742,70 @@ export const admin = {
     copied: 'Copied to clipboard',
     copyFailed: 'Copy failed',
     expiresAtText: (date: string) => `Expires: ${date}`
+  },
+  communitySettings: {
+    allowSemi: 'Allow semi-real posts',
+    allowRealname: 'Allow real-name posts',
+    allowAnonymous: 'Allow anonymous posts',
+    nameModeTitle: 'Post identity display',
+    nameModeHint: 'Disabled modes cannot be selected; anonymous posts always require review'
+  },
+  edgeProtection: {
+    title: 'Edge Protection',
+    subtitle: 'Configure observe mode, per-rule switches and rate limits of the VoiceHub edge layer',
+    loading: 'Loading configuration...',
+    loadFailed: 'Failed to load configuration',
+    save: 'Save',
+    saving: 'Saving...',
+    saved: 'Configuration saved',
+    saveFailed: 'Failed to save',
+    reset: 'Restore defaults',
+    confirmReset: 'Restore default configuration? Current changes will be lost.',
+    unsaved: 'You have unsaved changes',
+    observeMode: 'Global observe mode',
+    observeModeOn: 'Observe mode is ON: hits are logged only, nothing is blocked. Turn it off soon.',
+    observeModeHint: 'When on, script/bot, brute-force and geo rules only write attack logs instead of returning 403/429',
+    confirmObserve: 'Toggle global observe mode?',
+    enabled: 'Enabled',
+    disabled: 'Disabled',
+    hits24h: 'Hits (24h)',
+    lastHit: 'Last hit',
+    never: 'Never',
+    groupScript: 'Scripts & crawlers',
+    groupBrute: 'Brute force & enumeration',
+    groupGeo: 'Geo & bot',
+    groupRate: 'Rate limits',
+    ruleScript: 'Script browsing block',
+    ruleBruteForce: 'Credential stuffing detection',
+    ruleEnumeration: 'Bulk enumeration detection',
+    ruleBanned: 'Permanent bans',
+    ruleRegion: 'Geo gate',
+    ruleBot: 'Bot score',
+    ruleSameOrigin: 'Same-origin gate',
+    rateSection: 'Rate thresholds',
+    rateHint: 'Leave empty or 0 to use the default; out-of-range values are clamped',
+    builtinSection: 'Existing controls',
+    builtinHint: 'Geo gate, banned IPs, trusted IPs and bot scores use existing APIs and apply immediately',
+    dangerHint: 'Disabling rules weakens protection; real attacks are not blocked in observe mode'
+  },
+  opsNotification: {
+    title: 'Ops Notifications',
+    subtitle: 'Configure alert recipients; the sender uses the in-app SMTP settings',
+    recipients: 'Recipient emails',
+    recipientsHint: 'One per line or comma-separated, up to 10; empty falls back to VH_MAIL_TO on the server',
+    recipientsPlaceholder: 'ops@example.com',
+    invalidEmail: 'Invalid email address',
+    tooMany: 'At most 10 recipients',
+    sender: 'Sender',
+    senderFromSmtp: 'From in-app SMTP settings',
+    smtpNotConfigured: 'In-app SMTP is not configured; alert emails cannot be sent. Set it up in Push Configuration first.',
+    goSmtp: 'Go to Push Configuration',
+    save: 'Save',
+    saving: 'Saving...',
+    saved: 'Saved',
+    saveFailed: 'Failed to save',
+    loadFailed: 'Failed to load',
+    tatHint: 'Ops scripts are scheduled by Tencent Cloud Automation Tools (remote SHELL + Cron); alerts are sent via an internal API through the in-app SMTP.'
   }
 } as const
 

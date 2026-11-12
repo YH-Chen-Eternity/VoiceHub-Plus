@@ -575,6 +575,13 @@
       "when": 1794399185756,
       "tag": "20261111121305_community-board-guest-view",
       "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1794446114194,
+      "tag": "20261112011514_vh-20261112-features",
+      "breakpoints": true
     }
   ]
 }

@@ -443,7 +443,7 @@
 
             <!-- 投稿时间和撤销按钮 -->
             <div class="submission-footer">
-              <div class="submission-time">{{ locale.requestedAt }}{{ song.requestedAt }}</div>
+              <div class="submission-time">{{ locale.requestedAt }}{{ formatDateOnly(song.requestedAt) }}</div>
 
               <!-- 如果是自己的投稿或联合投稿，显示撤回/退出按钮 -->
               <button
@@ -599,6 +599,7 @@ import { getMusicUrl as resolveMusicUrl } from '~/utils/musicUrl'
 import { useLocale } from '~/utils/locale'
 import { useNewUi } from '~/composables/useNewUi'
 import { useThemeImage } from '~/composables/useThemeImage'
+import { formatDateOnly } from '~/utils/timeUtils'
 
 import dayjs from 'dayjs'
 import utc from 'dayjs/plugin/utc'

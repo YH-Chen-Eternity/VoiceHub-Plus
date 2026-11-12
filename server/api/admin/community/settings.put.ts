@@ -24,6 +24,9 @@ export default defineEventHandler(async (event) => {
   if (typeof body?.enabled === 'boolean') patch.enabled = body.enabled
   if (typeof body?.allowImages === 'boolean') patch.allowImages = body.allowImages
   if (typeof body?.moderationEnabled === 'boolean') patch.moderationEnabled = body.moderationEnabled
+  if (typeof body?.allowSemi === 'boolean') patch.allowSemi = body.allowSemi
+  if (typeof body?.allowRealname === 'boolean') patch.allowRealname = body.allowRealname
+  if (typeof body?.allowAnonymous === 'boolean') patch.allowAnonymous = body.allowAnonymous
   if (Object.prototype.hasOwnProperty.call(body || {}, 'maxImages')) {
     patch.maxImages = clampInt(body.maxImages, 1, 9, current.maxImages)
   }
@@ -113,6 +116,9 @@ export default defineEventHandler(async (event) => {
       maxCommentLength: updated?.maxCommentLength,
       moderationEnabled: updated?.moderationEnabled,
       moderationHitAction: updated?.moderationHitAction,
+      allowSemi: updated?.allowSemi,
+      allowRealname: updated?.allowRealname,
+      allowAnonymous: updated?.allowAnonymous,
       aliyunEndpoint: updated?.aliyunEndpoint,
       aliyunRegionId: updated?.aliyunRegionId,
       aliyunTextService: updated?.aliyunTextService,

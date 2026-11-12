@@ -28,6 +28,7 @@ import {
   sanitizeDownloadFilename
 } from '~~/server/utils/imageSecurity'
 import { readMediaFile } from '~~/server/utils/mediaStorage'
+import { recordTraffic } from '~~/server/utils/trafficMeter'
 
 /**
  * 图片读取端点：唯一对外吐字节的出口，私有目录/CND 都无法直连。
@@ -112,5 +113,11 @@ export default defineEventHandler(async (event) => {
     // 公开图按完整 URL（含 variant）缓存；私有/下载响应按 Cookie 区分，绝不进共享缓存
     'Vary': cacheable ? 'Accept-Encoding' : 'Cookie'
   })
+
+  // 出站流量计量（供运维看板「今日/本月消耗 + 文件流量排名」使用）。
+  // fire-and-forget：不 await、不改变响应头/状态码/缓存策略；函数内部吞掉所有异常。
+  // 只在真正吐出字节的成功路径计数，避免 404/415 被计入。
+  void recordTraffic(data.length, `${row.filename || 'unknown'}#${id}`)
+
   return data
 })

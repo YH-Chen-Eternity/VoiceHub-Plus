@@ -756,6 +756,8 @@ export const pages = {
       announcement: '公告栏编辑',
       'system-board': '系统看板',
       'attack-logs': '攻击日志',
+      'edge-protection': '边缘防护',
+      'ops-notification': '运维通知',
       'community-review': '社区帖子审核',
       'community-boards': '社区板块',
       'community-titles': '社区称号',
@@ -764,6 +766,7 @@ export const pages = {
     },
     roles: {
       USER: '普通用户',
+      CONTRIBUTOR: '发稿员',
       SONG_ADMIN: '歌曲管理员',
       BROADCASTER: '放歌员',
       REVIEWER: '审帖员',
@@ -952,6 +955,21 @@ export const pages = {
     titleLoading: '加载中'
   },
   community: {
+    // 发帖身份显示模式（管理员可在社区配置里关闭其中若干项）
+    nameMode: {
+      label: '发帖身份',
+      hint: '选择他人看到的姓名显示方式；管理员始终能看到班级与全名',
+      semi: '半实名（隐去中间字）',
+      real: '实名（显示全名）',
+      anon: '匿名（只显示第一个字）',
+      anonPendingHint: '匿名帖需要先通过审核才会公开',
+      disabledHint: '该显示模式已被管理员关闭'
+    },
+    allowSemi: '允许半实名发帖',
+    allowRealname: '允许实名发帖',
+    allowAnonymous: '允许匿名发帖',
+    nameModeTitle: '发帖身份显示',
+    nameModeSettingsHint: '关闭后用户发帖时不可选该模式；匿名帖始终先审后发',
     tab: '社区',
     title: '回声社区',
     subtitle: '把想说的话，留在校园里',
@@ -2550,10 +2568,13 @@ export const admin = {
       communityTitles: '社区称号',
       communityUsers: '社区用户',
       communityArchive: '社区归档记录',
-      communitySettings: '社区配置'
+      communitySettings: '社区配置',
+      edgeProtection: '边缘防护',
+      opsNotification: '运维通知'
     },
     roles: {
       USER: '普通用户',
+      CONTRIBUTOR: '发稿员',
       SONG_ADMIN: '歌曲管理员',
       BROADCASTER: '放歌员',
       REVIEWER: '审帖员',
@@ -4918,6 +4939,8 @@ export const admin = {
     },
     roles: {
       user: '普通用户',
+      contributor: '发稿员',
+      CONTRIBUTOR: '发稿员',
       songAdmin: '歌曲管理员',
       broadcaster: '放歌员',
       reviewer: '审帖员',
@@ -5561,6 +5584,70 @@ export const admin = {
     copied: '已复制到剪贴板',
     copyFailed: '复制失败',
     expiresAtText: (date: string) => `到期: ${date}`
+  },
+  communitySettings: {
+    allowSemi: '允许半实名发帖',
+    allowRealname: '允许实名发帖',
+    allowAnonymous: '允许匿名发帖',
+    nameModeTitle: '发帖身份显示',
+    nameModeHint: '关闭后用户发帖时不可选该模式；匿名帖始终先审后发'
+  },
+  edgeProtection: {
+    title: '边缘防护',
+    subtitle: '配置 VoiceHub 自研边缘层的观察模式、逐条拦截规则与频率阈值',
+    loading: '正在加载配置...',
+    loadFailed: '加载配置失败',
+    save: '保存配置',
+    saving: '正在保存...',
+    saved: '配置已保存',
+    saveFailed: '保存失败',
+    reset: '恢复默认',
+    confirmReset: '确定恢复默认配置吗？当前改动将丢失。',
+    unsaved: '有未保存的修改',
+    observeMode: '全站观察模式',
+    observeModeOn: '观察模式已开启：所有命中仅记录、不会拦截，请尽快关闭',
+    observeModeHint: '开启后脚本浏览、撞库、地域闸等规则只写攻击日志，不返回 403/429',
+    confirmObserve: '确定切换全站观察模式吗？',
+    enabled: '已启用',
+    disabled: '已关闭',
+    hits24h: '近 24 小时命中',
+    lastHit: '最近命中',
+    never: '无',
+    groupScript: '脚本与爬虫',
+    groupBrute: '暴力破解与枚举',
+    groupGeo: '地域与 Bot',
+    groupRate: '频率限制',
+    ruleScript: '脚本浏览拦截',
+    ruleBruteForce: '撞库登录检测',
+    ruleEnumeration: '批量枚举检测',
+    ruleBanned: '永久封禁',
+    ruleRegion: '地域闸',
+    ruleBot: 'Bot 评分',
+    ruleSameOrigin: '同源校验',
+    rateSection: '频率阈值',
+    rateHint: '留空或 0 表示使用默认值；超出范围会自动校正',
+    builtinSection: '并入的现有配置',
+    builtinHint: '地域闸、封禁 IP、可信 IP、Bot 评分沿用原有接口，修改后立即生效',
+    dangerHint: '关闭规则会降低防护能力；观察模式下真实攻击不会被拦截'
+  },
+  opsNotification: {
+    title: '运维通知',
+    subtitle: '配置运维告警邮件的收件人；发件人复用站内 SMTP 设置',
+    recipients: '收件人邮箱',
+    recipientsHint: '每行或用逗号分隔，最多 10 个；留空则回落服务器 automation.env 的 VH_MAIL_TO',
+    recipientsPlaceholder: 'ops@example.com',
+    invalidEmail: '邮箱格式不正确',
+    tooMany: '最多配置 10 个收件人',
+    sender: '发件人',
+    senderFromSmtp: '来自站内 SMTP 设置',
+    smtpNotConfigured: '站内 SMTP 尚未配置，告警邮件无法发送。请先到「推送配置」完成设置。',
+    goSmtp: '前往推送配置',
+    save: '保存',
+    saving: '正在保存...',
+    saved: '已保存',
+    saveFailed: '保存失败',
+    loadFailed: '加载失败',
+    tatHint: '运维脚本由腾讯云自动化助手（远程 SHELL + Cron 定时调度）触发，告警经应用内部接口交站内 SMTP 发出。'
   }
 } as const
 

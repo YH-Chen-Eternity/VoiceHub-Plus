@@ -64,7 +64,8 @@ export default defineEventHandler(async (event) => {
       boardId: communityPosts.boardId,
       status: communityPosts.status,
       authorId: communityPosts.authorId,
-      deletedAt: communityPosts.deletedAt
+      deletedAt: communityPosts.deletedAt,
+      nameMode: communityPosts.nameMode
     })
     .from(communityPosts)
     .where(eq(communityPosts.id, postId))
@@ -138,11 +139,13 @@ export default defineEventHandler(async (event) => {
   const mentionUserByToken = await resolveCommunityMentionUsers(mentionTokens, user)
 
   const rowById = new Map(rows.map((row) => [row.id, row]))
+  // 评论作者署名跟随所属帖子的显示模式；管理员/审帖员/本人仍由 buildCommunityIdentity 保留全名
   const identityOf = (row: (typeof rows)[number]) =>
     buildCommunityIdentity(
       { id: row.authorId, name: row.authorName, grade: row.authorGrade, class: row.authorClass },
       row.titleName,
-      user
+      user,
+      { nameMode: post.nameMode }
     )
 
   const comments: CommunityCommentPayload[] = rows.map((row) => {

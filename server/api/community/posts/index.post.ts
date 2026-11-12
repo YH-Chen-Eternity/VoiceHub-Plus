@@ -6,6 +6,7 @@ import { communityPostImages, communityPosts, mediaAssets, songs } from '~/drizz
 import {
   assertCommunityNotMuted,
   getBoardOrThrow,
+  isCommunityRateLimitExempt,
   requireCommunityUser,
   requireCommunityEnabled
 } from '~~/server/utils/community'
@@ -55,26 +56,37 @@ export default defineEventHandler(async (event) => {
     throw createApiError(403, 'COMMUNITY_ACCOUNT_UNAVAILABLE', '账号状态异常，无法发帖')
   }
 
-  // 按用户限流：审核链路会调用付费接口，不能由单个账号无限放大
-  const minuteLimit = await checkDistributedRateLimit(
-    `community_post:user:${user.id}`,
-    10,
-    60 * 1000
-  )
-  const dayLimit = await checkDistributedRateLimit(
-    `community_post_day:user:${user.id}`,
-    50,
-    24 * 60 * 60 * 1000
-  )
-  if (!minuteLimit.isAllowed || !dayLimit.isAllowed) {
-    throw createApiError(
-      429,
-      SERVER_ERROR_CODES.COMMON_RATE_LIMITED_SECONDS,
-      '发帖过于频繁，请稍后重试'
+  // 发稿员（CONTRIBUTOR）豁免频率限流；禁言/查重/审核/内容校验一律保留
+  if (!isCommunityRateLimitExempt(user)) {
+    // 按用户限流：审核链路会调用付费接口，不能由单个账号无限放大
+    const minuteLimit = await checkDistributedRateLimit(
+      `community_post:user:${user.id}`,
+      10,
+      60 * 1000
     )
+    const dayLimit = await checkDistributedRateLimit(
+      `community_post_day:user:${user.id}`,
+      50,
+      24 * 60 * 60 * 1000
+    )
+    if (!minuteLimit.isAllowed || !dayLimit.isAllowed) {
+      throw createApiError(
+        429,
+        SERVER_ERROR_CODES.COMMON_RATE_LIMITED_SECONDS,
+        '发帖过于频繁，请稍后重试'
+      )
+    }
   }
 
   const body = await readBody(event)
+  // 显示模式：semi(默认/半实名) / real(实名) / anon(匿名)。
+  // 校验后台三开关，非法值或对应开关关闭一律回退 semi；anon 帖强制走人工审核。
+  const requestedNameMode = String(body?.nameMode ?? '').trim()
+  let nameMode = 'semi'
+  if (requestedNameMode === 'real' && settings.allowRealname !== false) nameMode = 'real'
+  else if (requestedNameMode === 'anon' && settings.allowAnonymous !== false) nameMode = 'anon'
+  else if (requestedNameMode === 'semi' && settings.allowSemi !== false) nameMode = 'semi'
+
   const boardId = Number(body?.boardId)
   if (!Number.isInteger(boardId) || boardId <= 0) {
     throw createApiError(400, 'COMMUNITY_BOARD_REQUIRED', '请选择板块')
@@ -246,6 +258,9 @@ export default defineEventHandler(async (event) => {
     if (!needsManualReview) status = 'APPROVED'
   }
 
+  // 匿名帖强制人工审核：忽略自动放行（免审）路径，但保留 BLOCKED 等安全拦截结果
+  if (nameMode === 'anon' && status === 'APPROVED') status = 'PENDING'
+
   const created = await db.transaction(async (tx) => {
     const [post] = await tx
       .insert(communityPosts)
@@ -255,6 +270,7 @@ export default defineEventHandler(async (event) => {
         content,
         contentHash,
         songId,
+        nameMode,
         status,
         moderationLabel,
         moderationDetail
@@ -280,5 +296,5 @@ export default defineEventHandler(async (event) => {
         ? '发布成功'
         : '发布成功，审核通过后会出现在回声社区'
 
-  return { success: true, id: created.id, status: created.status, message }
+  return { success: true, id: created.id, status: created.status, nameMode, message }
 })
