@@ -75,14 +75,74 @@ export const sanitizeRolePages = (input: unknown): Record<string, string[]> => {
   return out
 }
 
+/**
+ * 配置结构版本 & 各版本新增的可配置页面。
+ *
+ * 背景：rolePages 一旦保存就是「全量快照」，后续版本新增的页面 id 不在快照里，
+ * 会被当成「超管未开通」而静默吞掉（运维看板 ops-board 即如此：上线前保存的
+ * ADMIN 快照里没有该 id，导致 ADMIN 看不到新看板、端点 403）。
+ * 因此新增页面时必须登记到对应版本，读取时对版本更早的快照做**增量补齐**
+ * （仅补该角色默认就含的页面）；超管在配置页重新保存后版本升到当前值，
+ * 之后再取消勾选不会被自动补回。
+ *
+ * 新增可配置页面的三处同步（缺一处都会静默失效）：
+ *   1) CONFIGURABLE_PAGE_IDS 加入页面 id；
+ *   2) 需要默认开通的角色补进 DEFAULT_ROLE_PAGES；
+ *   3) PAGES_ADDED_IN_VERSION 的**下一个**版本号里登记该 id，并把
+ *      ROLE_PAGES_SCHEMA_VERSION 加 1（否则已保存的老快照看不到新页面）。
+ */
+export const ROLE_PAGES_SCHEMA_VERSION = 2
+export const PAGES_ADDED_IN_VERSION: Record<number, readonly string[]> = {
+  2: ['ops-board']
+}
+
+/**
+ * rolePages 的存储形态：角色键 → 页面 id 数组，外加可选 `__version` 结构版本号。
+ * 与 app/drizzle/schema.ts 的 `SystemSettings.rolePages` jsonb 列类型保持一致
+ * （Record<string, string[] | number>），否则写入数字版本号会与列类型声明冲突。
+ */
+export type RolePagesConfig = Record<string, string[] | number>
+
+/** 按快照版本补齐该版本新增的页面（只补角色默认就含的，显式取消的不动）。 */
+const applyVersionAdditions = (role: ConfigurableRole, pages: string[], rawVersion: unknown): string[] => {
+  const storedVersion = typeof rawVersion === 'number' ? rawVersion : Number(rawVersion ?? 1)
+  const from = Number.isFinite(storedVersion) ? Math.max(1, Math.floor(storedVersion)) : 1
+  if (from >= ROLE_PAGES_SCHEMA_VERSION) return pages
+  const defaults = DEFAULT_ROLE_PAGES[role] || []
+  const out = [...pages]
+  for (let v = from + 1; v <= ROLE_PAGES_SCHEMA_VERSION; v++) {
+    for (const pid of PAGES_ADDED_IN_VERSION[v] || []) {
+      if (defaults.includes(pid) && !out.includes(pid)) out.push(pid)
+    }
+  }
+  return out
+}
+
+/**
+ * 把存储快照规范化为「当前版本视图」：旧快照补入该版本新增且角色默认就含的页面。
+ * 仅用于回显（GET role-pages 给配置页渲染草稿），**不写库**；
+ * 运行时鉴权解析见 resolveEffectivePages（同一套补齐规则）。
+ */
+export const normalizeRolePagesConfig = (rolePages: RolePagesConfig | null | undefined): RolePagesConfig | null => {
+  if (!rolePages) return null
+  const out: RolePagesConfig = { ...rolePages }
+  for (const role of CONFIGURABLE_ROLES) {
+    const value = out[role]
+    if (!Array.isArray(value)) continue
+    out[role] = applyVersionAdditions(role, value, rolePages.__version)
+  }
+  return out
+}
+
 /** 计算某角色生效页面：配置含该角色键则用配置值，否则用内置默认。
  *  纵深防御：无论数据来源，一律过滤超管专属页面（防止绕过 API 直改库获得超管页）。 */
-export const resolveEffectivePages = (role: string, rolePages: Record<string, string[]> | null | undefined): string[] | null => {
+export const resolveEffectivePages = (role: string, rolePages: RolePagesConfig | null | undefined): string[] | null => {
   if (!(CONFIGURABLE_ROLES as readonly string[]).includes(role)) return null
   const configured = rolePages?.[role]
+  const defaults = DEFAULT_ROLE_PAGES[role as ConfigurableRole] || []
   const pages = Array.isArray(configured)
-    ? configured
-    : DEFAULT_ROLE_PAGES[role as ConfigurableRole] || []
+    ? applyVersionAdditions(role as ConfigurableRole, configured, rolePages?.__version)
+    : defaults
   return [...new Set(pages.filter((p) => !(SUPER_ADMIN_ONLY_PAGES as readonly string[]).includes(p)))]
 }
 

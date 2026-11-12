@@ -15,12 +15,13 @@
  */
 import { db } from '~/drizzle/db'
 import { systemSettings } from '~/drizzle/schema'
+import type { RolePagesConfig } from '~~/types/rolePages'
 
 const TTL_MS = 60_000
 
-let cache: { at: number; value: Record<string, string[]> | null } | null = null
+let cache: { at: number; value: RolePagesConfig | null } | null = null
 
-export async function getRolePagesCached(): Promise<Record<string, string[]> | null> {
+export async function getRolePagesCached(): Promise<RolePagesConfig | null> {
   if (cache && Date.now() - cache.at < TTL_MS) return cache.value
   const rows = await db
     .select({ rolePages: systemSettings.rolePages })

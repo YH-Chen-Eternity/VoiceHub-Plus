@@ -16,7 +16,7 @@ import { requireSuperAdmin } from '~~/server/utils/requireAdmin'
 import { createApiError } from '~~/server/utils/apiError'
 import { writeAdminAudit } from '~~/server/utils/adminAudit'
 import { setHeader } from 'h3'
-import { CONFIGURABLE_ROLES, sanitizeRolePages } from '~~/types/rolePages'
+import { CONFIGURABLE_ROLES, ROLE_PAGES_SCHEMA_VERSION, sanitizeRolePages, type RolePagesConfig } from '~~/types/rolePages'
 import { invalidateRolePagesCache } from '~~/server/utils/rolePagesSettings'
 
 export default defineEventHandler(async (event) => {
@@ -39,8 +39,14 @@ export default defineEventHandler(async (event) => {
     throw createApiError(500, 'ROLE_PAGES_NO_SETTINGS', '系统设置行不存在')
   }
 
-  const merged: Record<string, string[]> = { ...(rows[0].rolePages ?? {}) }
+  const merged: RolePagesConfig = { ...(rows[0].rolePages ?? {}) }
   const sanitizedIncoming = sanitizeRolePages(incoming)
+  // 审计用的前后对比：记录本次每个角色的页面增删，便于事后追溯「谁收回了什么」
+  const changes: Record<string, { before: string[] | null; after: string[] | null }> = {}
+  const beforePages = (role: string): string[] | null => {
+    const value = rows[0].rolePages?.[role]
+    return Array.isArray(value) ? value : null
+  }
   // 提交值必须是该角色的合法页面数组（sanitize 已剔除非法项；键存在但值被清空 = 显式禁用全部）
   for (const [role, value] of Object.entries(incoming as Record<string, unknown>)) {
     if (!(CONFIGURABLE_ROLES as readonly string[]).includes(role)) {
@@ -48,6 +54,7 @@ export default defineEventHandler(async (event) => {
     }
     // null = 恢复该角色内置默认（从存储中删除键）
     if (value === null) {
+      changes[role] = { before: beforePages(role), after: null }
       delete merged[role]
       continue
     }
@@ -58,8 +65,13 @@ export default defineEventHandler(async (event) => {
     if (!(role in sanitizedIncoming)) {
       throw createApiError(400, 'ROLE_PAGES_INVALID_PAGES', `${role} 的页面列表无效（页面 id 均不在白名单内）`)
     }
+    changes[role] = { before: beforePages(role), after: sanitizedIncoming[role] }
     merged[role] = sanitizedIncoming[role]
   }
+
+  // 保存即定格为当前结构版本：此后新增页面的自动补齐不再影响本次选择，
+  // 超管取消勾选的页面保持取消状态（见 types/rolePages PAGES_ADDED_IN_VERSION）
+  merged.__version = ROLE_PAGES_SCHEMA_VERSION
 
   const updated = await db
     .update(systemSettings)
@@ -72,7 +84,7 @@ export default defineEventHandler(async (event) => {
 
   await writeAdminAudit(event, {
     action: 'ROLE_PAGES_UPDATE',
-    detail: JSON.stringify({ roles: Object.keys(sanitizedIncoming) })
+    detail: JSON.stringify({ roles: Object.keys(sanitizedIncoming), changes })
   })
 
   return { rolePages: updated[0]?.rolePages ?? merged }
