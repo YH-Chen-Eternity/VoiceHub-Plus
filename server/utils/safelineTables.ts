@@ -83,6 +83,7 @@ function timeValue(startTime: Date | null): Date | number {
 }
 
 /** 逐一探測候選表；連線層失敗回傳 null（交給上層降級），表不存在則繼續下一個。 */
+let lastTableWarnAt = 0
 async function resolveTable(candidates: string[]): Promise<string | null> {
   for (const table of candidates) {
     const probe = await safelineQuery((sql) =>
@@ -91,6 +92,13 @@ async function resolveTable(candidates: string[]): Promise<string | null> {
     if (!probe) return null
     const row = Array.isArray(probe) ? probe[0] : null
     if (row?.reg) return table
+  }
+  // 雷池升級後表名可能變更（例如 mgt_attack_log_v2）。靜默降級會讓
+  // 「資料源不可用」被誤判成「沒有攻擊」，因此留一條節流告警供監控發現。
+  const now = Date.now()
+  if (now - lastTableWarnAt > 60_000) {
+    lastTableWarnAt = now
+    console.warn('[ops-board][safeline] 候選統計表都不存在，雷池聚合降級:', candidates.join(', '))
   }
   return null
 }

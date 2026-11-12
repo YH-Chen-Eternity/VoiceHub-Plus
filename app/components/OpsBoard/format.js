@@ -31,12 +31,25 @@ export function formatInt(v) {
   return Math.round(n).toLocaleString('zh-CN')
 }
 
-// 大數緊湊顯示：億 / 萬
+// 緊湊數字：依 <html lang> 選擇中文「萬/億」或英文 K/M/B。
+// 看板目前以簡中為主，但仍尊重頁面語言，便於後續完整國際化。
+function isEnglishLocale() {
+  if (typeof document === 'undefined') return false
+  const lang = String(document.documentElement?.lang || navigator?.language || 'zh-CN').toLowerCase()
+  return !lang.startsWith('zh')
+}
+
 export function formatCount(v, digits = 1) {
   if (v === null || v === undefined || v === '') return '—'
   const n = toNumber(v, NaN)
   if (Number.isNaN(n)) return String(v)
   const abs = Math.abs(n)
+  if (isEnglishLocale()) {
+    if (abs >= 1e9) return (n / 1e9).toFixed(digits) + 'B'
+    if (abs >= 1e6) return (n / 1e6).toFixed(digits) + 'M'
+    if (abs >= 1e3) return (n / 1e3).toFixed(digits) + 'K'
+    return formatInt(n)
+  }
   if (abs >= 1e8) return (n / 1e8).toFixed(digits) + '亿'
   if (abs >= 1e4) return (n / 1e4).toFixed(digits) + '万'
   return formatInt(n)

@@ -241,51 +241,10 @@ const { isSuperAdmin } = usePermissions()
 const { admin } = useLocale()
 const t = computed(() => admin.value?.opsNotification || {})
 
-// 词典键 admin.opsNotification.* 由主 agent 统一加入；此处为简中兜底。
-const FALLBACK = {
-  title: '运维通知',
-  desc: '配置运维告警邮件的收件人。发件通道沿用站内 SMTP 设置。',
-  superAdminHint: '超级管理员可修改配置',
-  readOnlyHint: '只读：仅超级管理员可修改',
-  refresh: '刷新',
-  loading: '正在加载配置...',
-  loadFailed: '配置加载失败',
-  retry: '重试',
-  smtpReady: '站内 SMTP 已配置',
-  smtpReadyDesc: '发信通道可用，运维告警邮件将经站内 SMTP 发出。',
-  smtpNotReady: '站内 SMTP 未配置',
-  smtpNotReadyDesc: '运维告警邮件当前无法发出，请先完成发信配置。',
-  goSmtp: '前往 SMTP 设置',
-  senderTitle: '当前发件人',
-  senderDesc: '发件人来自站内 SMTP 设置（smtpFromEmail / smtpFromName），此处只读，不提供修改。',
-  senderEmpty: '尚未设置发件人',
-  recipientsTitle: '告警收件人',
-  recipientsDesc: '可填写多个邮箱，使用逗号、分号、空格或换行分隔。',
-  recipientsPlaceholder: 'ops@example.com, admin@example.com',
-  recipientsHint: '支持逗号 / 分号 / 空格 / 换行分隔，提交时自动去重并校验格式。',
-  validLabel: '有效邮箱',
-  invalidLabel: '以下邮箱格式有误，请修正后再保存',
-  duplicatesLabel: '已自动去重',
-  emptyHint: '留空将回落到环境变量中配置的默认收件人。',
-  tatTitle: '触发方式',
-  tatDesc: '运维告警由腾讯云自动化助手（TAT，远程 SHELL + Cron 定时调度）触发；邮件由 voicehub-mailer 调用应用内部接口，交由站内 SMTP 发出。',
-  savedHint: '收件人已保存。请前往「SMTP 设置」页确认发信通道可用。',
-  unsaved: '有未保存的更改',
-  save: '保存配置',
-  saving: '保存中...',
-  saved: '收件人已保存',
-  saveFailed: '保存失败',
-  saveVerifyMismatch: '已保存，但服务端回读值与提交值不一致，已按回读值刷新',
-  sendTest: '发送测试邮件',
-  sendingTest: '发送中...',
-  testSent: (n) => `测试邮件已发送给 ${n} 位收件人`,
-  testFailed: '测试邮件发送失败，请检查站内 SMTP 与收件人配置',
-  testPartial: (s, f) => `测试邮件部分失败：成功 ${s} 位，失败 ${f} 位`,
-  testDisabledHint: '需先配置站内 SMTP 且填写有效收件人'
-}
+// 文案统一来自共享双语词典 admin.*，键缺失时显示键名，避免英文环境回退中文。
 const L = (key) => {
   const value = t.value?.[key]
-  return value === undefined || value === null || value === '' ? (FALLBACK[key] || key) : value
+  return value === undefined || value === null || value === '' ? key : value
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/

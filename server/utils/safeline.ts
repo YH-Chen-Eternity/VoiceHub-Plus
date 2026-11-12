@@ -9,23 +9,25 @@
  * 任何新增方法都必須維持 GET，不得加入 POST/PUT/DELETE。
  *
  * env：
- *   SAFELINE_API_BASE   預設 https://127.0.0.1:9443（本機迴環，雷池預設自簽）
- *   SAFELINE_API_TOKEN  送至 X-SLCE-API-TOKEN 的權杖（相容別名 X_SLCE_API_TOKEN）
- *   SAFELINE_API_INSECURE  預設 'true'：只對本請求使用自簽容錯的 https.Agent。
+ *   SAFELINE_API_BASE    預設 https://127.0.0.1:9443（本機迴環，雷池預設自簽）
+ *   SAFELINE_API_TOKEN   送至 X-SLCE-API-TOKEN 的權杖（相容別名 X_SLCE_API_TOKEN）
+ *   SAFELINE_API_CA_FILE 可選：雷池自簽憑證的 CA / PEM 路徑，用於在嚴格校驗下信任該憑證。
  *
- * ⚠️ 憑證處理：雷池本機端點通常是自簽憑證。這裡用 per-request httpsAgent，
- *   絕不設定 NODE_TLS_REJECT_UNAUTHORIZED=0、不改 axios 全域預設、
- *   不關閉行程內其它 HTTPS 呼叫的驗證。若雷池已換成可信憑證，請設
- *   SAFELINE_API_INSECURE=false 並（建議）把 base 指向可信主機。
+ * 憑證處理：預設使用 Node 的系統信任鏈並**嚴格校驗**，不會關閉憑證驗證、
+ *   不改 axios 全域預設、也不設定任何全域 TLS 開關。
+ *   雷池使用自簽憑證時，把其 CA 憑證路徑填入 SAFELINE_API_CA_FILE；
+ *   該 CA 只作用於本模組的請求，不影響行程內其它 HTTPS 呼叫。
+ *   未設定或憑證不可信時，Open API 資料源降級 available:false，看板不會 500。
  */
 import https from 'node:https'
+import { readFileSync } from 'node:fs'
 import axios from 'axios'
 
 const BASE = String(process.env.SAFELINE_API_BASE || 'https://127.0.0.1:9443').replace(/\/+$/, '')
 const TOKEN = String(
   process.env.SAFELINE_API_TOKEN || process.env.X_SLCE_API_TOKEN || ''
 ).trim()
-const ALLOW_SELF_SIGNED = String(process.env.SAFELINE_API_INSECURE ?? 'true') !== 'false'
+const CA_FILE = String(process.env.SAFELINE_API_CA_FILE || '').trim()
 const REQUEST_TIMEOUT_MS = 3000
 const WARN_INTERVAL_MS = 60_000
 
@@ -41,8 +43,15 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-// 只在本模組的請求上生效，且僅當 base 為 https 且明確允許時才套用。
-const insecureHttpsAgent = new https.Agent({ rejectUnauthorized: false })
+// 可選的自訂 CA：嚴格校驗 + 信任雷池自簽憑證，只作用於本模組的請求。
+let trustedCaAgent: https.Agent | null = null
+if (CA_FILE) {
+  try {
+    trustedCaAgent = new https.Agent({ ca: readFileSync(CA_FILE, 'utf8') })
+  } catch (error) {
+    console.warn('[safeline-api] SAFELINE_API_CA_FILE 讀取失敗，改用系統預設信任鏈:', errorMessage(error))
+  }
+}
 
 /**
  * 雷池 Open API 唯讀端點。⚠️ 路徑需依實際版本實測後校正
@@ -77,8 +86,8 @@ export async function safelineRequest<T = any>(path: string): Promise<SafelineRe
         Accept: 'application/json'
       },
       timeout: REQUEST_TIMEOUT_MS,
-      ...(BASE.startsWith('https://') && ALLOW_SELF_SIGNED
-        ? { httpsAgent: insecureHttpsAgent, proxy: false }
+      ...(BASE.startsWith('https://') && trustedCaAgent
+        ? { httpsAgent: trustedCaAgent, proxy: false }
         : {}),
       validateStatus: (status) => status >= 200 && status < 300
     })

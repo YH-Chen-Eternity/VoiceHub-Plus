@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import vm from 'node:vm'
 
 /**
  * 契约 §5 / §9：边缘层观察模式 / 逐规则开关 测试。
@@ -10,8 +11,9 @@ import { fileURLToPath } from 'node:url'
  * 直接 import 会起服务、CI 不可行，且 shouldBlock 未导出。因此按仓库 policy 测试惯例
  * 读取源码文本处理：
  *  - 静态守卫：断言观察模式 / 逐规则开关 / 动态配置接口的关键实现标记仍在，防回归删除；
- *  - 行为测试：从源码抽取 shouldBlock 的真实函数体，注入受控 runtimeConfig 后用
- *    new Function 求值执行（只做纯判定、不启动服务、不碰网络），覆盖观察模式逻辑。
+ *  - 行为测试：从源码抽取 shouldBlock 的真实函数体，注入受控依赖后用
+ *    vm.runInNewContext 在隔离作用域求值执行（不共享宿主全局、不启动服务、不碰网络），
+ *    覆盖观察模式逻辑；比直接 new Function 更收敛可执行面。
  * 基础设施常驻断言始终运行；Agent D 的实现标记缺失时其余用例 t.skip，保证 pnpm test 不崩。
  */
 const REWRITER = fileURLToPath(new URL('../../deploy/rewriter/app-rewriter.js', import.meta.url))
@@ -73,9 +75,22 @@ test('shouldBlock 观察模式 / 逐规则开关判定（抽取真实函数体�
     t.skip('依赖模块尚未就绪：无法定位 shouldBlock 函数体')
     return
   }
+  // 从源码同步 RULE_KEYS，避免测试内硬编码与实现漂移；注入隔离作用域所需的全部依赖。
+  const keyMatch = rewriterCode.match(/const RULE_KEYS = \[([^\]]+)\]/)
+  const ruleKeys = keyMatch
+    ? (keyMatch[1].match(/['"][^'"]+['"]/g) || []).map((s) => s.slice(1, -1))
+    : []
   let factory: Function
   try {
-    factory = new Function('runtimeConfig', `${shouldBlockSource}\nreturn shouldBlock`)
+    const sandbox = vm.createContext({
+      RULE_KEYS: ruleKeys,
+      warnedRuleKinds: new Set<string>(),
+      console: { warn: () => {} }
+    })
+    factory = vm.runInContext(
+      `(function (runtimeConfig) { ${shouldBlockSource}\nreturn shouldBlock })`,
+      sandbox
+    ) as Function
   } catch {
     t.skip('依赖模块尚未就绪：shouldBlock 函数体无法求值')
     return

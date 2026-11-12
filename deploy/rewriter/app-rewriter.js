@@ -205,7 +205,13 @@ function applyEdgeConfig() {
 // 观察模式 / 逐规则开关：统一判断是否真正拦截。
 // 全站 observeMode 或该规则 ruleSwitches[kind] === false → 不拦截（只记录）。
 // 未登记的规则（如限流 'rateLimit'）不受逐规则开关影响，仅受 observeMode 影响。
+const warnedRuleKinds = new Set();
 function shouldBlock(ruleKind) {
+  // 未登記的規則只受觀察模式影響；記一次告警，提醒開發者補進 RULE_KEYS。
+  if (ruleKind && !RULE_KEYS.includes(ruleKind) && !warnedRuleKinds.has(ruleKind)) {
+    warnedRuleKinds.add(ruleKind);
+    console.warn('[edge] unregistered rule kind (observeMode only):', ruleKind);
+  }
   if (runtimeConfig.observeMode) return false;
   if (ruleKind && Object.prototype.hasOwnProperty.call(runtimeConfig.ruleSwitches, ruleKind)) {
     return runtimeConfig.ruleSwitches[ruleKind] !== false;

@@ -1923,7 +1923,7 @@ const getRoleName = (role) => {
     SONG_ADMIN: 'songAdmin',
     BROADCASTER: 'broadcaster',
     REVIEWER: 'reviewer',
-    CONTRIBUTOR: 'CONTRIBUTOR',
+    CONTRIBUTOR: 'contributor',
     ADMIN: 'admin',
     SUPER_ADMIN: 'superAdmin'
   }

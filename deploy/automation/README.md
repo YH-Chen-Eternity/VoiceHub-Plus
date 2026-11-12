@@ -39,6 +39,9 @@
 | SSH 私钥 | 运维终端本地 | — | `600` | 绝不入库 |
 | 站点域名 / 验证文件 / 公网 IP | `/etc/voicehub/automation.env` | `VH_*` | `600` | 非凭据，但也不写入公开仓库 |
 
+**令牌轮换**：`ATTACK_LOG_TOKEN` 建议每 90 天轮换一次（或发生疑似泄露时立即轮换），
+应用 env 与 `/etc/voicehub/automation.env` 必须同步更新，否则告警邮件会被内部接口拒绝。
+
 ### 禁止事项
 
 - 不要把 `.env`、`.cos.conf`、`*.pem`、PAT、API Key、实例 ID、真实域名/IP 提交到仓库。
