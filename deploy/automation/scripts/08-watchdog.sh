@@ -19,6 +19,8 @@ RESTART_AT_FILE="$STATE_DIR/last-restart"
 MAX_FAILS=${VH_MAX_FAILS:-2}
 COOLDOWN=${VH_RESTART_COOLDOWN:-300}
 DISK_MAX=${VH_DISK_MAX_PERCENT:-90}
+# 未恢复时以非 0 退出，让 systemctl status / 监控看到失败（日志与邮件之外的第二信号）
+RC=0
 
 TS=$(date '+%F %T')
 if [ ! -d "$VH_HOME" ]; then
@@ -81,6 +83,7 @@ else
 动作：docker restart voicehub
 结果：健康检查通过"
       else
+        RC=1
         log "重启后仍未恢复，需人工介入"
         notify "[VoiceHub] 应用自动重启失败" "时间：$TS
 连续失败：$fails 次
@@ -102,6 +105,7 @@ for c in voicehub-postgres voicehub-redis voicehub-rewriter; do
       # 先单容器 start，避免 compose up 连带拉起 voicehub；start 失败再走 compose
       if ! docker start "$c" >/dev/null 2>&1; then
         if ! ( cd "$VH_HOME" && docker compose up -d "${c#voicehub-}" ) >/dev/null 2>&1; then
+          RC=1
           log "依赖容器 $c 拉起失败"
           notify "[VoiceHub] 依赖容器拉起失败" "时间：$TS
 容器：$c
@@ -121,9 +125,10 @@ if [ -n "${used:-}" ] && [ "$used" -ge "$DISK_MAX" ]; then
   log "根分区占用 ${used}% ≥ ${DISK_MAX}%，清理悬空镜像与构建缓存"
   docker image prune -f >/dev/null 2>&1
   docker builder prune -f >/dev/null 2>&1
+  RC=1
   notify "[VoiceHub] 磁盘占用告警" "时间：$TS
 根分区占用：${used}%（阈值 ${DISK_MAX}%）
 已清理悬空镜像与构建缓存，请检查大文件与备份保留策略"
 fi
 
-exit 0
+exit "$RC"
