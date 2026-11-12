@@ -24,9 +24,10 @@ export default defineEventHandler(async (event) => {
   const rows = await db.select().from(systemSettings).limit(1)
   const settings = rows[0]
 
-  // 站内 SMTP 是否可用：开关、主机、发件邮箱三者齐备才算已配置
+  // 站内 SMTP 是否可用：开关、主机齐备，发件地址 smtpFromEmail 为空时回退发件账号
+  // （与 smtpService 的 fromEmail = smtpFromEmail || smtpUsername 口径一致）
   const smtpConfigured = Boolean(
-    settings?.smtpEnabled && settings?.smtpHost && settings?.smtpFromEmail
+    settings?.smtpEnabled && settings?.smtpHost && (settings?.smtpFromEmail || settings?.smtpUsername)
   )
   const fromEmail = settings?.smtpFromEmail || settings?.smtpUsername || ''
   const fromName = settings?.smtpFromName || '校园广播站'
