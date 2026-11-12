@@ -3,16 +3,17 @@
  * Copyright (C) 2026 YH-Chen-Eternity
  * SPDX-License-Identifier: GPL-3.0-only
  *
- * 雷池 mgt 庫攻擊日誌／全量偵測日誌的只讀聚合。
+ * 雷池（SafeLine）mgt 庫攻擊日誌／流量統計的只讀聚合。
  *
- * ⚠️⚠️ 表結構需部署時實測後校正 ⚠️⚠️
- *   請在雷池 mgt 庫執行 `\dt` 與 `\d <table>`，把實際表名、欄位名、
- *   時間欄位型態填進下方 SL 常數。社群版常見為攻擊事件表 mgt_attack_log，
- *   全量偵測日誌 mgt_detect_log_*（可能按小時／日分表）。
- *   ATTACK_TABLES / DETECT_TABLES 為候選清單，resolveTable() 會用
- *   to_regclass() 逐一探測（不存在的表回傳 NULL 而非報錯，因此不會誤觸
- *   全域連線降級），取第一個真實存在的表。若表在不同 schema，請一併
- *   校正 search_path 或把 schema 名稱寫入連線字串的 options。
+ * 表結構已按雷池 9.x 免費個人版實測校正（2026-11，生產庫 safeline-ce）：
+ *   - mgt_detect_log_basic        攻擊／異常偵測記錄（只存偵測事件，非全量流量）
+ *       timestamp bigint（秒級 epoch，有索引）、src_ip、attack_type bigint、
+ *       risk_level、action、country/province/city；沒有 status_code 列。
+ *   - mgt_statistics_agg          聚合表（type/key/count/time，time 為小時級 epoch）
+ *       type='status_code'（key=狀態碼）→ 全量請求數與 4xx/5xx 佔比；
+ *       type='pv'（key=content-type）→ 頁面瀏覽量。
+ *   - statistics_ips              按 IP 的 30 秒粒度流量 → UV（distinct key）。
+ *   - 舊社群版的 mgt_attack_log / mgt_detect_log 仍保留為候選（resolveTable 探測）。
  *
  * 安全約定：
  *   - 表名／欄名一律以 sql('identifier') 插入（postgres-js 的安全識別符）；
@@ -20,33 +21,14 @@
  *   - 不含任何寫入語句，所有查詢失敗一律 available:false 降級。
  */
 import { isSafelineAvailable, safelineQuery } from './safelinePg'
+import {
+  SL,
+  SAFELINE_ATTACK_TYPES,
+  SAFELINE_COUNTRY_NAMES
+} from './safelineEnums'
 
-export type SafelineTimeMode = 'timestamp' | 'epochMs' | 'epochSec'
-
-export const SL: {
-  attackTables: string[]
-  detectTables: string[]
-  timeMode: SafelineTimeMode
-  col: {
-    time: string
-    ip: string
-    type: string
-    status: string
-    region: string
-    host: string
-  }
-} = {
-  attackTables: ['mgt_attack_log'],
-  detectTables: ['mgt_detect_log_basic', 'mgt_detect_log'],
-  timeMode: 'timestamp',
-  col: {
-    time: 'timestamp',
-    ip: 'src_ip',
-    type: 'attack_type',
-    status: 'status_code',
-    region: 'region',
-    host: 'host'
-  }
+function attackTypeName(code: number): string {
+  return SAFELINE_ATTACK_TYPES[code] ?? `类型 ${code}`
 }
 
 export interface NameValue {
@@ -93,8 +75,8 @@ async function resolveTable(candidates: string[]): Promise<string | null> {
     const row = Array.isArray(probe) ? probe[0] : null
     if (row?.reg) return table
   }
-  // 雷池升級後表名可能變更（例如 mgt_attack_log_v2）。靜默降級會讓
-  // 「資料源不可用」被誤判成「沒有攻擊」，因此留一條節流告警供監控發現。
+  // 雷池升級後表名可能變更。靜默降級會讓「資料源不可用」被誤判成「沒有攻擊」，
+  // 因此留一條節流告警供監控發現。
   const now = Date.now()
   if (now - lastTableWarnAt > 60_000) {
     lastTableWarnAt = now
@@ -140,9 +122,10 @@ export async function queryAttackAgg(
   const from = timeValue(startTime)
   const result = await safelineQuery(async (sql) => {
     const [byType, ipTop, regions, total] = await Promise.all([
-      sql`SELECT ${sql(SL.col.type)}::text AS "name", count(*)::int AS "value"
+      // 僅統計真實攻擊分類（attack_type >= 0；負值為白名單/非攻擊等流量標記）
+      sql`SELECT ${sql(SL.col.type)}::int AS "code", count(*)::int AS "value"
             FROM ${sql(table)}
-           WHERE ${sql(SL.col.time)} >= ${from}
+           WHERE ${sql(SL.col.time)} >= ${from} AND ${sql(SL.col.type)} >= 0
            GROUP BY ${sql(SL.col.type)}
            ORDER BY "value" DESC LIMIT 20`,
       sql`SELECT ${sql(SL.col.ip)}::text AS "ip", count(*)::int AS "value"
@@ -165,15 +148,27 @@ export async function queryAttackAgg(
     available: true,
     table,
     total: Number(totalRow?.n ?? 0),
-    byType: toNameValue(result.byType),
+    byType: toNameValue(result.byType).map((item) => {
+      const code = Number(item.name)
+      return Number.isFinite(code) ? { ...item, name: attackTypeName(code) } : item
+    }),
     ipTop: toIpValue(result.ipTop),
-    regions: toNameValue(result.regions)
+    regions: toNameValue(result.regions).map((item) => ({
+      ...item,
+      name: SAFELINE_COUNTRY_NAMES[item.name] ?? item.name
+    }))
   }
 }
 
 /**
  * 雷池全量 HTTP 流量聚合（requests / pv / uv / 4xx / 5xx）。
- * rate4xx、rate5xx 為百分比（0~100）；無 page 維度時 pv 以 requests 近似。
+ * rate4xx、rate5xx 為百分比（0~100）。
+ *
+ * 免費版資料面：
+ *   - requests / 4xx / 5xx ← mgt_statistics_agg type='status_code'（key=狀態碼）；
+ *   - pv ← 同表 type='pv'（key=content-type，僅頁面類回應）；
+ *   - uv ← statistics_ips 的 distinct key（30 秒粒度按 IP 計數）。
+ * 聚合表不可用時回退舊版行為：直接掃偵測/攻擊事件表（status_code 列存在時）。
  */
 export async function queryHttpTrafficAgg(
   _range: string,
@@ -190,10 +185,65 @@ export async function queryHttpTrafficAgg(
   }
   if (!isSafelineAvailable()) return empty
 
-  const table = await resolveTable(SL.detectTables)
+  const from = timeValue(startTime)
+
+  // ── 路徑一：聚合表（免費版 9.x）──
+  const aggTable = await resolveTable(SL.aggTables)
+  if (aggTable) {
+    const ipTable = await resolveTable(SL.ipTables)
+    const rows = await safelineQuery(async (sql) => {
+      const [status, pv, uv] = await Promise.all([
+        sql`SELECT key, coalesce(sum(count), 0)::bigint AS "n"
+              FROM ${sql(aggTable)}
+             WHERE type = 'status_code' AND "time" >= ${from}
+             GROUP BY key`,
+        sql`SELECT coalesce(sum(count), 0)::bigint AS "n"
+              FROM ${sql(aggTable)}
+             WHERE type = 'pv' AND "time" >= ${from}`,
+        ipTable
+          ? sql`SELECT count(DISTINCT key)::int AS "n"
+                  FROM ${sql(ipTable)}
+                 WHERE "time" >= ${from}`
+          : sql`SELECT count(DISTINCT key)::int AS "n"
+                  FROM ${sql(aggTable)}
+                 WHERE type = 'sl_session' AND "time" >= ${from}`
+      ])
+      return { status, pv, uv }
+    })
+    if (!rows) return empty
+
+    const statusRows = Array.isArray(rows.status) ? rows.status : []
+    let requests = 0
+    let c4xx = 0
+    let c5xx = 0
+    for (const row of statusRows as any[]) {
+      const code = Number(row?.key)
+      const n = Number(row?.n ?? 0)
+      if (!Number.isFinite(code)) continue
+      requests += n
+      if (code >= 400 && code <= 499) c4xx += n
+      else if (code >= 500) c5xx += n
+    }
+    const pvRow = Array.isArray(rows.pv) ? rows.pv[0] : null
+    const uvRow = Array.isArray(rows.uv) ? rows.uv[0] : null
+    const pct = (n: number) =>
+      requests > 0 ? Math.round((n / requests) * 10000) / 100 : 0
+
+    return {
+      available: true,
+      table: aggTable,
+      requests,
+      pv: Number(pvRow?.n ?? 0),
+      uv: Number(uvRow?.n ?? 0),
+      rate4xx: pct(c4xx),
+      rate5xx: pct(c5xx)
+    }
+  }
+
+  // ── 路徑二（舊版兜底）：直接掃事件表 ──
+  const table = await resolveTable(SL.attackTables)
   if (!table) return empty
 
-  const from = timeValue(startTime)
   const rows = await safelineQuery((sql) => sql`
     SELECT count(*)::int AS "requests",
            count(DISTINCT ${sql(SL.col.ip)})::int AS "uv",
