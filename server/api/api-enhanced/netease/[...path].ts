@@ -2,6 +2,10 @@
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import {
+  isNeteaseRealIpEnabled,
+  resolveNeteaseRealIp
+} from '~~/server/utils/neteaseRealIp'
 
 const neteaseEnhancedApiPromise = import('@neteasecloudmusicapienhanced/api').then((mod) => {
   return (mod.default || {}) as Record<string, (params: Record<string, any>) => Promise<any>>
@@ -108,6 +112,51 @@ const normalizeParams = (input: Record<string, any>) => {
   return output
 }
 
+/**
+ * 出口 IP 的稳定种子：
+ * - 扫码流程用 unikey，保证 key/create/check 三步落在同一地区；
+ * - 账号相关请求用 MUSIC_U，保证同一账号的地区不来回跳；
+ * - 其余请求（搜索、歌曲地址等）每次随机，不携带任何账号特征。
+ */
+const buildRealIpSeed = (
+  endpointPath: string,
+  qrKey: string,
+  cookieText: string
+): string | undefined => {
+  if (endpointPath.startsWith('login/qr/')) {
+    return qrKey ? `qr:${qrKey}` : 'qr:default'
+  }
+
+  const matched = cookieText.match(/(?:^|;\s*)MUSIC_U=([^;]+)/)
+  return matched?.[1] ? `account:${matched[1]}` : undefined
+}
+
+/** cookie 可能按数组重复传参（cookie=a&cookie=b），合并全部片段再解析，避免漏掉 MUSIC_U */
+const collectCookieText = (input: unknown): string => {
+  if (!input || typeof input !== 'object') return ''
+  const raw = (input as Record<string, unknown>).cookie
+  if (typeof raw === 'string') return raw
+  if (Array.isArray(raw)) {
+    return raw.filter((item): item is string => typeof item === 'string').join('; ')
+  }
+  return ''
+}
+
+/** 直接从原始入参取单个字符串（数组取最后一项，与 normalizeParams 口径一致），避免种子被数组传参绕过 */
+const pickRawValue = (input: unknown, name: string): string => {
+  if (!input || typeof input !== 'object') return ''
+  const raw = (input as Record<string, unknown>)[name]
+  if (typeof raw === 'string') return raw.trim()
+  if (Array.isArray(raw)) {
+    for (let i = raw.length - 1; i >= 0; i -= 1) {
+      const item = raw[i]
+      if (typeof item === 'string' && item.trim()) return item.trim()
+    }
+  }
+  return ''
+}
+
+
 export default defineEventHandler(async (event) => {
   const rawPath = getRouterParam(event, 'path')
   const endpointPath = Array.isArray(rawPath) ? rawPath.join('/') : rawPath
@@ -147,17 +196,36 @@ export default defineEventHandler(async (event) => {
     })
   }
 
-  const queryParams = normalizeParams(getQuery(event))
+  const rawQuery = getQuery(event)
+  const queryParams = normalizeParams(rawQuery)
   let bodyParams: Record<string, any> = {}
+  let rawBody: Record<string, any> = {}
 
   if (method !== 'GET') {
     const body = await readBody(event).catch(() => ({}))
     if (body && typeof body === 'object' && !Array.isArray(body)) {
-      bodyParams = normalizeParams(body as Record<string, any>)
+      rawBody = body as Record<string, any>
+      bodyParams = normalizeParams(rawBody)
     }
   }
 
   const params = { ...queryParams, ...bodyParams }
+  const cookieText = Array.from(
+    new Set([collectCookieText(rawQuery), collectCookieText(rawBody)].filter(Boolean))
+  ).join('; ')
+  const qrKey =
+    pickRawValue(rawQuery, 'key') ||
+    pickRawValue(rawBody, 'key') ||
+    (typeof params.key === 'string' ? params.key : '')
+
+  // 境外出口会被网易云判为海外，登录与账号接口直接失败；统一改写 X-Real-IP。
+  // 客户端传入的 realIP 一律忽略，避免该代理变成任意 IP 伪造入口。
+  if (isNeteaseRealIpEnabled()) {
+    params.realIP = resolveNeteaseRealIp(buildRealIpSeed(endpointPath, qrKey, cookieText))
+    if (process.env.NETEASE_REAL_IP_DEBUG === 'true') {
+      console.log(`[Netease] ${endpointPath} 出口 IP: ${params.realIP}`)
+    }
+  }
 
   // 等待 xeapi 公钥等配置就绪
   await ensureNcmConfig()

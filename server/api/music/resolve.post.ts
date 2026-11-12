@@ -75,17 +75,24 @@ function isPlayable(url: string) {
   return /^https?:\/\//i.test(url || '') && !/\.(jpg|jpeg|png|webp|gif)$/i.test(url)
 }
 
-/** vkeys 公共音源（免登录） */
+/** vkeys 公共音源（免登录）：腾讯系支持字母 songmid（mid=）与数字 songId（id=） */
 async function tryVkeys(platform: string, musicId: string, quality: number) {
   const p = platform === 'tencent' ? 'tencent' : 'netease'
-  const url = `https://api.vkeys.cn/v2/music/${p}?id=${encodeURIComponent(musicId)}&quality=${Number.isFinite(quality) ? quality : 4}`
+  const idParam =
+    platform === 'tencent' && !/^\d+$/.test(musicId)
+      ? `mid=${encodeURIComponent(musicId)}`
+      : `id=${encodeURIComponent(musicId)}`
+  const url = `https://api.vkeys.cn/v2/music/${p}?${idParam}&quality=${Number.isFinite(quality) ? quality : 4}`
   try {
     const res = await fetchWithTimeout(url, 8000, { headers: { accept: 'application/json' } })
     if (!res.ok) return null
     const json: any = await res.json().catch(() => null)
     const candidate =
       json?.data?.url || json?.data?.link || (Array.isArray(json?.data) ? json.data[0]?.url : null)
-    if (typeof candidate === 'string' && isPlayable(candidate)) return { url: candidate, source: 'vkeys' }
+    if (typeof candidate === 'string' && isPlayable(candidate)) {
+      // http 直链在 https 页面会被按混合内容拦截，统一升级为 https
+      return { url: candidate.replace(/^http:\/\//i, 'https://'), source: 'vkeys' }
+    }
   } catch {
     // 忽略，继续尝试下一个源
   }

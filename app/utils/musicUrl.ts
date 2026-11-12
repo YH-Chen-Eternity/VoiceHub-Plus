@@ -486,10 +486,12 @@ export async function getMusicUrlResult(
             `https://api.vkeys.cn/v2/music/tencent?${idParam.key}=${encodeURIComponent(idParam.value)}&quality=${selectedQuality}`,
             { signal: AbortSignal.timeout(5000) }
           ).then((response) => (response.ok ? response.json() : null))
-          const url = v2Response?.data?.url
-          if (v2Response?.code === 200 && url && !isKnownInvalidQqAudioUrl(String(url))) {
-            rememberMusicUrlSource(String(url), 'vkeys-v3')
-            return { url: String(url), source: 'vkeys-v3' }
+          const rawUrl = v2Response?.data?.url
+          // 上游返回 http 直链：https 页面加载会被浏览器按混合内容拦截（移动端尤其严格），必须升级
+          const url = rawUrl ? String(rawUrl).replace(/^http:\/\//i, 'https://') : ''
+          if (v2Response?.code === 200 && url && !isKnownInvalidQqAudioUrl(url)) {
+            rememberMusicUrlSource(url, 'vkeys-v3')
+            return { url, source: 'vkeys-v3' }
           }
         }
       } catch {
