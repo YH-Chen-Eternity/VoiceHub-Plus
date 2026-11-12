@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { community as zhCommunity } from '../../app/utils/locale/zh-CN.ts'
 import { community as enCommunity } from '../../app/utils/locale/en-US.ts'
+import { DEFAULT_ROLE_PAGES } from '../../types/rolePages.ts'
 
 /**
  * 社区游客板块可见性 & 后台栏目权限策略测试（2026-11-11）。
@@ -12,50 +13,32 @@ import { community as enCommunity } from '../../app/utils/locale/en-US.ts'
  * 1. 板块新增 allowGuestView（默认关）：游客只能浏览开启该开关板块的已通过帖子，
  *    列表 / 详情 / 评论三条读取链路都必须收紧，防直链绕过。
  * 2. 社区归档记录收权：仅 ADMIN / SUPER_ADMIN 可见可用，审帖员不再出现在菜单，
- *    后端 archive 端点同步 requireCommunityAdmin。
+ *    后台 archive 端点同步 requireCommunityAdmin。
  * 3. 举报与申诉保留给审帖员（requireCommunityReviewer 链路不回收）。
  *
- * usePermissions.ts 含 ~~/* 别名导入，无法在 Node 单测内直接加载，
- * 这里按仓库既有 policy 测试惯例对源码做结构断言（正则锚定角色行），
+ * 角色默认页已统一到 types/rolePages 的 DEFAULT_ROLE_PAGES（单一来源，
+ * usePermissions 回退与后端内置默认共用），本测试直接对数据本体断言；
+ * usePermissions.ts 侧另做结构断言（引用 DEFAULT_ROLE_PAGES 且超管直通），
  * 防止后续改动无意间把归档还给审帖员或弄丢举报申诉入口。
  */
 
 const repoRoot = join(process.cwd())
 const permissionsSource = readFileSync(join(repoRoot, 'app/composables/usePermissions.ts'), 'utf-8')
 
-function extractRoleList(role: 'REVIEWER' | 'ADMIN' | 'BROADCASTER', occurrence: 1 | 2): string {
-  // canAccessPage 用 includes(page) 形式，getUserPages 用 switch 返回数组形式，
-  // 两种形态各出现一次，因此每个角色有两处列表需要同时断言。
-  const pattern =
-    occurrence === 1
-      ? new RegExp(`role === '${role}'` + String.raw`[\s\S]{0,80}?return \[([^\]]*)\]\.includes`)
-      : new RegExp(String.raw`case '${role}':\s*\n\s*return \[([^\]]*)\]`)
-  const match = permissionsSource.match(pattern)
-  assert.ok(match, `usePermissions.ts 中应能定位 ${role} 的第 ${occurrence} 处页面列表`)
-  return match[1]
-}
-
-test('归档收权：审帖员页面列表（canAccessPage + getUserPages）不再包含社区归档记录', () => {
-  for (const occurrence of [1, 2] as const) {
-    const list = extractRoleList('REVIEWER', occurrence)
-    assert.ok(!list.includes('community-archive'), `REVIEWER 第 ${occurrence} 处列表不应包含 community-archive`)
-    assert.ok(list.includes('community-review'), `REVIEWER 第 ${occurrence} 处列表应保留 community-review`)
-    assert.ok(list.includes('community-comment-review'), `REVIEWER 第 ${occurrence} 处列表应保留 community-comment-review`)
-  }
+test('归档收权：审帖员默认页（canAccessPage 回退 + getUserPages 单一来源）不再包含社区归档记录', () => {
+  const reviewer = DEFAULT_ROLE_PAGES.REVIEWER
+  assert.ok(!reviewer.includes('community-archive'), 'REVIEWER 默认页不应包含 community-archive')
+  assert.ok(reviewer.includes('community-review'), 'REVIEWER 默认页应保留 community-review')
+  assert.ok(reviewer.includes('community-comment-review'), 'REVIEWER 默认页应保留 community-comment-review')
+  assert.ok(reviewer.includes('community-reports'), 'REVIEWER 默认页应保留 community-reports')
+  // usePermissions 回退与 getUserPages 均引用 DEFAULT_ROLE_PAGES（单一来源，无硬编码副本）
+  const roleListCopies = permissionsSource.match(/\['overview', 'schedule'[\s\S]*?\]/g) || []
+  assert.equal(roleListCopies.length, 0, 'usePermissions.ts 不应残留硬编码角色默认页列表')
+  assert.match(permissionsSource, /DEFAULT_ROLE_PAGES/, 'usePermissions.ts 应引用 DEFAULT_ROLE_PAGES')
 })
 
-test('举报与申诉：审帖员页面列表两处均保留 community-reports', () => {
-  for (const occurrence of [1, 2] as const) {
-    const list = extractRoleList('REVIEWER', occurrence)
-    assert.ok(list.includes('community-reports'), `REVIEWER 第 ${occurrence} 处列表应保留 community-reports`)
-  }
-})
-
-test('归档收权：管理员与超管仍保留社区归档记录入口', () => {
-  for (const occurrence of [1, 2] as const) {
-    const adminList = extractRoleList('ADMIN', occurrence)
-    assert.ok(adminList.includes('community-archive'), `ADMIN 第 ${occurrence} 处列表应保留 community-archive`)
-  }
+test('归档收权：管理员默认页仍保留社区归档记录入口', () => {
+  assert.ok(DEFAULT_ROLE_PAGES.ADMIN.includes('community-archive'), 'ADMIN 默认页应保留 community-archive')
   // SUPER_ADMIN 在 canAccessPage 直接 return true，getUserPages 全量列表
   assert.match(
     permissionsSource,
