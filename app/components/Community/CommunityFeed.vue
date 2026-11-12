@@ -346,10 +346,6 @@
                     {{ option.label }}
                   </button>
                 </div>
-                <p v-if="publishForm.nameMode === 'anon'" class="field-hint name-mode-anon-hint">
-                  <Info :size="12" />
-                  <span>{{ t.nameMode?.hint || t.pendingHint }}</span>
-                </p>
               </div>
 
               <div class="board-picker">
@@ -2883,13 +2879,6 @@ onUnmounted(() => {
 .field-hint {
   font-size: 0.64rem;
   color: var(--text-quaternary);
-}
-
-.name-mode-anon-hint {
-  display: flex;
-  align-items: center;
-  gap: 0.3rem;
-  color: var(--warning);
 }
 
 .search-field {
