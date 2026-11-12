@@ -154,7 +154,8 @@ import {
   Settings,
   Flag,
   ShieldCheck,
-  Send
+  Send,
+  Gauge
 } from '@lucide/vue'
 import { useLocale } from '~/utils/locale'
 
@@ -270,6 +271,7 @@ const menuGroups = computed(() => [
       { icon: ShieldAlert, label: locale.value.menu?.attackLogs || '攻击日志', id: 'attack-logs' },
       { icon: ShieldCheck, label: locale.value.menu?.edgeProtection || '边缘防护', id: 'edge-protection' },
       { icon: Send, label: locale.value.menu?.opsNotification || '运维通知', id: 'ops-notification' },
+      { icon: Gauge, label: locale.value.menu?.opsBoard || '运维看板', id: 'ops-board' },
       { icon: Settings, label: locale.value.menu?.rolePermissions || '角色权限', id: 'role-permissions' }
     ]
   },
@@ -295,6 +297,11 @@ const shouldShowGroup = (group) => {
 const onNavigate = (id) => {
   if (id === 'password') {
     navigateTo('/change-password')
+    return
+  }
+  // 运维看板为独立全屏页面（/ops-board），不属于后台内容区组件
+  if (id === 'ops-board') {
+    navigateTo('/ops-board')
     return
   }
   emit('navigate', id)

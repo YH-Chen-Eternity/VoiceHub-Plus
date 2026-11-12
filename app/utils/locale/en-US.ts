@@ -778,6 +778,7 @@ export const pages = {
       'attack-logs': 'Attack Logs',
       'edge-protection': 'Edge Protection',
       'ops-notification': 'Ops Notifications',
+      'ops-board': 'Ops Board',
       'community-review': 'Community Review',
       'community-boards': 'Community Boards',
       'community-titles': 'Community Titles',

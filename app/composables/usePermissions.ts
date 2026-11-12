@@ -36,7 +36,7 @@ export const usePermissions = () => {
 
     // 回退：内置默认页面（与后端 DEFAULT_ROLE_PAGES 保持一致）
     if (role === 'ADMIN') {
-      return ['overview', 'schedule', 'print', 'songs', 'users', 'grade-class', 'notifications', 'smtp-config', 'playtimes', 'request-times', 'semesters', 'blacklist', 'site-config', 'api-keys', 'data-analysis', 'card-codes', 'music-source', 'review-notes', 'review-users', 'announcement', 'system-board', 'attack-logs', 'edge-protection', 'ops-notification', 'community-review', 'community-comment-review', 'community-archive', 'community-boards', 'community-titles', 'community-users', 'community-settings', 'community-reports', 'community-overview'].includes(page)
+      return ['overview', 'schedule', 'print', 'songs', 'users', 'grade-class', 'notifications', 'smtp-config', 'playtimes', 'request-times', 'semesters', 'blacklist', 'site-config', 'api-keys', 'data-analysis', 'card-codes', 'music-source', 'review-notes', 'review-users', 'announcement', 'system-board', 'attack-logs', 'edge-protection', 'ops-notification', 'ops-board', 'community-review', 'community-comment-review', 'community-archive', 'community-boards', 'community-titles', 'community-users', 'community-settings', 'community-reports', 'community-overview'].includes(page)
     }
 
     // 歌曲管理员可以访问的页面
@@ -108,7 +108,7 @@ export const usePermissions = () => {
           'community-overview'
         ]
       case 'ADMIN':
-        return ['overview', 'schedule', 'print', 'songs', 'users', 'grade-class', 'notifications', 'smtp-config', 'playtimes', 'request-times', 'semesters', 'blacklist', 'site-config', 'api-keys', 'data-analysis', 'card-codes', 'music-source', 'review-notes', 'review-users', 'announcement', 'system-board', 'attack-logs', 'edge-protection', 'ops-notification', 'community-review', 'community-comment-review', 'community-archive', 'community-boards', 'community-titles', 'community-users', 'community-settings', 'community-reports', 'community-overview']
+        return ['overview', 'schedule', 'print', 'songs', 'users', 'grade-class', 'notifications', 'smtp-config', 'playtimes', 'request-times', 'semesters', 'blacklist', 'site-config', 'api-keys', 'data-analysis', 'card-codes', 'music-source', 'review-notes', 'review-users', 'announcement', 'system-board', 'attack-logs', 'edge-protection', 'ops-notification', 'ops-board', 'community-review', 'community-comment-review', 'community-archive', 'community-boards', 'community-titles', 'community-users', 'community-settings', 'community-reports', 'community-overview']
       case 'SONG_ADMIN':
         return ['overview', 'schedule', 'print', 'songs', 'playtimes', 'request-times', 'semesters', 'data-analysis', 'card-codes']
       case 'BROADCASTER':

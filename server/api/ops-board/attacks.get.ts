@@ -10,7 +10,7 @@ import { defineEventHandler } from 'h3'
 import { and, desc, sql } from 'drizzle-orm'
 import { db } from '~/drizzle/db'
 import { attackLogs } from '~/drizzle/schema'
-import { requireAdmin } from '~~/server/utils/requireAdmin'
+import { requireOpsBoardViewer } from '~~/server/utils/opsBoardViewer'
 import {
   queryAttackAgg,
   type NameValue,
@@ -56,7 +56,7 @@ async function buildRegions(ips: string[]): Promise<{ regions: NameValue[]; avai
 }
 
 export default defineEventHandler(async (event) => {
-  requireAdmin(event)
+  await requireOpsBoardViewer(event)
   setOpsBoardNoStore(event)
 
   const info = parseOpsRange(event)

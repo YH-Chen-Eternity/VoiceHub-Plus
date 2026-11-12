@@ -41,6 +41,7 @@ export const CONFIGURABLE_PAGE_IDS = [
   'attack-logs',
   'edge-protection',
   'ops-notification',
+  'ops-board',
   'community-review',
   'community-comment-review',
   'community-archive',

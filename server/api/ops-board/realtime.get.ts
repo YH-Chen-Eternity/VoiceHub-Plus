@@ -2,7 +2,7 @@
  * 即時在線人數與 QPS。資料源：10.online-presence.ts 維護的 Redis ZSET／每秒計數。
  */
 import { defineEventHandler } from 'h3'
-import { requireAdmin } from '~~/server/utils/requireAdmin'
+import { requireOpsBoardViewer } from '~~/server/utils/opsBoardViewer'
 import { buildRedisKey, getRedisClient } from '~~/server/utils/redis'
 import { setOpsBoardNoStore } from './_shared'
 
@@ -10,7 +10,7 @@ const WINDOW_MS = 5 * 60 * 1000
 const SAMPLE_SECONDS = 5
 
 export default defineEventHandler(async (event) => {
-  requireAdmin(event)
+  await requireOpsBoardViewer(event)
   setOpsBoardNoStore(event)
 
   const unavailable = {
