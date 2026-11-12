@@ -5,7 +5,7 @@
       <span v-if="estimated" class="ob-est">应用侧估算</span>
     </header>
 
-    <div v-if="err && !t" class="ob-empty">数据暂不可用</div>
+    <div v-if="!t || (err && !t)" class="ob-empty">数据暂不可用</div>
 
     <template v-else>
       <div class="ob-grid-2">

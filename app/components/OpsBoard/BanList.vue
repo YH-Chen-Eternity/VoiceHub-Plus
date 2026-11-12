@@ -8,7 +8,7 @@
       </div>
     </header>
 
-    <div v-if="err && !a" class="ob-empty">数据暂不可用</div>
+    <div v-if="!a || (err && !a)" class="ob-empty">数据暂不可用</div>
     <div v-else-if="!rows.length" class="ob-empty">暂无封禁记录</div>
 
     <ul v-else class="ban-list">

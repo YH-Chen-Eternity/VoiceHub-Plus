@@ -16,7 +16,7 @@
       </div>
       <div class="flex flex-wrap items-center gap-3">
         <span class="text-[11px] font-semibold text-text-disabled">
-          {{ isSuperAdmin ? L('superAdminHint') : L('readOnlyHint') }}
+          {{ isAdminOrAbove ? L('superAdminHint') : L('readOnlyHint') }}
         </span>
         <button
           class="flex items-center gap-2 px-3 py-2 rounded-xl text-[11px] font-bold bg-bg-primary-40 border border-border-secondary text-text-tertiary hover:text-text-primary hover:border-border-tertiary transition-all disabled:opacity-50"
@@ -126,7 +126,7 @@
             v-model="rawRecipients"
             rows="5"
             :placeholder="L('recipientsPlaceholder')"
-            :disabled="!isSuperAdmin"
+            :disabled="!isAdminOrAbove"
             class="w-full min-h-[120px] rounded-xl border border-border-secondary bg-bg-primary-30 px-3 py-2.5 text-xs leading-relaxed text-text-primary outline-none focus:border-primary disabled:opacity-50"
           />
           <p class="px-1 text-[10px] text-text-tertiary">{{ L('recipientsHint') }}</p>
@@ -192,7 +192,7 @@
           type="button"
           class="inline-flex items-center gap-2 rounded-xl border border-border-secondary bg-bg-secondary-30 px-4 py-2.5 text-xs font-bold text-text-secondary transition-all hover:bg-bg-secondary-50 disabled:opacity-50 disabled:cursor-not-allowed"
           :title="!smtpConfigured || parsed.valid.length === 0 ? L('testDisabledHint') : (parsed.invalid.length > 0 ? L('invalidLabel') : '')"
-          :disabled="!isSuperAdmin || !smtpConfigured || testing || saving || parsed.invalid.length > 0 || parsed.valid.length === 0"
+          :disabled="!isAdminOrAbove || !smtpConfigured || testing || saving || parsed.invalid.length > 0 || parsed.valid.length === 0"
           @click="sendTest"
         >
           <Send :size="14" :class="{ 'animate-pulse': testing }" />
@@ -201,7 +201,7 @@
         <button
           type="button"
           class="inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-xs font-bold text-white shadow-lg shadow-[var(--primary-glow-20)] transition-all hover:bg-primary-hover disabled:opacity-50 disabled:cursor-not-allowed"
-          :disabled="!isSuperAdmin || saving || testing || parsed.invalid.length > 0"
+          :disabled="!isAdminOrAbove || saving || testing || parsed.invalid.length > 0"
           @click="save"
         >
           <Save :size="14" :class="{ 'animate-pulse': saving }" />
@@ -240,7 +240,7 @@ const emit = defineEmits(['navigate'])
 const goSmtp = () => emit('navigate', 'smtp-config')
 
 const { showToast } = useToast()
-const { isSuperAdmin } = usePermissions()
+const { isAdminOrAbove } = usePermissions()
 const { admin } = useLocale()
 const t = computed(() => admin.value?.opsNotification || {})
 
@@ -315,7 +315,7 @@ const load = async () => {
 
 // 用当前表单里「尚未保存」的收件人试发，方便先验证再保存
 const sendTest = async () => {
-  if (!isSuperAdmin.value || testing.value || saving.value) return
+  if (!isAdminOrAbove.value || testing.value || saving.value) return
   const recipients = parsed.value.valid
   if (!smtpConfigured.value || parsed.value.invalid.length || recipients.length === 0) return
   testing.value = true
@@ -342,7 +342,7 @@ const sendTest = async () => {
 }
 
 const save = async () => {
-  if (!isSuperAdmin.value || saving.value || testing.value || parsed.value.invalid.length) return
+  if (!isAdminOrAbove.value || saving.value || testing.value || parsed.value.invalid.length) return
   saving.value = true
   const recipients = parsed.value.valid
   try {

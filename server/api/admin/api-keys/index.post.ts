@@ -21,12 +21,12 @@ const createApiKeySchema = z.object({
 })
 
 export default defineEventHandler(async (event) => {
-  // 检查用户权限 - 只有超级管理员可以管理 API Key
+  // 检查用户权限 - 管理员及以上可以管理 API Key
   const user = event.context.user
-  if (!user || user.role !== 'SUPER_ADMIN') {
+  if (!user || !['ADMIN', 'SUPER_ADMIN'].includes(user.role)) {
     throw createError({
       statusCode: 403,
-      message: '只有超级管理员可以管理 API Key'
+      message: '仅管理员及以上可以管理 API Key'
     })
   }
 

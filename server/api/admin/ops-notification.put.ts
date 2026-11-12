@@ -10,7 +10,7 @@
 import { db } from '~/drizzle/db'
 import { systemSettings } from '~/drizzle/schema'
 import { eq } from 'drizzle-orm'
-import { requireSuperAdmin } from '~~/server/utils/requireAdmin'
+import { requireAdmin } from '~~/server/utils/requireAdmin'
 import { createApiError } from '~~/server/utils/apiError'
 import { SYSTEM_SETTINGS_DEFAULTS } from '~~/server/utils/system-settings-defaults'
 
@@ -25,7 +25,7 @@ const splitRecipients = (value: unknown): string[] =>
     .filter(Boolean)
 
 export default defineEventHandler(async (event) => {
-  requireSuperAdmin(event)
+  requireAdmin(event)
   setHeader(event, 'Cache-Control', 'no-store')
 
   const body = await readBody(event).catch(() => null)

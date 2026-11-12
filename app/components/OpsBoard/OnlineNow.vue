@@ -5,7 +5,7 @@
       <span class="live-tag"><i class="ob-dot" /> 实时</span>
     </header>
 
-    <div v-if="err && !rt" class="ob-empty">数据暂不可用</div>
+    <div v-if="!rt || (err && !rt)" class="ob-empty">数据暂不可用</div>
     <template v-else>
       <div class="online-main">
         <span class="online-num">{{ onlineText }}</span>

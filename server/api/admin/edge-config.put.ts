@@ -13,14 +13,14 @@ import {
   type EdgeConfig
 } from '~~/server/config/edgeRules'
 import { createApiError } from '~~/server/utils/apiError'
-import { requireSuperAdmin } from '~~/server/utils/requireAdmin'
+import { requireAdmin } from '~~/server/utils/requireAdmin'
 import { getEdgeConfig, setEdgeConfig } from '~~/server/utils/rewriterBans'
 
 const isPlainObject = (v: unknown): v is Record<string, unknown> =>
   !!v && typeof v === 'object' && !Array.isArray(v)
 
 export default defineEventHandler(async (event) => {
-  requireSuperAdmin(event)
+  requireAdmin(event)
   setHeader(event, 'Cache-Control', 'no-store')
 
   const body = await readBody(event).catch(() => null)

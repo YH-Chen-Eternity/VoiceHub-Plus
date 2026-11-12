@@ -111,7 +111,7 @@ test('PUT /api/admin/edge-config 写操作鉴权与 no-store（契约级守卫�
     t.skip('依赖模块尚未就绪：edge-config.put.ts 尚未创建（Agent D 负责）')
     return
   }
-  assert.match(configPutCode, /requireSuperAdmin\s*\(/, '写操作应 requireSuperAdmin')
+  assert.match(configPutCode, /requireAdmin\s*\(/, '写操作应 requireAdmin（管理员及以上）')
   assert.match(configPutCode, /no-store/, '应设置 Cache-Control: no-store')
   assert.match(configPutCode, /defineEventHandler/, '应使用 defineEventHandler')
   assert.match(configPutCode, /setEdgeConfig\s*\(/, '应调用 setEdgeConfig 落盘')
