@@ -94,6 +94,20 @@ services:
       - MUSIC_HYW_CARD_KEY=${MUSIC_HYW_CARD_KEY:-}
       - MUSIC_YUAFENG_TX_URL=${MUSIC_YUAFENG_TX_URL:-}
       - MUSIC_YUAFENG_APIKEY=${MUSIC_YUAFENG_APIKEY:-}
+      # ---- 运维看板数据源（只读；未配置时对应模块自动降级，看板不会 500）----
+      # 漏配会导致看板流量卡片静默回落到本地估算（source=estimated），
+      # 腾讯云流量包真实余量需要下面 4 个变量同时存在（见 .env.example 说明）。
+      - HOST_METRICS_DIR=${HOST_METRICS_DIR:-/data/voicehub/host-metrics}
+      - SAFELINE_PG_URL=${SAFELINE_PG_URL:-}
+      - SAFELINE_API_BASE=${SAFELINE_API_BASE:-}
+      - SAFELINE_API_TOKEN=${SAFELINE_API_TOKEN:-}
+      - SAFELINE_API_CA_FILE=${SAFELINE_API_CA_FILE:-}
+      - TENCENT_SECRET_ID=${TENCENT_SECRET_ID:-}
+      - TENCENT_SECRET_KEY=${TENCENT_SECRET_KEY:-}
+      - TENCENT_COS_BUCKET=${TENCENT_COS_BUCKET:-}
+      - TENCENT_COS_REGION=${TENCENT_COS_REGION:-}
+      - LIGHTHOUSE_INSTANCE_ID=${LIGHTHOUSE_INSTANCE_ID:-}
+      - LIGHTHOUSE_REGION=${LIGHTHOUSE_REGION:-}
     mem_limit: 1536m
     cpus: '1.50'
     depends_on:
