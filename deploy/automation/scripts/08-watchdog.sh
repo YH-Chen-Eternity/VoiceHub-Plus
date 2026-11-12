@@ -20,8 +20,12 @@ MAX_FAILS=${VH_MAX_FAILS:-2}
 COOLDOWN=${VH_RESTART_COOLDOWN:-300}
 DISK_MAX=${VH_DISK_MAX_PERCENT:-90}
 
-mkdir -p "$STATE_DIR" "$(dirname "$LOG")"
 TS=$(date '+%F %T')
+if [ ! -d "$VH_HOME" ]; then
+  printf '%s VH_HOME 不存在：%s，跳过恢复\n' "$TS" "$VH_HOME" >&2
+  exit 1
+fi
+mkdir -p "$STATE_DIR" "$(dirname "$LOG")"
 log() { printf '%s %s\n' "$TS" "$*" >> "$LOG"; }
 
 notify() {
@@ -50,10 +54,14 @@ else
       echo "$now" > "$RESTART_AT_FILE"
       if [ "$(state voicehub)" = "running" ]; then
         docker restart voicehub >/dev/null 2>&1
+        rc=$?
       else
         ( cd "$VH_HOME" && docker compose up -d voicehub ) >/dev/null 2>&1
+        rc=$?
       fi
-      for _ in $(seq 1 12); do
+      [ "$rc" -ne 0 ] && log "容器恢复命令失败（退出码 $rc）"
+      # 最长等待 120s：冷启动含依赖等待与迁移，短于 start_period 易误判失败
+      for _ in $(seq 1 24); do
         sleep 5
         curl -fsS -m 5 -o /dev/null "$APP_URL" && break
       done
@@ -82,7 +90,9 @@ for c in voicehub-postgres voicehub-redis voicehub-rewriter; do
     running|restarting|created) ;;
     *)
       log "依赖容器 $c 状态异常（${st:-不存在}），尝试拉起"
-      ( cd "$VH_HOME" && docker compose up -d "${c#voicehub-}" ) >/dev/null 2>&1 || docker start "$c" >/dev/null 2>&1
+      if ! ( cd "$VH_HOME" && docker compose up -d "${c#voicehub-}" ) >/dev/null 2>&1; then
+        docker start "$c" >/dev/null 2>&1 || log "依赖容器 $c 拉起失败"
+      fi
       notify "[VoiceHub] 依赖容器已自动拉起" "时间：$TS
 容器：$c
 原状态：${st:-不存在}"

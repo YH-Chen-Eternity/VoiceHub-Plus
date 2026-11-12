@@ -249,7 +249,7 @@ unset TENCENTCLOUD_SECRET_ID TENCENTCLOUD_SECRET_KEY     # 用完清除
 
 | 检查项 | 判据 | 动作 |
 | --- | --- | --- |
-| 应用存活 | `GET /api/health` 连续失败 ≥ `VH_MAX_FAILS`（默认 2 次） | `docker restart voicehub`；容器不存在则 `compose up -d voicehub`；重启后 60s 内复检并告警 |
+| 应用存活 | `GET /api/health` 连续失败 ≥ `VH_MAX_FAILS`（默认 2 次） | `docker restart voicehub`；容器不存在则 `compose up -d voicehub`；重启后 120s 内复检并告警 |
 | 重启风暴保护 | 距上次自动重启 < `VH_RESTART_COOLDOWN`（默认 300s） | 跳过重启，仅记录 |
 | 依赖容器 | `voicehub-postgres` / `voicehub-redis` / `voicehub-rewriter` 非 running | `compose up -d <服务>`，失败再 `docker start` |
 | 磁盘占用 | 根分区 ≥ `VH_DISK_MAX_PERCENT`（默认 90%） | 清理悬空镜像与构建缓存并告警 |
