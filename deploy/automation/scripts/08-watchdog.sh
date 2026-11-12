@@ -62,7 +62,12 @@ else
           rc=$?
           ;;
       esac
-      [ "$rc" -ne 0 ] && log "容器恢复命令失败（退出码 $rc）"
+      if [ "$rc" -ne 0 ]; then
+        log "容器恢复命令失败（退出码 $rc）"
+        notify "[VoiceHub] 自动恢复命令失败" "时间：$TS
+命令退出码：$rc
+请检查 docker 权限与 compose 文件"
+      fi
       # 最长等待 120s：冷启动含依赖等待与迁移，短于 start_period 易误判失败
       for _ in $(seq 1 24); do
         sleep 5
@@ -94,8 +99,14 @@ for c in voicehub-postgres voicehub-redis voicehub-rewriter; do
     running|restarting|created) ;;
     *)
       log "依赖容器 $c 状态异常（${st:-不存在}），尝试拉起"
-      if ! ( cd "$VH_HOME" && docker compose up -d "${c#voicehub-}" ) >/dev/null 2>&1; then
-        docker start "$c" >/dev/null 2>&1 || log "依赖容器 $c 拉起失败"
+      # 先单容器 start，避免 compose up 连带拉起 voicehub；start 失败再走 compose
+      if ! docker start "$c" >/dev/null 2>&1; then
+        if ! ( cd "$VH_HOME" && docker compose up -d "${c#voicehub-}" ) >/dev/null 2>&1; then
+          log "依赖容器 $c 拉起失败"
+          notify "[VoiceHub] 依赖容器拉起失败" "时间：$TS
+容器：$c
+请登录主机检查 compose 配置与容器日志"
+        fi
       fi
       notify "[VoiceHub] 依赖容器已自动拉起" "时间：$TS
 容器：$c

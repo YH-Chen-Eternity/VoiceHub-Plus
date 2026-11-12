@@ -78,6 +78,11 @@ test('社区审核接口按角色权限页强制（不再只是页面可见性�
   const effective = mod.resolveEffectivePages('REVIEWER', { REVIEWER: strippedReviewer }) as string[]
   assert.ok(!effective.includes('community-comment-review'), '取消后不应再包含评论审核页')
   assert.ok(effective.includes('community-review'), '未取消的帖子审核页应保留')
+  // 对称场景：取消帖子审核页后同样不再包含该 id，评论审核页保留
+  const strippedPosts = mod.DEFAULT_ROLE_PAGES.REVIEWER.filter((p: string) => p !== 'community-review')
+  const afterPosts = mod.resolveEffectivePages('REVIEWER', { REVIEWER: strippedPosts }) as string[]
+  assert.ok(!afterPosts.includes('community-review'), '取消后不应再包含帖子审核页')
+  assert.ok(afterPosts.includes('community-comment-review'), '未取消的评论审核页应保留')
 })
 
 test('超管专属数据库端点对 ADMIN 一律拒绝', () => {

@@ -95,7 +95,9 @@ export default defineEventHandler(async (event) => {
     }
   }
 
-  // 超管专属端点（数据库运维）：ADMIN 一律拒绝，与其页面权限保持一致
+  // 超管专属端点（数据库运维）：ADMIN 一律拒绝，与其页面权限保持一致。
+  // 位置固定在 SONG_ADMIN / BROADCASTER 白名单之后：这两个角色访问数据库接口时
+  // 仍返回其既有的 AUTH_FORBIDDEN，不改变原错误语义
   if (role !== 'SUPER_ADMIN' && SUPER_ADMIN_ONLY_PATTERNS.some((pattern) => pattern.test(lower))) {
     throw createApiError(403, 'AUTH_PAGE_FORBIDDEN', '该接口仅超级管理员可访问')
   }
