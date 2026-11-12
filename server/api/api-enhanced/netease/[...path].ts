@@ -2,6 +2,10 @@
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import {
+  isNeteaseRealIpEnabled,
+  resolveNeteaseRealIp
+} from '~~/server/utils/neteaseRealIp'
 
 const neteaseEnhancedApiPromise = import('@neteasecloudmusicapienhanced/api').then((mod) => {
   return (mod.default || {}) as Record<string, (params: Record<string, any>) => Promise<any>>
@@ -108,6 +112,23 @@ const normalizeParams = (input: Record<string, any>) => {
   return output
 }
 
+/**
+ * 出口 IP 的稳定种子：
+ * - 扫码流程用 unikey，保证 key/create/check 三步落在同一地区；
+ * - 账号相关请求用 MUSIC_U，保证同一账号的地区不来回跳；
+ * - 其余请求（搜索、歌曲地址等）每次随机，不携带任何账号特征。
+ */
+const buildRealIpSeed = (endpointPath: string, params: Record<string, any>): string | undefined => {
+  if (endpointPath.startsWith('login/qr/')) {
+    const key = typeof params.key === 'string' ? params.key.trim() : ''
+    return key ? `qr:${key}` : 'qr:default'
+  }
+
+  const cookie = typeof params.cookie === 'string' ? params.cookie : ''
+  const matched = cookie.match(/(?:^|;\s*)MUSIC_U=([^;]+)/)
+  return matched?.[1] ? `account:${matched[1]}` : undefined
+}
+
 export default defineEventHandler(async (event) => {
   const rawPath = getRouterParam(event, 'path')
   const endpointPath = Array.isArray(rawPath) ? rawPath.join('/') : rawPath
@@ -158,6 +179,12 @@ export default defineEventHandler(async (event) => {
   }
 
   const params = { ...queryParams, ...bodyParams }
+
+  // 首尔机房出口会被网易云判为海外，登录与账号接口直接失败；统一改写 X-Real-IP。
+  // 客户端传入的 realIP 一律忽略，避免该代理变成任意 IP 伪造入口。
+  if (isNeteaseRealIpEnabled()) {
+    params.realIP = resolveNeteaseRealIp(buildRealIpSeed(endpointPath, params))
+  }
 
   // 等待 xeapi 公钥等配置就绪
   await ensureNcmConfig()
