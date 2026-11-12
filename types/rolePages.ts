@@ -103,27 +103,46 @@ export const PAGES_ADDED_IN_VERSION: Record<number, readonly string[]> = {
  */
 export type RolePagesConfig = Record<string, string[] | number>
 
+/** 按快照版本补齐该版本新增的页面（只补角色默认就含的，显式取消的不动）。 */
+const applyVersionAdditions = (role: ConfigurableRole, pages: string[], rawVersion: unknown): string[] => {
+  const storedVersion = typeof rawVersion === 'number' ? rawVersion : Number(rawVersion ?? 1)
+  const from = Number.isFinite(storedVersion) ? Math.max(1, Math.floor(storedVersion)) : 1
+  if (from >= ROLE_PAGES_SCHEMA_VERSION) return pages
+  const defaults = DEFAULT_ROLE_PAGES[role] || []
+  const out = [...pages]
+  for (let v = from + 1; v <= ROLE_PAGES_SCHEMA_VERSION; v++) {
+    for (const pid of PAGES_ADDED_IN_VERSION[v] || []) {
+      if (defaults.includes(pid) && !out.includes(pid)) out.push(pid)
+    }
+  }
+  return out
+}
+
+/**
+ * 把存储快照规范化为「当前版本视图」：旧快照补入该版本新增且角色默认就含的页面。
+ * 仅用于回显（GET role-pages 给配置页渲染草稿），**不写库**；
+ * 运行时鉴权解析见 resolveEffectivePages（同一套补齐规则）。
+ */
+export const normalizeRolePagesConfig = (rolePages: RolePagesConfig | null | undefined): RolePagesConfig | null => {
+  if (!rolePages) return null
+  const out: RolePagesConfig = { ...rolePages }
+  for (const role of CONFIGURABLE_ROLES) {
+    const value = out[role]
+    if (!Array.isArray(value)) continue
+    out[role] = applyVersionAdditions(role, value, rolePages.__version)
+  }
+  return out
+}
+
 /** 计算某角色生效页面：配置含该角色键则用配置值，否则用内置默认。
  *  纵深防御：无论数据来源，一律过滤超管专属页面（防止绕过 API 直改库获得超管页）。 */
 export const resolveEffectivePages = (role: string, rolePages: RolePagesConfig | null | undefined): string[] | null => {
   if (!(CONFIGURABLE_ROLES as readonly string[]).includes(role)) return null
   const configured = rolePages?.[role]
   const defaults = DEFAULT_ROLE_PAGES[role as ConfigurableRole] || []
-  let pages: string[]
-  if (Array.isArray(configured)) {
-    // 快照 + 版本增量补齐：只补该角色默认就含的新增页面，显式取消的其他页面不动
-    pages = [...configured]
-    const rawVersion = rolePages?.__version
-    const storedVersion = typeof rawVersion === 'number' ? rawVersion : Number(rawVersion ?? 1)
-    const from = Number.isFinite(storedVersion) ? Math.max(1, Math.floor(storedVersion)) : 1
-    for (let v = from + 1; v <= ROLE_PAGES_SCHEMA_VERSION; v++) {
-      for (const pid of PAGES_ADDED_IN_VERSION[v] || []) {
-        if (defaults.includes(pid) && !pages.includes(pid)) pages.push(pid)
-      }
-    }
-  } else {
-    pages = defaults
-  }
+  const pages = Array.isArray(configured)
+    ? applyVersionAdditions(role as ConfigurableRole, configured, rolePages?.__version)
+    : defaults
   return [...new Set(pages.filter((p) => !(SUPER_ADMIN_ONLY_PAGES as readonly string[]).includes(p)))]
 }
 

@@ -11,7 +11,7 @@ import { db } from '~/drizzle/db'
 import { systemSettings } from '~/drizzle/schema'
 import { requireSuperAdmin } from '~~/server/utils/requireAdmin'
 import { setHeader } from 'h3'
-import { DEFAULT_ROLE_PAGES } from '~~/types/rolePages'
+import { DEFAULT_ROLE_PAGES, normalizeRolePagesConfig } from '~~/types/rolePages'
 
 export default defineEventHandler(async (event) => {
   requireSuperAdmin(event)
@@ -19,8 +19,10 @@ export default defineEventHandler(async (event) => {
 
   const rows = await db.select({ rolePages: systemSettings.rolePages }).from(systemSettings).limit(1)
 
+  // 回显用「当前版本视图」：旧快照里缺失的新增页（如 ops-board）按版本补齐后再给配置页，
+  // 避免「服务端已按补齐后的页面放行、配置页却显示未勾选」的口径分裂。
   return {
-    rolePages: rows[0]?.rolePages ?? null,
+    rolePages: normalizeRolePagesConfig(rows[0]?.rolePages ?? null),
     defaults: DEFAULT_ROLE_PAGES
   }
 })

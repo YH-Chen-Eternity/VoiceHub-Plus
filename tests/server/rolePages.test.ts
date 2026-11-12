@@ -65,6 +65,19 @@ describe('types/rolePages.ts 共享定义', () => {
     assert.deepEqual(stamped, ['overview'], '版本已定格后取消勾选保持取消')
   })
 
+  test('normalizeRolePagesConfig：配置页回显与运行时生效值同口径', async () => {
+    const mod = await import('../../types/rolePages.ts')
+    const legacy = { ADMIN: ['overview'], REVIEWER: ['community-review'] }
+    const view = mod.normalizeRolePagesConfig(legacy)
+    assert.ok(Array.isArray(view?.ADMIN) && (view!.ADMIN as string[]).includes('ops-board'), '回显视图应含补齐后的 ops-board')
+    assert.deepEqual(view?.REVIEWER, ['community-review'], '默认不含看板的角色回显不变')
+    assert.equal(view?.__version, undefined, '不写库、不应擅自加版本号')
+    assert.equal(mod.normalizeRolePagesConfig(null), null)
+    // GET 端点使用该视图，防止「服务端放行、配置页显示未勾选」
+    const src = read('server/api/admin/role-pages.get.ts')
+    assert.match(src, /normalizeRolePagesConfig/, 'GET 应返回规范化视图')
+  })
+
   test('内置默认不含超管专属页面（database / role-permissions）', async () => {
     const mod = await import('../../types/rolePages.ts')
     for (const [role, pages] of Object.entries(mod.DEFAULT_ROLE_PAGES)) {
