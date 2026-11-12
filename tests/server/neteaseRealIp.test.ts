@@ -39,6 +39,12 @@ test('随机结果避开网段内的 .0 与 .255 广播地址', () => {
   }
 })
 
+test('不包含腾讯云等 IDC 网段，避免被识别为机房 IP', () => {
+  assert.equal(isGuangdongIp('129.204.10.10'), false)
+  assert.equal(isGuangdongIp('119.29.10.10'), false)
+  assert.equal(isGuangdongIp('157.255.10.10'), false)
+})
+
 test('NETEASE_REAL_IP 可指定固定出口，非法值则回退随机池', () => {
   const original = process.env.NETEASE_REAL_IP
   try {

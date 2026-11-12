@@ -17,7 +17,11 @@ interface GuangdongIpRange {
   note: string
 }
 
-/** 广东主要运营商与腾讯深圳的公网网段（电信 / 移动 / 联通 / 腾讯） */
+/**
+ * 广东三大运营商公网网段（电信 / 移动 / 联通）。
+ * 刻意不包含腾讯云 / DNSPod / 深圳腾讯等 IDC 段：云厂商地址会被网易云识别为
+ * 机房 IP，反而更容易命中华东地区以外的风控策略，住宅宽带段更接近真实用户。
+ */
 const GUANGDONG_CIDRS: Array<[string, string]> = [
   ['113.108.0.0/14', '广东电信'],
   ['119.145.0.0/16', '深圳电信'],
@@ -28,10 +32,7 @@ const GUANGDONG_CIDRS: Array<[string, string]> = [
   ['61.144.0.0/15', '广州电信'],
   ['218.20.0.0/16', '广州电信'],
   ['120.196.0.0/14', '广东移动'],
-  ['58.248.0.0/16', '广东联通'],
-  ['157.255.0.0/16', '深圳腾讯'],
-  ['119.29.0.0/16', '腾讯 DNSPod'],
-  ['129.204.0.0/16', '腾讯云广州']
+  ['58.248.0.0/16', '广东联通']
 ]
 
 const ipv4ToInt = (ip: string): number => {
@@ -82,9 +83,14 @@ const fnv1a = (input: string): number => {
 }
 
 const randomOffset = (): number => {
-  // 不使用 Math.random：出口 IP 属于风控相关参数，用 CSPRNG 避免可预测
+  // 不使用 Math.random：出口 IP 属于风控相关参数，用 CSPRNG 避免可预测。
+  // 直接取模会让低位地址略占优，这里用拒绝采样消除模偏差（池约 2^24，最多重采样 8 次）。
   const buffer = new Uint32Array(1)
-  globalThis.crypto.getRandomValues(buffer)
+  const limit = 0x1_0000_0000 - (0x1_0000_0000 % TOTAL_ADDRESSES)
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    globalThis.crypto.getRandomValues(buffer)
+    if (buffer[0] < limit) return buffer[0] % TOTAL_ADDRESSES
+  }
   return buffer[0] % TOTAL_ADDRESSES
 }
 

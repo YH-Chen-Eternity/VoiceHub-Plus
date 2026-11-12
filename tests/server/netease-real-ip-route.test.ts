@@ -69,7 +69,7 @@ const { default: handler } = await import(
   `data:text/javascript;base64,${Buffer.from(compiled.outputFiles[0].contents).toString('base64')}`
 )
 
-async function call(pathname: string, query: Record<string, string> = {}) {
+async function call(pathname: string, query: Record<string, any> = {}) {
   const event: any = { params: { path: pathname }, method: 'GET', query: { ...query } }
   await handler(event)
   const callRecord = (globalThis as any).__ncmCalls.at(-1)
@@ -108,6 +108,12 @@ test('同一账号的 cookie 请求使用同一 IP', async () => {
   const second = await call('login/status', { cookie })
   assert.equal(first.realIP, second.realIP)
   assert.ok(isGuangdongIp(String(first.realIP)))
+})
+
+test('cookie 以数组重复传参时仍能识别 MUSIC_U', async () => {
+  const single = await call('login/status', { cookie: 'MUSIC_U=abc123; __csrf=def' })
+  const arrayForm = await call('login/status', { cookie: ['MUSIC_U=abc123', '__csrf=def'] })
+  assert.equal(arrayForm.realIP, single.realIP)
 })
 
 test('NETEASE_REAL_IP_MODE=off 时不下发 realIP', async () => {

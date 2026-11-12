@@ -118,16 +118,31 @@ const normalizeParams = (input: Record<string, any>) => {
  * - 账号相关请求用 MUSIC_U，保证同一账号的地区不来回跳；
  * - 其余请求（搜索、歌曲地址等）每次随机，不携带任何账号特征。
  */
-const buildRealIpSeed = (endpointPath: string, params: Record<string, any>): string | undefined => {
+const buildRealIpSeed = (
+  endpointPath: string,
+  params: Record<string, any>,
+  cookieText: string
+): string | undefined => {
   if (endpointPath.startsWith('login/qr/')) {
     const key = typeof params.key === 'string' ? params.key.trim() : ''
     return key ? `qr:${key}` : 'qr:default'
   }
 
-  const cookie = typeof params.cookie === 'string' ? params.cookie : ''
-  const matched = cookie.match(/(?:^|;\s*)MUSIC_U=([^;]+)/)
+  const matched = cookieText.match(/(?:^|;\s*)MUSIC_U=([^;]+)/)
   return matched?.[1] ? `account:${matched[1]}` : undefined
 }
+
+/** cookie 可能按数组重复传参（cookie=a&cookie=b），合并全部片段再解析，避免漏掉 MUSIC_U */
+const collectCookieText = (input: unknown): string => {
+  if (!input || typeof input !== 'object') return ''
+  const raw = (input as Record<string, unknown>).cookie
+  if (typeof raw === 'string') return raw
+  if (Array.isArray(raw)) {
+    return raw.filter((item): item is string => typeof item === 'string').join('; ')
+  }
+  return ''
+}
+
 
 export default defineEventHandler(async (event) => {
   const rawPath = getRouterParam(event, 'path')
@@ -168,22 +183,31 @@ export default defineEventHandler(async (event) => {
     })
   }
 
-  const queryParams = normalizeParams(getQuery(event))
+  const rawQuery = getQuery(event)
+  const queryParams = normalizeParams(rawQuery)
   let bodyParams: Record<string, any> = {}
+  let rawBody: Record<string, any> = {}
 
   if (method !== 'GET') {
     const body = await readBody(event).catch(() => ({}))
     if (body && typeof body === 'object' && !Array.isArray(body)) {
-      bodyParams = normalizeParams(body as Record<string, any>)
+      rawBody = body as Record<string, any>
+      bodyParams = normalizeParams(rawBody)
     }
   }
 
   const params = { ...queryParams, ...bodyParams }
+  const cookieText = [collectCookieText(rawQuery), collectCookieText(rawBody)]
+    .filter(Boolean)
+    .join('; ')
 
   // 首尔机房出口会被网易云判为海外，登录与账号接口直接失败；统一改写 X-Real-IP。
   // 客户端传入的 realIP 一律忽略，避免该代理变成任意 IP 伪造入口。
   if (isNeteaseRealIpEnabled()) {
-    params.realIP = resolveNeteaseRealIp(buildRealIpSeed(endpointPath, params))
+    params.realIP = resolveNeteaseRealIp(buildRealIpSeed(endpointPath, params, cookieText))
+    if (process.env.NETEASE_REAL_IP_DEBUG === 'true') {
+      console.log(`[Netease] ${endpointPath} 出口 IP: ${params.realIP}`)
+    }
   }
 
   // 等待 xeapi 公钥等配置就绪
