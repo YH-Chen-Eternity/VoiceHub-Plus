@@ -86,4 +86,8 @@ test('超管专属数据库端点对 ADMIN 一律拒绝', () => {
   const block = src.slice(src.indexOf('SUPER_ADMIN_ONLY_PATTERNS'), src.indexOf('const SONG_ADMIN_ALLOWED_PATTERNS'))
   assert.match(block, /\/api\\\/admin\\\/database/, '数据库接口应纳入超管专属')
   assert.match(src, /role !== 'SUPER_ADMIN' && SUPER_ADMIN_ONLY_PATTERNS\.some/, '非超管命中应拒绝')
+  // 顺序：先按既有角色白名单拒绝（错误码保持 AUTH_FORBIDDEN），再做超管专属与页面判定
+  const songAdminCheck = src.indexOf("role === 'SONG_ADMIN' && !SONG_ADMIN_ALLOWED_PATTERNS")
+  const superOnlyCheck = src.indexOf('SUPER_ADMIN_ONLY_PATTERNS.some')
+  assert.ok(songAdminCheck > -1 && superOnlyCheck > songAdminCheck, '超管专属检查应位于 SONG_ADMIN 判定之后')
 })

@@ -82,11 +82,6 @@ export default defineEventHandler(async (event) => {
 
   const method = getMethod(event).toUpperCase()
 
-  // 超管专属端点（数据库运维）：ADMIN 一律拒绝，与其页面权限保持一致
-  if (role !== 'SUPER_ADMIN' && SUPER_ADMIN_ONLY_PATTERNS.some((pattern) => pattern.test(lower))) {
-    throw createApiError(403, 'AUTH_PAGE_FORBIDDEN', '该接口仅超级管理员可访问')
-  }
-
   if (role === 'SONG_ADMIN' && !SONG_ADMIN_ALLOWED_PATTERNS.some((pattern) => pattern.test(lower))) {
     throw createApiError(403, 'AUTH_FORBIDDEN', '该接口仅系统管理员可访问')
   }
@@ -98,6 +93,11 @@ export default defineEventHandler(async (event) => {
         throw createApiError(403, 'AUTH_FORBIDDEN', '放歌员仅可查看排期相关信息')
       }
     }
+  }
+
+  // 超管专属端点（数据库运维）：ADMIN 一律拒绝，与其页面权限保持一致
+  if (role !== 'SUPER_ADMIN' && SUPER_ADMIN_ONLY_PATTERNS.some((pattern) => pattern.test(lower))) {
+    throw createApiError(403, 'AUTH_PAGE_FORBIDDEN', '该接口仅超级管理员可访问')
   }
 
   // ── 角色权限（rolePages）端点级强制 ──

@@ -4,6 +4,8 @@
  * 公开无鉴权，响应不含版本、提交、主机名等任何环境信息。
  */
 export default defineEventHandler((event) => {
+  // 显式声明 JSON：不依赖 h3 默认推断，避免中间层按 text/plain 处理
+  setHeader(event, 'Content-Type', 'application/json; charset=utf-8')
   setHeader(event, 'Cache-Control', 'no-store')
   return { status: 'ok' }
 })

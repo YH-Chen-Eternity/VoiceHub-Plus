@@ -52,13 +52,16 @@ else
     else
       log "重启应用容器 voicehub"
       echo "$now" > "$RESTART_AT_FILE"
-      if [ "$(state voicehub)" = "running" ]; then
-        docker restart voicehub >/dev/null 2>&1
-        rc=$?
-      else
-        ( cd "$VH_HOME" && docker compose up -d voicehub ) >/dev/null 2>&1
-        rc=$?
-      fi
+      case "$(state voicehub)" in
+        running|restarting)
+          docker restart voicehub >/dev/null 2>&1
+          rc=$?
+          ;;
+        *)
+          ( cd "$VH_HOME" && docker compose up -d voicehub ) >/dev/null 2>&1
+          rc=$?
+          ;;
+      esac
       [ "$rc" -ne 0 ] && log "容器恢复命令失败（退出码 $rc）"
       # 最长等待 120s：冷启动含依赖等待与迁移，短于 start_period 易误判失败
       for _ in $(seq 1 24); do
@@ -84,6 +87,7 @@ else
 fi
 
 # ---- 2) 依赖容器：非 running 时拉起（restart 策略之外的兜底）----
+# 容器名 → compose 服务名（去掉 voicehub- 前缀）一一对应：postgres / redis / rewriter
 for c in voicehub-postgres voicehub-redis voicehub-rewriter; do
   st=$(state "$c")
   case "$st" in
@@ -101,7 +105,7 @@ for c in voicehub-postgres voicehub-redis voicehub-rewriter; do
 done
 
 # ---- 3) 磁盘保护：占用超阈值时清理悬空镜像与构建缓存 ----
-used=$(df --output=pcent / 2>/dev/null | tail -1 | tr -dc '0-9')
+used=$(df -P / 2>/dev/null | awk 'NR==2 {gsub(/%/, "", $5); print $5}')
 if [ -n "${used:-}" ] && [ "$used" -ge "$DISK_MAX" ]; then
   log "根分区占用 ${used}% ≥ ${DISK_MAX}%，清理悬空镜像与构建缓存"
   docker image prune -f >/dev/null 2>&1
