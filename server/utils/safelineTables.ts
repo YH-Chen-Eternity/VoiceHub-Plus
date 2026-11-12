@@ -207,6 +207,8 @@ export async function queryHttpTrafficAgg(
           : sql`SELECT count(DISTINCT key)::int AS "n"
                   FROM ${sql(aggTable)}
                  WHERE type = 'sl_session' AND "time" >= ${from}`
+          // type='sl_session'（session 聚合）已於生產 mgt_statistics_agg 實測存在，
+          // 僅在 statistics_ips 缺失的部署上作為 UV 回退。
       ])
       return { status, pv, uv }
     })
@@ -241,7 +243,10 @@ export async function queryHttpTrafficAgg(
   }
 
   // ── 路徑二（舊版兜底）：直接掃事件表 ──
-  const table = await resolveTable(SL.attackTables)
+  // 僅探測帶 status_code 欄的舊版事件表（mgt_attack_log）；
+  // 免費版 mgt_detect_log_basic 沒有該欄，混入候選會讓 SQL 報
+  // column "status_code" does not exist，被誤判成連線故障。
+  const table = await resolveTable(SL.eventTables)
   if (!table) return empty
 
   const rows = await safelineQuery((sql) => sql`

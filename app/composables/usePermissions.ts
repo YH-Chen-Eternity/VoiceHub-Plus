@@ -30,7 +30,8 @@ export const usePermissions = () => {
 
     const effective = auth.user.value.effectivePages
     if (Array.isArray(effective)) {
-      return effective.includes(page)
+      // 纵深防御：超管专属页不因 effectivePages 下发而放行（上方已硬拦截，此处兜底过滤）
+      return effective.includes(page) && page !== 'database' && page !== 'role-permissions'
     }
 
     // 回退：内置默认页面（与后端 DEFAULT_ROLE_PAGES 保持一致）
@@ -62,10 +63,10 @@ export const usePermissions = () => {
 
     const role = auth.user.value.role
 
-    // 可配置角色优先后端下发的生效页面
+    // 可配置角色优先后端下发的生效页面；过滤超管专属页（纵深防御）
     const effective = auth.user.value.effectivePages
     if (role !== 'SUPER_ADMIN' && Array.isArray(effective)) {
-      return [...effective]
+      return effective.filter((p) => p !== 'database' && p !== 'role-permissions')
     }
 
     switch (role) {

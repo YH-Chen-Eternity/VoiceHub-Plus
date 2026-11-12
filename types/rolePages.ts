@@ -74,10 +74,13 @@ export const sanitizeRolePages = (input: unknown): Record<string, string[]> => {
   return out
 }
 
-/** 计算某角色生效页面：配置含该角色键则用配置值，否则用内置默认 */
+/** 计算某角色生效页面：配置含该角色键则用配置值，否则用内置默认。
+ *  纵深防御：无论数据来源，一律过滤超管专属页面（防止绕过 API 直改库获得超管页）。 */
 export const resolveEffectivePages = (role: string, rolePages: Record<string, string[]> | null | undefined): string[] | null => {
   if (!(CONFIGURABLE_ROLES as readonly string[]).includes(role)) return null
   const configured = rolePages?.[role]
-  if (Array.isArray(configured)) return [...configured]
-  return [...(DEFAULT_ROLE_PAGES[role as ConfigurableRole] || [])]
+  const pages = Array.isArray(configured)
+    ? configured
+    : DEFAULT_ROLE_PAGES[role as ConfigurableRole] || []
+  return [...new Set(pages.filter((p) => !(SUPER_ADMIN_ONLY_PAGES as readonly string[]).includes(p)))]
 }
