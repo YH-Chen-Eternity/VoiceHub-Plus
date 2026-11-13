@@ -181,7 +181,7 @@
                 >
                   <img
                     :alt="`图片 ${Number(index) + 1}`"
-                    :src="image.thumbUrl || image.url"
+                    :src="image.thumbUrl ?? image.url"
                     loading="lazy"
                   >
                 </button>
@@ -459,7 +459,7 @@
                     :key="image.id"
                     class="upload-thumb"
                   >
-                    <img :alt="`已选图片 ${Number(index) + 1}`" :src="image.thumbUrl || image.url">
+                    <img :alt="`已选图片 ${Number(index) + 1}`" :src="image.thumbUrl ?? image.url">
                     <button class="thumb-remove" type="button" @click="removeImage(image.id)">
                       <X :size="12" />
                     </button>
@@ -565,7 +565,7 @@
                 >
                   <img
                     :alt="`图片 ${Number(index) + 1}`"
-                    :src="image.thumbUrl || image.url"
+                    :src="image.thumbUrl ?? image.url"
                     loading="lazy"
                   >
                 </button>
