@@ -1212,11 +1212,21 @@ function isCardVisible(entry: IntersectionObserverEntry) {
   return entry.intersectionRect.height >= Math.min(cardHeight * 0.5, viewportHeight * 0.6)
 }
 
-/** 只观察当前渲染出来的卡片；已上报过的直接跳过，避免重复建观察 */
-function observePostCards() {
+/**
+ * 只观察当前渲染出来的卡片；已上报过的直接跳过，避免重复建观察。
+ * ClientOnly + 异步数据下，posts 写入到真实 DOM 之间可能还差一两帧，
+ * 这里查不到卡片就短延时重试，避免整页一次都不计数。
+ */
+function observePostCards(retry = 0) {
   if (typeof IntersectionObserver === 'undefined') return
-  const container = feedListRef.value
-  if (!container) return
+  // 优先用模板 ref；ref 尚未就绪时退回到文档查询，保证卡片一定能被观察
+  const container =
+    feedListRef.value ||
+    (typeof document !== 'undefined' ? document.querySelector<HTMLElement>('.feed-list') : null)
+  if (!container) {
+    if (retry < 20) setTimeout(() => observePostCards(retry + 1), 300)
+    return
+  }
   if (!impressionObserver) {
     impressionObserver = new IntersectionObserver(
       (entries) => {
@@ -1246,7 +1256,12 @@ function observePostCards() {
       { threshold: [0, 0.25, 0.5, 0.75, 1] }
     )
   }
-  container.querySelectorAll<HTMLElement>('[data-post-id]').forEach((el) => {
+  const cards = container.querySelectorAll<HTMLElement>('[data-post-id]')
+  if (!cards.length && retry < 20) {
+    setTimeout(() => observePostCards(retry + 1), 300)
+    return
+  }
+  cards.forEach((el) => {
     const postId = Number(el.dataset.postId)
     if (!postId || reportedViewIds.has(postId)) return
     impressionObserver?.observe(el)
