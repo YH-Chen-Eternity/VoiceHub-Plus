@@ -37,6 +37,10 @@ function safeEqual(a: string, b: string): boolean {
 
 /** 从签名 cookie 读取匿名 id；无效则换发新 id。返回匿名 id（不落库明文） */
 function getOrCreateGuestId(event: H3Event): string {
+  // 同一请求内多次调用（如「限流键 + 计数」）复用同一个 id，
+  // 否则首次访问会连发两个不同的 cookie，限流桶与实际计数对不上
+  const cached = (event.context as any).__vhGuestId as string | undefined
+  if (cached) return cached
   const raw = getCookie(event, COOKIE_NAME)
   if (raw) {
     const dot = raw.lastIndexOf('.')
@@ -49,6 +53,7 @@ function getOrCreateGuestId(event: H3Event): string {
     }
   }
   const id = randomBytes(16).toString('hex')
+  ;(event.context as any).__vhGuestId = id
   setCookie(event, COOKIE_NAME, `${id}.${sign(id)}`, {
     httpOnly: true,
     sameSite: 'lax',
@@ -110,3 +115,12 @@ export async function purgeExpiredGuestViews(): Promise<number> {
 
 /** 供测试与其它模块复用的常量 */
 export const GUEST_VIEW_COOKIE = COOKIE_NAME
+
+/**
+ * 游客维度的限流键：直接用匿名哈希，不依赖 IP。
+ * 生产部署在反向代理之后时，所有请求的 TCP 源地址都是代理地址，
+ * 按 IP 限流会把全体游客挤进同一个桶；匿名哈希至少能按浏览器区分。
+ */
+export function getGuestRateKey(event: H3Event): string {
+  return hashGuestId(getOrCreateGuestId(event))
+}
