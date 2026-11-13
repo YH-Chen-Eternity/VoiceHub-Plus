@@ -194,7 +194,10 @@ export async function loadCommunityPosts(options: LoadOptions) {
 
   const statusByPost = new Map<number, string>()
   for (const row of rows) statusByPost.set(row.id, row.status)
-  const imagesByPost = new Map<number, Array<{ id: number; url: string }>>()
+  const imagesByPost = new Map<
+    number,
+    Array<{ id: number; url: string; thumbUrl: string }>
+  >()
   for (const image of imageRows) {
     const list = imagesByPost.get(image.postId) || []
     // 已通过审核的帖子图片走公开 CDN 端点（无 Cookie、可公共缓存、支持 ETag/304），
@@ -203,7 +206,9 @@ export async function loadCommunityPosts(options: LoadOptions) {
       statusByPost.get(image.postId) === 'APPROVED'
         ? `/api/public/media/${image.mediaId}`
         : `/api/media/${image.mediaId}`
-    list.push({ id: image.mediaId, url })
+    // 列表宫格默认用 ≤512KB 的预览图（缺失时端点自动回退原图），
+    // 点开查看器再按需取原图，避免一次拉十几张 3MB 大图把窄带占满
+    list.push({ id: image.mediaId, url, thumbUrl: `${url}?variant=preview` })
     imagesByPost.set(image.postId, list)
   }
 

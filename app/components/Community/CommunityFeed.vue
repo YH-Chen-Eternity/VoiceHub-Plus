@@ -174,7 +174,11 @@
                   type="button"
                   @click="openLightbox(post.images, Number(index))"
                 >
-                  <img :alt="`图片 ${Number(index) + 1}`" :src="image.url" loading="lazy">
+                  <img
+                    :alt="`图片 ${Number(index) + 1}`"
+                    :src="image.thumbUrl || image.url"
+                    loading="lazy"
+                  >
                 </button>
               </div>
 
@@ -450,7 +454,7 @@
                     :key="image.id"
                     class="upload-thumb"
                   >
-                    <img :alt="`已选图片 ${Number(index) + 1}`" :src="image.url">
+                    <img :alt="`已选图片 ${Number(index) + 1}`" :src="image.thumbUrl || image.url">
                     <button class="thumb-remove" type="button" @click="removeImage(image.id)">
                       <X :size="12" />
                     </button>
@@ -554,7 +558,11 @@
                   type="button"
                   @click="openLightbox(selectedPost.images, Number(index))"
                 >
-                  <img :alt="`图片 ${Number(index) + 1}`" :src="image.url" loading="lazy">
+                  <img
+                    :alt="`图片 ${Number(index) + 1}`"
+                    :src="image.thumbUrl || image.url"
+                    loading="lazy"
+                  >
                 </button>
               </div>
 
