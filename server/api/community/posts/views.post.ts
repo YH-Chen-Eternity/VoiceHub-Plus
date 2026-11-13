@@ -13,6 +13,9 @@ import { checkDistributedRateLimit } from '~~/server/utils/rateLimiter'
 /** 单次上报的最大帖子数：客户端按批合并，避免滚动时每个卡片一个请求 */
 const MAX_BATCH = 40
 
+/** 每个上报者的每分钟上限：单批最多 40 条，多标签页同时浏览时 120 会误伤 */
+const RATE_LIMIT_PER_MINUTE = 300
+
 /**
  * 列表曝光计浏览（「在外面看到也算一次」）。
  *
@@ -38,7 +41,7 @@ export default defineEventHandler(async (event) => {
   const rateKey = guest
     ? `community_view:guest:${getGuestRateKey(event)}`
     : `community_view:user:${user.id}`
-  const limit = await checkDistributedRateLimit(rateKey, 120, 60 * 1000).catch(() => null)
+  const limit = await checkDistributedRateLimit(rateKey, RATE_LIMIT_PER_MINUTE, 60 * 1000).catch(() => null)
   if (limit && !limit.isAllowed) return { success: true, viewCounts: {} }
 
   // 只统计当前读者真正能看到的帖子：已通过、未删除；游客还要落在「游客可见」板块内

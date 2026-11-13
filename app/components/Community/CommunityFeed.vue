@@ -1156,6 +1156,8 @@ const IMPRESSION_DWELL_MS = 1000
 const IMPRESSION_FLUSH_MS = 1200
 const IMPRESSION_BATCH_MAX = 40
 let impressionObserver: IntersectionObserver | null = null
+let feedCardsObserver: MutationObserver | null = null
+let feedCardsTarget: HTMLElement | null = null
 const impressionTimers = new WeakMap<Element, ReturnType<typeof setTimeout>>()
 const pendingViewIds = new Set<number>()
 const reportedViewIds = new Set<number>()
@@ -1212,10 +1214,21 @@ function isCardVisible(entry: IntersectionObserverEntry) {
   return entry.intersectionRect.height >= Math.min(cardHeight * 0.5, viewportHeight * 0.6)
 }
 
+/** 把容器里已渲染的卡片挂到观察器上，返回卡片数量 */
+function watchRenderedCards(container: HTMLElement) {
+  const cards = container.querySelectorAll<HTMLElement>('[data-post-id]')
+  cards.forEach((el) => {
+    const postId = Number(el.dataset.postId)
+    if (!postId || reportedViewIds.has(postId)) return
+    impressionObserver?.observe(el)
+  })
+  return cards.length
+}
+
 /**
  * 只观察当前渲染出来的卡片；已上报过的直接跳过，避免重复建观察。
- * ClientOnly + 异步数据下，posts 写入到真实 DOM 之间可能还差一两帧，
- * 这里查不到卡片就短延时重试，避免整页一次都不计数。
+ * 卡片由异步数据渲染，容器与卡片可能晚一两帧出现：先挂 MutationObserver，
+ * 卡片插入即观察；再保留短轮询兜底，避免极端情况下整页一次都不计数。
  */
 function observePostCards(retry = 0) {
   if (typeof IntersectionObserver === 'undefined') return
@@ -1256,21 +1269,28 @@ function observePostCards(retry = 0) {
       { threshold: [0, 0.25, 0.5, 0.75, 1] }
     )
   }
-  const cards = container.querySelectorAll<HTMLElement>('[data-post-id]')
-  if (!cards.length && retry < 20) {
-    setTimeout(() => observePostCards(retry + 1), 300)
-    return
+  // 容器被重建（切换板块、分页重置）时重新挂观察目标
+  if (feedCardsTarget !== container) {
+    feedCardsObserver?.disconnect()
+    feedCardsObserver = null
+    feedCardsTarget = null
+    if (typeof MutationObserver !== 'undefined') {
+      feedCardsObserver = new MutationObserver(() => watchRenderedCards(container))
+      feedCardsObserver.observe(container, { childList: true, subtree: true })
+      feedCardsTarget = container
+    }
   }
-  cards.forEach((el) => {
-    const postId = Number(el.dataset.postId)
-    if (!postId || reportedViewIds.has(postId)) return
-    impressionObserver?.observe(el)
-  })
+  if (!watchRenderedCards(container) && retry < 20) {
+    setTimeout(() => observePostCards(retry + 1), 300)
+  }
 }
 
 function stopImpressions() {
   impressionObserver?.disconnect()
   impressionObserver = null
+  feedCardsObserver?.disconnect()
+  feedCardsObserver = null
+  feedCardsTarget = null
   if (viewFlushTimer) {
     clearTimeout(viewFlushTimer)
     viewFlushTimer = null
