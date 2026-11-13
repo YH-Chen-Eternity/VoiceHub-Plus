@@ -48,6 +48,7 @@ function getOrCreateGuestId(event: H3Event): string {
       const id = raw.slice(0, dot)
       const sig = raw.slice(dot + 1)
       if (/^[0-9a-f]{32}$/.test(id) && sig && safeEqual(sig, sign(id))) {
+        ;(event.context as any).__vh_guest_id = id
         return id
       }
     }
