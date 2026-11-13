@@ -41,7 +41,7 @@ export default defineEventHandler(async (event) => {
   // multipart 会整体读入内存，先按声明的长度拒绝明显超限的请求
   const declaredLength = Number(getHeader(event, 'content-length') || 0)
   if (Number.isFinite(declaredLength) && declaredLength > COMMUNITY_IMAGE_MAX_UPLOAD_BYTES + 512 * 1024) {
-    throw createApiError(413, 'MEDIA_TOO_LARGE', '图片原始文件不能超过 15MB')
+    throw createApiError(413, 'MEDIA_TOO_LARGE', '图片原始文件不能超过 20MB')
   }
 
   const form = await readMultipartFormData(event)
@@ -52,7 +52,7 @@ export default defineEventHandler(async (event) => {
 
   const mime = String(file.type || '').toLowerCase()
   if (file.data.length > COMMUNITY_IMAGE_MAX_UPLOAD_BYTES) {
-    throw createApiError(400, 'MEDIA_TOO_LARGE', '图片原始文件不能超过 15MB')
+    throw createApiError(400, 'MEDIA_TOO_LARGE', '图片原始文件不能超过 20MB')
   }
 
   // 类型与内容校验、去元数据、「尽量无损」重编码、派生预览图统一在此完成

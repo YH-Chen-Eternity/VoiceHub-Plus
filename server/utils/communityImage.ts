@@ -5,9 +5,9 @@ import {
   type NormalizedImage
 } from './imageSecurity'
 
-// 社区图片：入库体积上限 3MB（「查看原图」展示的那份），原始上传上限 15MB
+// 社区图片：入库体积上限 3MB（「查看原图」展示的那份），原始上传上限 20MB
 export const COMMUNITY_IMAGE_MAX_BYTES = 3 * 1024 * 1024
-export const COMMUNITY_IMAGE_MAX_UPLOAD_BYTES = 15 * 1024 * 1024
+export const COMMUNITY_IMAGE_MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 // 预览图（九宫格缩略图 / 灯箱默认展示）体积上限，明显小于 3MB
 export const COMMUNITY_IMAGE_PREVIEW_MAX_BYTES = 512 * 1024
 
@@ -30,7 +30,7 @@ export async function normalizeCommunityImage(params: {
     throw createApiError(400, 'MEDIA_NO_FILE', '请选择要上传的图片')
   }
   if (params.data.length > COMMUNITY_IMAGE_MAX_UPLOAD_BYTES) {
-    throw createApiError(400, 'MEDIA_TOO_LARGE', '图片原始文件不能超过 15MB')
+    throw createApiError(400, 'MEDIA_TOO_LARGE', '图片原始文件不能超过 20MB')
   }
 
   const normalized = await normalizeUploadedImage({

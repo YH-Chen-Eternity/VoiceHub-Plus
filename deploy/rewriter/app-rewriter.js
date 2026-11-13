@@ -1114,157 +1114,6 @@ function tsInit(){
 function tsGet(){if(window.__vhModalToken)return Promise.resolve(window.__vhModalToken);return tsInit().then(function(ok){if(!ok)return '';if(tsErr)return '';return new Promise(function(res){if(tsToken)return res(tsToken);tsWaiters.push(res);setTimeout(function(){res(tsToken||'')},4000)})})}
 function withToken(init,tk){var ni=init?Object.assign({},init):{};try{var b=ni.body;if(typeof b==='string'){var j=JSON.parse(b);j.turnstileToken=tk;ni.body=JSON.stringify(j);var h=new Headers(ni.headers||{});if(!h.has('content-type'))h.set('content-type','application/json');ni.headers=h}else if(b&&typeof b==='object'&&!(b instanceof FormData)){ni.body=Object.assign({},b,{turnstileToken:tk})}else if(b instanceof FormData){b.append('turnstileToken',tk)}}catch(e){}return ni}
 var of=window.fetch;
-var unameShown=false;
-function vhEsc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
-function showUnameModal(){
-  if(unameShown||document.getElementById('vh-setup'))return;
-  unameShown=true;
-  var needPwd=!!window.__vhNeedPwd, needUname=!!window.__vhNeedUname;
-  var emailOk=!!window.__vhEmailVerified;
-  var curEmail=window.__vhEmail||'';
-  var m=document.createElement('div');
-  m.id='vh-setup';
-  m.style.cssText='position:fixed;inset:0;z-index:2147483000;background:rgba(0,0,0,.66);display:flex;align-items:flex-start;justify-content:center;padding:20px 16px 32px;overflow:auto;-webkit-overflow-scrolling:touch';
-  var card=document.createElement('div');
-  card.style.cssText='width:100%;max-width:440px;margin:0 auto;background:#16181d;border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:22px 20px;color:#eaeaea;font-family:system-ui,-apple-system,"Microsoft YaHei",sans-serif;box-shadow:0 24px 60px rgba(0,0,0,.5)';
-  var LBL='display:block;margin:0 0 6px;font-size:12px;font-weight:700;color:#9aa0a6';
-  var INP='width:100%;box-sizing:border-box;padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.16);background:#0f1115;color:#fff;font-size:14px;outline:none';
-  var html='<h3 style="margin:0 0 4px;font-size:16px;font-weight:800">完善账号信息</h3>'
-    +'<p style="margin:0 0 12px;font-size:12.5px;line-height:1.7;color:#9aa0a6">为了你的账号安全，首次登录需要设置'+(needPwd?(needUname?'<b style="color:#eaeaea">新的用户名</b>和<b style="color:#eaeaea">新的密码</b>':'<b style="color:#eaeaea">新的密码</b>'):'<b style="color:#eaeaea">新的用户名</b>')+'，并完成一次邮箱验证。设置后不再提醒。</p>';
-  if(!emailOk){
-    html+='<div id="vh-email-box" style="margin:0 0 16px;padding:14px;border-radius:12px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08)">'
-      +'<div style="font-size:12.5px;font-weight:800;margin-bottom:10px;color:#eaeaea">邮箱验证</div>'
-      +'<label style="'+LBL+'">邮箱地址</label>'
-      +'<div style="display:flex;gap:8px"><input id="vh-em" value="'+vhEsc(curEmail)+'" placeholder="name@example.com" style="'+INP+';flex:1">'
-      +'<button id="vh-em-send" type="button" style="flex:0 0 auto;padding:0 14px;border-radius:10px;border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.06);color:#eaeaea;font-size:12.5px;font-weight:700;cursor:pointer;white-space:nowrap">发送验证码</button></div>'
-      +'<label style="'+LBL+';margin-top:12px">邮箱验证码</label>'
-      +'<input id="vh-code" inputmode="numeric" maxlength="6" placeholder="6 位验证码" style="'+INP+'">'
-      +'<div id="vh-em-st" style="margin-top:8px;font-size:12px;color:#9aa0a6">验证码将发送至该邮箱，10 分钟内有效</div>'
-      +'</div>';
-  }
-  if(needUname){
-    html+='<label style="'+LBL+'">设置新用户名（登录账号）</label>'
-      +'<input id="vh-un" maxlength="20" placeholder="2-20 位中文/字母/数字/下划线" style="'+INP+'">'
-      +'<div id="vh-un-hint" style="margin:6px 0 14px;font-size:11.5px;line-height:1.7;color:#6b7280">当前用户名：'+vhEsc(window.__vhCurUname)+'，新用户名不能与它相同</div>';
-  }
-  if(needPwd){
-    html+='<div style="margin:0 0 8px;font-size:12.5px;font-weight:800;color:#eaeaea">设置新密码</div>'
-      +'<label style="'+LBL+'">当前密码</label><input id="vh-pw0" type="password" autocomplete="current-password" placeholder="输入当前登录密码" style="'+INP+';margin-bottom:10px">'
-      +'<label style="'+LBL+'">新密码</label><input id="vh-pw1" type="password" autocomplete="new-password" placeholder="至少 6 位" style="'+INP+'">'
-      +'<div style="margin:6px 0 14px;font-size:11.5px;line-height:1.7;color:#6b7280">新密码可以与原密码相同</div>'
-      +'<label style="'+LBL+'">确认新密码</label><input id="vh-pw2" type="password" autocomplete="new-password" placeholder="再次输入新密码" style="'+INP+'">';
-  }
-  if(needPwd){
-    html+='<div id="vh-setup-ts" style="margin-top:14px;display:flex;justify-content:center;min-height:65px"></div>'
-      +'<div style="margin:0 0 4px;font-size:11.5px;line-height:1.7;color:#6b7280;text-align:center">修改密码需要完成一次人机验证</div>';
-  }
-  html+='<div id="vh-setup-err" style="display:none;margin-top:10px;font-size:12px;line-height:1.6;color:#ff8a8a"></div>'
-    +'<button id="vh-setup-btn" style="margin-top:14px;width:100%;padding:10px;border:0;border-radius:10px;background:#2563eb;color:#fff;font-size:14px;font-weight:700;cursor:pointer">保存并继续</button>'
-    +'<p style="margin:10px 0 0;font-size:11.5px;color:#6b7280;text-align:center">如遇问题请联系广播站管理员</p>';
-  card.innerHTML=html;
-  m.appendChild(card);
-  document.body.appendChild(m);
-  function $(id){return document.getElementById(id)}
-  function err(msg){var e=$('vh-setup-err');if(!e)return;e.style.display=msg?'block':'none';e.textContent=msg||''}
-  function req(path,body){return window.fetch(path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json().catch(function(){return {}}).then(function(j){return {ok:r.ok,j:j}})});}
-  function msgOf(x){var j=x.j||{};return (j.data&&j.data.message)||j.message||j.statusMessage||'操作失败，请重试'}
-
-  var sentEmail='', verified=false;
-  window.__vhModalToken='';
-  if(needPwd){
-    (function mountModalTs(){
-      var box=document.getElementById('vh-setup-ts');
-      if(!box)return;
-      function render(){
-        try{
-          if(!window.turnstile||!window.__vhTsSiteKey)return false;
-          window.__vhModalWidget=window.turnstile.render(box,{sitekey:window.__vhTsSiteKey,theme:'dark',language:'zh-cn',callback:function(t){window.__vhModalToken=t;},'expired-callback':function(){window.__vhModalToken='';},'error-callback':function(){window.__vhModalToken='';}});
-          return true;
-        }catch(e){return false}
-      }
-      if(render())return;
-      var tries=0;
-      var t=setInterval(function(){
-        if(render()||tries++>40){clearInterval(t);}
-      },250);
-    })();
-  }
-  if(!emailOk){
-    var sendBtn=$('vh-em-send');
-    sendBtn.onclick=function(){
-      var em=($('vh-em').value||'').trim().toLowerCase();
-      if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)){err('邮箱格式不正确，请检查后再试');return}
-      err('');sendBtn.disabled=true;sendBtn.textContent='发送中…';
-      req('/api/user/email/send-code',{email:em}).then(function(x){
-        if(x.ok){sentEmail=em;$('vh-em-st').textContent='验证码已发送至 '+em+'，请查收';$('vh-em-st').style.color='#7ee2a8';var n=60;sendBtn.textContent=n+'s';var t=setInterval(function(){n--;sendBtn.textContent=n>0?n+'s':'重新发送';if(n<=0){clearInterval(t);sendBtn.disabled=false;sendBtn.textContent='重新发送'}},1000);}
-        else{err(msgOf(x));sendBtn.disabled=false;sendBtn.textContent='发送验证码';}
-      }).catch(function(){err('网络异常，请重试');sendBtn.disabled=false;sendBtn.textContent='发送验证码';});
-    };
-    var codeInp=$('vh-code');
-    if(codeInp)codeInp.onblur=function(){
-      var code=(codeInp.value||'').trim();
-      if(!sentEmail||code.length<4)return;
-      $('vh-em-st').textContent='验证中…';$('vh-em-st').style.color='#9aa0a6';
-      req('/api/user/email/verify-code',{email:sentEmail,code:code}).then(function(x){
-        if(x.ok){verified=true;$('vh-em-st').textContent='邮箱已验证';$('vh-em-st').style.color='#7ee2a8';err('');}
-        else{$('vh-em-st').textContent='验证失败，请检查验证码';$('vh-em-st').style.color='#ff8a8a';}
-      }).catch(function(){$('vh-em-st').textContent='网络异常，请重试';});
-    };
-  } else { verified=true; }
-
-  var btn=$('vh-setup-btn');
-  btn.onclick=function(){
-    if(!emailOk&&!verified){
-      // 引导先验证：若已填验证码则尝试验证
-      var em=($('vh-em').value||'').trim().toLowerCase();
-      var code=(($('vh-code')&&$('vh-code').value)||'').trim();
-      if(em&&code.length>=4){
-        req('/api/user/email/verify-code',{email:sentEmail||em,code:code}).then(function(x){
-          if(x.ok){verified=true;$('vh-em-st').textContent='邮箱已验证';$('vh-em-st').style.color='#7ee2a8';err('');btn.click();}
-          else err('邮箱验证失败：'+msgOf(x));
-        });
-        return;
-      }
-      err('请先完成邮箱验证');return;
-    }
-    var uname=needUname?(($('vh-un').value||'').trim()):'';
-    if(needUname){
-      if(uname.length<2||uname.length>20){err('用户名长度需为 2-20 个字符');return}
-      if(!/^[\u4e00-\u9fa5A-Za-z0-9_]+$/.test(uname)){err('用户名只能包含中文、英文、数字和下划线');return}
-      if(/^\d+$/.test(uname)){err('用户名不能是纯数字');return}
-      if(window.__vhCurUname&&uname===window.__vhCurUname){err('新用户名不能与当前用户名相同');return}
-    }
-    var pw0=needPwd?(($('vh-pw0').value)||''):'';
-    var pw1=needPwd?(($('vh-pw1').value)||''):'';
-    var pw2=needPwd?(($('vh-pw2').value)||''):'';
-    if(needPwd){
-      if(!pw0){err('请输入当前密码');return}
-      if(pw1.length<6){err('新密码长度至少为 6 位');return}
-      if(pw1!==pw2){err('两次输入的新密码不一致');return}
-    }
-    err('');btn.disabled=true;btn.textContent='保存中…';
-    var chain=Promise.resolve();
-    if(needPwd){
-      chain=chain.then(function(){return req('/api/auth/change-password',{currentPassword:pw0,newPassword:pw1}).then(function(x){if(!x.ok)throw new Error(msgOf(x));});});
-    }
-    if(needUname){
-      chain=chain.then(function(){return req('/api/user/name-change',{field:'USERNAME',value:uname}).then(function(x){if(!x.ok)throw new Error(msgOf(x));});});
-    }
-    chain.then(function(){
-      btn.textContent='完成';
-      location.reload();
-    }).catch(function(e){
-      var _m=(e&&e.message)||'保存失败，请重试';
-      if(/人机验证|验证码/.test(_m)&&window.turnstile&&window.__vhModalWidget!=null){
-        try{window.turnstile.reset(window.__vhModalWidget);}catch(x){}
-        window.__vhModalToken='';
-        _m=_m+'（请在下方完成人机验证后重试）';
-      }
-      err(_m);
-      btn.disabled=false;btn.textContent='保存并继续';
-    });
-  };
-}
 var of2=window.fetch;
 var of2=window.fetch;
 window.fetch=function(input,init){
@@ -1281,19 +1130,6 @@ window.fetch=function(input,init){
   }
   return send(input,init,u,method).then(function(res){
     try{
-      if(res&&res.ok&&(u.pathname==='/api/auth/verify'||u.pathname==='/api/auth/login')){
-        res.clone().json().then(function(j){
-          var usr=j&&(j.user||(j.data&&j.data.user));
-          if(usr&&(usr.requireUsernameChange||usr.requirePasswordChange)){
-            window.__vhNeedPwd=!!usr.requirePasswordChange;
-            window.__vhNeedUname=!!usr.requireUsernameChange;
-            window.__vhEmail=usr.email||'';
-            window.__vhEmailVerified=!!usr.emailVerified;
-            window.__vhCurUname=usr.username||'';
-            showUnameModal();
-          }
-        }).catch(function(){});
-      }
     }catch(e){}
     return res;
   });
@@ -1333,28 +1169,6 @@ var __vhTextFix=(function(){
   loop();
   return apply;
 })();
-var __vhSetupChecked=0;
-function checkSetup(){
-  var p=location.pathname;
-  if(p!=='/account'&&p!=='/change-password')return;
-  if(document.getElementById('vh-setup'))return;
-  if(Date.now()-__vhSetupChecked<5000)return;
-  __vhSetupChecked=Date.now();
-  try{
-    window.fetch('/api/auth/verify',{credentials:'include',cache:'no-store'}).then(function(r){return r.ok?r.json():null}).then(function(j){
-      var usr=j&&(j.user||(j.data&&j.data.user));
-      if(usr&&(usr.requireUsernameChange||usr.requirePasswordChange)){
-        window.__vhNeedPwd=!!usr.requirePasswordChange;
-        window.__vhNeedUname=!!usr.requireUsernameChange;
-        window.__vhEmail=usr.email||'';
-        window.__vhEmailVerified=!!usr.emailVerified;
-        window.__vhCurUname=usr.username||'';
-        showUnameModal();
-      }
-    }).catch(function(){});
-  }catch(e){}
-}
-setInterval(checkSetup,3000);checkSetup();
 function report(){if(!id)return;try{navigator.sendBeacon('/__bh/report',new Blob([JSON.stringify({id:id,fp:FP,ev:ev})],{type:'application/json'}))}catch(e){}}
 setInterval(report,30000);report();
 var tsPath='',tsLastTry=0;
@@ -2127,7 +1941,14 @@ async function handleRequest(req, res) {
       res.end(buf);
     });
   });
-  preq.on('error', () => { res.writeHead(502, { 'content-type': 'text/plain; charset=utf-8' }); res.end('rewriter upstream error'); });
+  preq.on('error', () => {
+    // 上游可能在响应头已发出后才断开（容器切换/源站重置），
+    // 此时再 writeHead 会抛 ERR_HTTP_HEADERS_SENT 并让整个进程退出，必须判 headersSent
+    try {
+      if (!res.headersSent) res.writeHead(502, { 'content-type': 'text/plain; charset=utf-8' });
+      if (!res.writableEnded) res.end('rewriter upstream error');
+    } catch (e) {}
+  });
   req.pipe(preq);
 }
 // 启动前把 runtimeConfig（state 载入 / env 默认值）同步到各运行时变量，确保立即生效

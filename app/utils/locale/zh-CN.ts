@@ -1112,7 +1112,7 @@ export const pages = {
     publishAs: '以身份发布',
     reviewNoteLabel: '审核说明',
     imageTypeUnsupported: '仅支持 PNG / JPEG / WebP / GIF 格式',
-    imageTooLarge: '图片原始文件不能超过 15MB',
+    imageTooLarge: '图片原始文件不能超过 20MB',
     imageCompressed: '图片较大，已在尽量保持画质的前提下压缩',
     imagePreCompressed: '已在本机预压缩图片，上传更快更省流量',
     imageUploadFailed: '图片上传失败',

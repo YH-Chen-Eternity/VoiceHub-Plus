@@ -1133,7 +1133,7 @@ export const pages = {
     publishAs: 'Posting as',
     reviewNoteLabel: 'Review note',
     imageTypeUnsupported: 'Only PNG / JPEG / WebP / GIF are supported',
-    imageTooLarge: 'Original images must be under 15MB',
+    imageTooLarge: 'Original images must be under 20MB',
     imageCompressed: 'Large image was compressed while keeping as much quality as possible',
     imagePreCompressed: 'Image was pre-compressed on your device — faster upload, less data',
     imageUploadFailed: 'Image upload failed',
