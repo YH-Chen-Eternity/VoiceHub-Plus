@@ -69,17 +69,28 @@ function hashGuestId(id: string): string {
  * 只在帖子已 APPROVED 时由调用方触发；任何异常都吞掉并按「不计数」处理，绝不影响详情读取。
  */
 export async function recordGuestView(event: H3Event, postId: number): Promise<boolean> {
+  const counted = await recordGuestViews(event, [postId])
+  return counted.length > 0
+}
+
+/**
+ * 批量记录游客浏览（列表曝光用）。返回本次真正计数成功的帖子 id。
+ * 与单条记录共用同一 cookie / 小时桶去重口径，批量插入一次完成，避免 N 次往返。
+ */
+export async function recordGuestViews(event: H3Event, postIds: number[]): Promise<number[]> {
+  const ids = [...new Set(postIds.filter((id) => Number.isInteger(id) && id > 0))]
+  if (!ids.length) return []
   try {
     const guestHash = hashGuestId(getOrCreateGuestId(event))
     const hourBucket = Math.floor(Date.now() / HOUR_MS)
     const inserted = await db
       .insert(communityGuestViews)
-      .values({ postId, guestHash, hourBucket })
+      .values(ids.map((postId) => ({ postId, guestHash, hourBucket })))
       .onConflictDoNothing()
       .returning({ postId: communityGuestViews.postId })
-    return inserted.length > 0
+    return inserted.map((row) => Number(row.postId))
   } catch {
-    return false
+    return []
   }
 }
 

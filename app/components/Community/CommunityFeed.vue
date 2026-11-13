@@ -138,8 +138,13 @@
             <p>{{ t.empty }}</p>
           </div>
 
-          <div v-else class="feed-list">
-            <article v-for="post in posts" :key="post.id" class="post-card">
+          <div v-else ref="feedListRef" class="feed-list">
+            <article
+              v-for="post in posts"
+              :key="post.id"
+              :data-post-id="post.id"
+              class="post-card"
+            >
               <header class="post-head">
                 <button class="identity" type="button" @click="openProfile(post.author.id)">
                   <span class="identity-name">{{ post.author.displayName }}</span>
@@ -862,7 +867,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
 import {
   AlertTriangle,
   ArrowRight,
@@ -919,6 +924,7 @@ const status = ref<AnyRecord | null>(null)
 const me = ref<AnyRecord | null>(null)
 const boards = ref<AnyRecord[]>([])
 const posts = ref<AnyRecord[]>([])
+const feedListRef = ref<HTMLElement | null>(null)
 const activeBoardId = ref(0)
 const filterMine = ref(false)
 const feedLoading = ref(false)
@@ -1131,11 +1137,130 @@ async function loadFeed(reset = false) {
     posts.value = reset ? list : [...posts.value, ...list]
     nextCursor.value = res.nextCursor ?? null
     feedPermissions.canPin = Boolean(res.permissions?.canPin)
+    await nextTick()
+    observePostCards()
   } catch (error: any) {
     showToast(apiMessage(error, t.value.loadFailed), 'error')
   } finally {
     feedLoading.value = false
   }
+}
+
+/**
+ * 列表曝光计浏览：卡片在视口里停留满 1 秒就算「在外面看过」，上报后小眼睛就地 +1。
+ * 后端与详情页共用同一套去重口径（登录用户永久去重、游客按小时桶），
+ * 所以从列表点进详情不会重复计数，同一个人反复刷列表也不会一直涨。
+ * 上报按批合并（最多 40 条一次），失败静默——统计不能影响阅读。
+ */
+const IMPRESSION_DWELL_MS = 1000
+const IMPRESSION_FLUSH_MS = 1200
+const IMPRESSION_BATCH_MAX = 40
+let impressionObserver: IntersectionObserver | null = null
+const impressionTimers = new WeakMap<Element, ReturnType<typeof setTimeout>>()
+const pendingViewIds = new Set<number>()
+const reportedViewIds = new Set<number>()
+let viewFlushTimer: ReturnType<typeof setTimeout> | null = null
+
+function queuePostView(postId: number) {
+  if (reportedViewIds.has(postId) || pendingViewIds.has(postId)) return
+  pendingViewIds.add(postId)
+  if (viewFlushTimer) return
+  viewFlushTimer = setTimeout(() => {
+    viewFlushTimer = null
+    void flushPostViews()
+  }, IMPRESSION_FLUSH_MS)
+}
+
+async function flushPostViews() {
+  if (!pendingViewIds.size) return
+  const ids = [...pendingViewIds].slice(0, IMPRESSION_BATCH_MAX)
+  for (const id of ids) {
+    pendingViewIds.delete(id)
+    reportedViewIds.add(id)
+  }
+  try {
+    const res = await $fetch<AnyRecord>('/api/community/posts/views', {
+      method: 'POST',
+      body: { ids }
+    })
+    const counts = (res?.viewCounts || {}) as Record<string, number>
+    for (const [rawId, count] of Object.entries(counts)) {
+      const id = Number(rawId)
+      const post = posts.value.find((item) => item.id === id)
+      if (post) post.viewCount = Number(count)
+      if (selectedPost.value?.id === id) selectedPost.value.viewCount = Number(count)
+    }
+  } catch {
+    // 上报失败允许下次曝光再试，不提示用户
+    for (const id of ids) reportedViewIds.delete(id)
+  }
+  if (pendingViewIds.size) {
+    if (!viewFlushTimer) {
+      viewFlushTimer = setTimeout(() => {
+        viewFlushTimer = null
+        void flushPostViews()
+      }, IMPRESSION_FLUSH_MS)
+    }
+  }
+}
+
+/** 卡片是否算「看得见」：常规卡片露出 50%，比屏幕还高的长帖露出屏幕 60% 也算 */
+function isCardVisible(entry: IntersectionObserverEntry) {
+  if (!entry.isIntersecting) return false
+  const cardHeight = entry.boundingClientRect.height || 1
+  const viewportHeight = typeof window === 'undefined' ? 1 : window.innerHeight || 1
+  return entry.intersectionRect.height >= Math.min(cardHeight * 0.5, viewportHeight * 0.6)
+}
+
+/** 只观察当前渲染出来的卡片；已上报过的直接跳过，避免重复建观察 */
+function observePostCards() {
+  if (typeof IntersectionObserver === 'undefined') return
+  const container = feedListRef.value
+  if (!container) return
+  if (!impressionObserver) {
+    impressionObserver = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          const target = entry.target as HTMLElement
+          const postId = Number(target.dataset.postId)
+          if (!postId) continue
+          if (!isCardVisible(entry)) {
+            const timer = impressionTimers.get(target)
+            if (timer) {
+              clearTimeout(timer)
+              impressionTimers.delete(target)
+            }
+            continue
+          }
+          if (impressionTimers.has(target) || reportedViewIds.has(postId)) continue
+          const timer = setTimeout(() => {
+            impressionTimers.delete(target)
+            impressionObserver?.unobserve(target)
+            if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
+            if (!target.isConnected) return
+            queuePostView(postId)
+          }, IMPRESSION_DWELL_MS)
+          impressionTimers.set(target, timer)
+        }
+      },
+      { threshold: [0, 0.25, 0.5, 0.75, 1] }
+    )
+  }
+  container.querySelectorAll<HTMLElement>('[data-post-id]').forEach((el) => {
+    const postId = Number(el.dataset.postId)
+    if (!postId || reportedViewIds.has(postId)) return
+    impressionObserver?.observe(el)
+  })
+}
+
+function stopImpressions() {
+  impressionObserver?.disconnect()
+  impressionObserver = null
+  if (viewFlushTimer) {
+    clearTimeout(viewFlushTimer)
+    viewFlushTimer = null
+  }
+  void flushPostViews()
 }
 
 function selectBoard(boardId: number) {
@@ -1847,6 +1972,7 @@ onMounted(() => {
 onUnmounted(() => {
   if (songTimer) clearTimeout(songTimer)
   window.removeEventListener('keydown', handleKeydown)
+  stopImpressions()
 })
 </script>
 

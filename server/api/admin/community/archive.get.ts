@@ -192,10 +192,12 @@ export default defineEventHandler(async (event) => {
   for (const row of commentRows) if (row.deletedBy) actorIds.add(row.deletedBy)
   await loadActors()
 
-  const imagesByPost = new Map<number, Array<{ id: number; url: string }>>()
+  const imagesByPost = new Map<number, Array<{ id: number; url: string; thumbUrl: string }>>()
   for (const image of imageRows) {
     const list = imagesByPost.get(image.postId) || []
-    list.push({ id: image.mediaId, url: `/api/media/${image.mediaId}` })
+    // 与社区 feed 一致：宫格先用 ≤512KB 预览图，点开查看器再取原图
+    const url = `/api/media/${image.mediaId}`
+    list.push({ id: image.mediaId, url, thumbUrl: `${url}?variant=preview` })
     imagesByPost.set(image.postId, list)
   }
   const commentsByPost = new Map<number, AnyRecord[]>()
