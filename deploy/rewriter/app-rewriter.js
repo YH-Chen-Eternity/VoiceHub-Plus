@@ -13,6 +13,7 @@ let cssCache = { key: '', content: '' };
 //  强制逻辑由应用自身承担，不依赖边缘注入：
 //    · app/app.vue 全局挂载 ForceUsernameChangeModal（用户名不合规时拦截）
 //    · app/middleware/auth.global.ts 在 requirePasswordChange 时强制跳转 /change-password
+//    · /api/auth/change-password 自身校验 Turnstile 与密码策略（服务端强制，非前端门控）
 //  因此这里不再重复注入弹窗，避免两套实现互相干扰。
 // ============================================================
 
