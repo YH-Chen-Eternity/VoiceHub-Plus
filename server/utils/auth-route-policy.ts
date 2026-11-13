@@ -57,7 +57,8 @@ export const PUBLIC_API_EXACT_ROUTES: readonly RoutePolicy[] = [
   { path: '/api/music/state', methods: ['POST'] },
   { path: '/api/music/websocket', methods: GET_METHODS },
   { path: '/api/sys/time', methods: GET_METHODS },
-  // 社区浏览曝光计数：游客也要计入小眼睛，端点自身只统计可见的已通过帖子并做去重
+  // 社区浏览曝光计数：游客也要计入小眼睛，端点自身只统计可见的已通过帖子并做去重。
+  // 仅放行 POST；该路径的 GET 会落到 /api/community/ 前缀的游客只读规则上，无处理器即 404。
   { path: '/api/community/posts/views', methods: ['POST'] },
   // 边缘 rewriter 写攻击日志：用共享令牌鉴权，不走用户登录态
   { path: '/api/internal/attack-log', methods: ['POST'] }
