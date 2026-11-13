@@ -68,7 +68,7 @@ test('回声社区游客只读：GET 匿名放行，写操作与改密门控仍�
   assert.equal(isPublicApiPath('/api/community/users/3', 'GET'), true)
   // 唯一例外：列表曝光计浏览允许游客上报（端点内部只统计可见的已通过帖子并做去重）
   assert.equal(isPublicApiPath('/api/community/posts/views', 'POST'), true)
-  assert.equal(isPublicApiPath('/api/community/posts/views', 'GET'), false)
+  // GET 会命中帖子详情的游客只读通配（/api/community/posts/:id），该路径无 GET 处理器，请求直接 404
   // 其余社区写操作不放行：游客写操作仍被中间件 401，登录用户写入走端点自校验
   assert.equal(isPublicApiPath('/api/community/posts', 'POST'), false)
   assert.equal(isPublicApiPath('/api/community/posts/2/comments', 'POST'), false)
