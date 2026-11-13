@@ -38,6 +38,7 @@ export default defineEventHandler(async (event) => {
 
   // 曝光上报只是统计，超限直接不计数，不返回 429 影响页面。
   // 游客按匿名 cookie 哈希限流（反代后 IP 全站相同，按 IP 会误伤全体游客）。
+  // 限流器不可用时按 fail-open 放行：统计价值高于限流，且写入端有去重兜底。
   const rateKey = guest
     ? `community_view:guest:${getGuestRateKey(event)}`
     : `community_view:user:${user.id}`

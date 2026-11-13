@@ -39,7 +39,7 @@ function safeEqual(a: string, b: string): boolean {
 function getOrCreateGuestId(event: H3Event): string {
   // 同一请求内多次调用（如「限流键 + 计数」）复用同一个 id，
   // 否则首次访问会连发两个不同的 cookie，限流桶与实际计数对不上
-  const cached = (event.context as any).__vhGuestId as string | undefined
+  const cached = (event.context as any).__vh_guest_id as string | undefined
   if (cached) return cached
   const raw = getCookie(event, COOKIE_NAME)
   if (raw) {
@@ -53,7 +53,7 @@ function getOrCreateGuestId(event: H3Event): string {
     }
   }
   const id = randomBytes(16).toString('hex')
-  ;(event.context as any).__vhGuestId = id
+  ;(event.context as any).__vh_guest_id = id
   setCookie(event, COOKIE_NAME, `${id}.${sign(id)}`, {
     httpOnly: true,
     sameSite: 'lax',

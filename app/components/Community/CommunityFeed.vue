@@ -1155,6 +1155,8 @@ async function loadFeed(reset = false) {
 const IMPRESSION_DWELL_MS = 1000
 const IMPRESSION_FLUSH_MS = 1200
 const IMPRESSION_BATCH_MAX = 40
+/** 卡片异步渲染的兜底重试上限：20 次 × 300ms */
+const MAX_OBSERVE_RETRY = 20
 let impressionObserver: IntersectionObserver | null = null
 let feedCardsObserver: MutationObserver | null = null
 let feedCardsTarget: HTMLElement | null = null
@@ -1169,7 +1171,7 @@ function queuePostView(postId: number) {
   if (viewFlushTimer) return
   viewFlushTimer = setTimeout(() => {
     viewFlushTimer = null
-    void flushPostViews()
+    flushPostViews().catch(() => {})
   }, IMPRESSION_FLUSH_MS)
 }
 
@@ -1200,7 +1202,7 @@ async function flushPostViews() {
     if (!viewFlushTimer) {
       viewFlushTimer = setTimeout(() => {
         viewFlushTimer = null
-        void flushPostViews()
+        flushPostViews().catch(() => {})
       }, IMPRESSION_FLUSH_MS)
     }
   }
@@ -1237,7 +1239,7 @@ function observePostCards(retry = 0) {
     feedListRef.value ||
     (typeof document !== 'undefined' ? document.querySelector<HTMLElement>('.feed-list') : null)
   if (!container) {
-    if (retry < 20) setTimeout(() => observePostCards(retry + 1), 300)
+    if (retry < MAX_OBSERVE_RETRY) setTimeout(() => observePostCards(retry + 1), 300)
     return
   }
   if (!impressionObserver) {
@@ -1280,7 +1282,7 @@ function observePostCards(retry = 0) {
       feedCardsTarget = container
     }
   }
-  if (!watchRenderedCards(container) && retry < 20) {
+  if (!watchRenderedCards(container) && retry < MAX_OBSERVE_RETRY) {
     setTimeout(() => observePostCards(retry + 1), 300)
   }
 }
@@ -1295,7 +1297,8 @@ function stopImpressions() {
     clearTimeout(viewFlushTimer)
     viewFlushTimer = null
   }
-  void flushPostViews()
+  // 组件卸载时把未上报的曝光发出去，失败也不阻塞卸载
+  flushPostViews().catch(() => {})
 }
 
 function selectBoard(boardId: number) {
