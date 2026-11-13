@@ -1,5 +1,5 @@
 export const COMMUNITY_IMAGE_MAX_BYTES = 3 * 1024 * 1024
-export const COMMUNITY_IMAGE_MAX_UPLOAD_BYTES = 15 * 1024 * 1024
+export const COMMUNITY_IMAGE_MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 
 const SUPPORTED_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
 // 与服务端 COMMUNITY_LOSSY_ATTEMPTS 对齐：先保持原尺寸逐级降质量，质量到下限仍超标才降尺寸兜底，
