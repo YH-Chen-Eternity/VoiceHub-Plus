@@ -3,8 +3,8 @@
 # 社区版新增文件；完整许可证见仓库根目录 LICENSE。
 
 # ============================================================
-#  VoiceHub 校园广播站（修改版）—— 腾讯云轻量 2C4G 生产编排
-#  架构：Cloudflare(橙云, Full strict) → Nginx(宿主, 443)
+#  VoiceHub 校园广播站（修改版）—— 单机 2C4G 生产编排参考
+#  架构：CDN/WAF（可选）→ Nginx(宿主, 443)
 #        → rewriter(边缘安全层 3001) → voicehub(3000) → postgres/redis
 #
 #  原则：

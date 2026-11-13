@@ -109,7 +109,7 @@
             class="aspect-square overflow-hidden rounded-xl border border-border-secondary-50 bg-bg-primary-40"
             @click="lightbox = image.url"
           >
-            <img :src="image.url" alt="" class="h-full w-full object-cover transition-transform hover:scale-105" >
+            <img :src="image.thumbUrl ?? image.url" alt="" class="h-full w-full object-cover transition-transform hover:scale-105" >
           </button>
         </div>
 

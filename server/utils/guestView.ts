@@ -37,6 +37,10 @@ function safeEqual(a: string, b: string): boolean {
 
 /** 从签名 cookie 读取匿名 id；无效则换发新 id。返回匿名 id（不落库明文） */
 function getOrCreateGuestId(event: H3Event): string {
+  // 同一请求内多次调用（如「限流键 + 计数」）复用同一个 id，
+  // 否则首次访问会连发两个不同的 cookie，限流桶与实际计数对不上
+  const cached = (event.context as any).__vh_guest_id as string | undefined
+  if (cached) return cached
   const raw = getCookie(event, COOKIE_NAME)
   if (raw) {
     const dot = raw.lastIndexOf('.')
@@ -44,11 +48,13 @@ function getOrCreateGuestId(event: H3Event): string {
       const id = raw.slice(0, dot)
       const sig = raw.slice(dot + 1)
       if (/^[0-9a-f]{32}$/.test(id) && sig && safeEqual(sig, sign(id))) {
+        ;(event.context as any).__vh_guest_id = id
         return id
       }
     }
   }
   const id = randomBytes(16).toString('hex')
+  ;(event.context as any).__vh_guest_id = id
   setCookie(event, COOKIE_NAME, `${id}.${sign(id)}`, {
     httpOnly: true,
     sameSite: 'lax',
@@ -69,17 +75,28 @@ function hashGuestId(id: string): string {
  * 只在帖子已 APPROVED 时由调用方触发；任何异常都吞掉并按「不计数」处理，绝不影响详情读取。
  */
 export async function recordGuestView(event: H3Event, postId: number): Promise<boolean> {
+  const counted = await recordGuestViews(event, [postId])
+  return counted.length > 0
+}
+
+/**
+ * 批量记录游客浏览（列表曝光用）。返回本次真正计数成功的帖子 id。
+ * 与单条记录共用同一 cookie / 小时桶去重口径，批量插入一次完成，避免 N 次往返。
+ */
+export async function recordGuestViews(event: H3Event, postIds: number[]): Promise<number[]> {
+  const ids = [...new Set(postIds.filter((id) => Number.isInteger(id) && id > 0))]
+  if (!ids.length) return []
   try {
     const guestHash = hashGuestId(getOrCreateGuestId(event))
     const hourBucket = Math.floor(Date.now() / HOUR_MS)
     const inserted = await db
       .insert(communityGuestViews)
-      .values({ postId, guestHash, hourBucket })
+      .values(ids.map((postId) => ({ postId, guestHash, hourBucket })))
       .onConflictDoNothing()
       .returning({ postId: communityGuestViews.postId })
-    return inserted.length > 0
+    return inserted.map((row) => Number(row.postId))
   } catch {
-    return false
+    return []
   }
 }
 
@@ -99,3 +116,12 @@ export async function purgeExpiredGuestViews(): Promise<number> {
 
 /** 供测试与其它模块复用的常量 */
 export const GUEST_VIEW_COOKIE = COOKIE_NAME
+
+/**
+ * 游客维度的限流键：直接用匿名哈希，不依赖 IP。
+ * 生产部署在反向代理之后时，所有请求的 TCP 源地址都是代理地址，
+ * 按 IP 限流会把全体游客挤进同一个桶；匿名哈希至少能按浏览器区分。
+ */
+export function getGuestRateKey(event: H3Event): string {
+  return hashGuestId(getOrCreateGuestId(event))
+}

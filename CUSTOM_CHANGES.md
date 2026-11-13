@@ -1,12 +1,11 @@
 # VoiceHub 定制源码修改说明
 
 > 适用源码：`voicehub-plus-final2-20261023.tar.gz`
-> 线上镜像：`voicehub-voicehub:final2-20261023`
 > 生成日期：2026-10-23
 > 上游基线：`YH-Chen-Eternity/VoiceHub-Plus`（v1.6.0.5，2026-10-17）
 
 本文说明「相对上游基线到底改了哪些文件、每处改动的目的、改完后的行为」。
-所有结论来自源码逐文件对比和生产运行验证，不是凭记忆整理。
+所有结论来自源码逐文件对比与运行验证，不是凭记忆整理。
 
 ---
 
@@ -127,7 +126,7 @@ cd <部署目录> && docker compose up -d voicehub
 
 | 文件 | 作用 |
 |---|---|
-| `deploy/docker-compose.yml` | 腾讯云生产编排参考：rewriter → voicehub → postgres/redis，端口只绑 `127.0.0.1`，TZ=UTC |
+| `deploy/docker-compose.yml` | 生产编排参考：rewriter → voicehub → postgres/redis，端口只绑 `127.0.0.1`，TZ=UTC |
 | `deploy/.env.example` | 环境变量模板（不含真实密钥） |
 | `deploy/nginx/voicehub.conf` | 站点主配置：443、mTLS `ssl_verify_client on`、回源 3001、限流、安全头 |
 | `deploy/nginx/voicehub-proxy.conf` | 统一回源 proxy 头，放大 header 缓冲避免 Nuxt SSR 502 |
