@@ -1,5 +1,6 @@
 // Modified by YH-Chen on 2026-10-17
 import { existsSync } from 'node:fs'
+import { isIP } from 'node:net'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
@@ -77,8 +78,12 @@ const QR_LOGIN_TTL_MS = 5 * 60 * 1000
 const qrLoginCache = new Map<string, { cookie: string; at: number }>()
 
 const rememberQrLogin = (key: string, cookie: string) => {
-  // 过期条目交给分钟级定时任务处理，写入路径不再做 O(n) 扫描
-  if (qrLoginCache.size >= 500) qrLoginCache.clear()
+  // 过期条目交给分钟级定时任务处理。到上限时按插入顺序淘汰最旧的一条，
+  // 不能整体 clear，否则会误删其他访客仍在有效期内的 803 结果。
+  if (qrLoginCache.size >= 500) {
+    const oldest = qrLoginCache.keys().next()
+    if (!oldest.done) qrLoginCache.delete(oldest.value)
+  }
   qrLoginCache.set(key, { cookie, at: Date.now() })
 }
 
@@ -239,13 +244,9 @@ export default defineEventHandler(async (event) => {
   const candidateIp = String(Array.isArray(rawClientIp) ? rawClientIp[0] : rawClientIp)
     .split(',')[0]!
     .trim()
-  // 只接受「像 IP 的字符串」（IPv4 点分或 IPv6），限制字符集与长度，避免任意头值进入种子。
+  // 只接受合法 IP 字面量（IPv4/IPv6），非法值退回默认种子，避免任意头值进入种子。
   // IPv6 访客同样按自身地址取种子，三步仍然一致，不会退化成全员共用 qr:default。
-  const isIpLike =
-    candidateIp.length >= 3 &&
-    candidateIp.length <= 45 &&
-    /^[0-9a-fA-F:.]+$/.test(candidateIp)
-  const clientIp = isIpLike ? candidateIp.toLowerCase() : ''
+  const clientIp = isIP(candidateIp) ? candidateIp.toLowerCase() : ''
 
   // 境外出口会被网易云判为海外，登录与账号接口直接失败；统一改写 X-Real-IP。
   // 客户端传入的 realIP 一律忽略，避免该代理变成任意 IP 伪造入口。

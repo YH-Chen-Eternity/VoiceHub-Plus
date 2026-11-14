@@ -147,8 +147,8 @@ const qrImg = ref('')
 const loading = ref(false)
 const status = ref(0) // 800已过期、801待扫码、802已扫码、803登录成功
 const isExpired = ref(false)
-let timer: ReturnType<typeof setInterval> | null = null
-let retryTimer: ReturnType<typeof setTimeout> | null = null
+let timer: any = null
+let retryTimer: any = null
 let unikey = ''
 
 const handleClose = () => {
