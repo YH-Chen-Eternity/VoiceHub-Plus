@@ -757,3 +757,35 @@ AST 普查器枚举危险调用点与请求源，按风险类别分诊，并与�
 
 - 新增策略测试 `tests/server/community-guest-view-policy.test.ts`（9 项）：归档收权、举报申诉保留、游客可见 schema/迁移/三条读取链路接入、后台读写链路、双语词典键一致、系统状态受限载荷不含内部细节。
 - 本机验证：eslint 0 error（改动文件）、单测 421/421 通过、`nuxt build` 通过。
+
+### 10.21 列表曝光计入浏览量、后台审帖/归档改用缩略图（2026-11-13）
+
+**曝光即浏览**
+
+- 新增 `server/api/community/posts/views.post.ts`：批量上报「卡片在视口内停留达标」的帖子 ID（单次最多 40 条），据此累加 `viewCount`。原先只有打开帖子详情才计数，列表里刷到但不点开的阅读量完全丢失。
+- 登录用户按 `userId + postId` 永久去重；游客按签名 Cookie `vh_cid` 派生的哈希 + 小时桶去重（`server/utils/guestView.ts` 新增 `recordGuestViews` / `getGuestRateKey` / `hashGuestId`），同一游客同一小时内重复曝光只计一次。
+- 限流键 `community_view:guest:<hash>` / `community_view:user:<id>`，阈值 300 次/分钟；触发限流时 **fail-open**（不返回 429），避免计数接口异常影响正常浏览。
+- 该端点加入游客白名单（`server/utils/auth-route-policy.ts`），未登录访客的曝光同样计数；响应不返回任何他人信息，仅回执已记账条数。
+- 前端 `CommunityFeed.vue`：卡片带 `data-post-id`，`IntersectionObserver`（threshold 0.5）叠加停留时长判定，达标的 ID 进批次队列后统一上报；列表异步渲染场景用 `MutationObserver` + `watchRenderedCards()` 补齐观察（重试上限 20 次，300ms 兜底），避免懒加载卡片漏计。
+- 上报失败静默降级（`flushPostViews().catch(() => {})`），不打断浏览、不弹错误提示。
+
+**后台缩略图**
+
+- 审帖页（`Admin/CommunityReview.vue`）与归档页（`Admin/CommunityArchive.vue`）统一改用 `image.thumbUrl ?? image.url`，列表不再加载原图；`archive.get.ts` 补充返回 `thumbUrl`（`/api/media/<id>?variant=preview`）。
+- 后台图片查看器仍取原图，管理员审阅需要看清细节，属有意保留。
+
+### 10.22 站点自备素材改由边缘层直读宿主目录（2026-11-13）
+
+- 现象：每次重建镜像后学校 Logo 变破图，`/images/校徽.png` 返回 404。
+- 根因：校徽、站徽等素材按「不入库」策略被 `.gitignore` 排除，因此不在构建上下文内；Nitro 的静态资源清单在构建时固化，事后把文件拷进容器也仍然 404，重建即丢。
+- 方案：Nginx 增加 `location ^~ /images/ { root <素材目录>; try_files $uri @vh_images_fallback; }`，优先读宿主素材目录，未命中再回源到应用；两条分支统一 `Cache-Control: public, max-age=604800` 并关闭 access_log。
+- 效果：素材与镜像解耦，重建、回滚镜像都不再影响 Logo；新增素材只需放到宿主目录，无需重新构建。
+- 注意：`/images/` 下的文件不再随镜像发布，迁移环境时需单独同步该目录。
+
+### 10.23 PWA 预缓存只保留静态资源（2026-11-14）
+
+- 现象：手机端 PWA（独立窗口）偶发整页「500 / 加载失败」，服务器侧查不到对应 5xx 请求。
+- 根因：Service Worker 预缓存了 179 项，含 HTML 与全部 JS/CSS。发版后 chunk hash 全量变化，旧页面（或旧 SW 返回的旧 HTML）去加载已被删除的旧 chunk，模块导入失败，请求根本到不了服务器。
+- 改法：`nuxt.config.ts` 的 `workbox.globPatterns` 收窄为 `**/*.{png,svg,ico,woff2,webp,jpg,jpeg}`，业务代码（js/css/html）一律不预缓存，全部走网络，始终取当前版本；同时显式开启 `skipWaiting` / `clientsClaim` / `cleanupOutdatedCaches`，新 SW 安装后立即接管并清理旧预缓存条目。
+- 影响：预缓存条目由 179 项降至 16 项（图标、主题 SVG、备案图、构建元信息）。**代价是 PWA 不再支持完全离线打开**——断网时无法进入应用；在线体验与发版一致性优先。
+- 已装机的旧版本仍需用户刷新或重开一次才能换上新 SW；换新后不会再出现发版即白屏的问题。
