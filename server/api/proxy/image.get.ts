@@ -7,6 +7,7 @@ import { publicAddress } from '~~/server/utils/music-source-plugins/network'
 import { getServerTimestamp } from '~~/server/utils/serverTime'
 import { isServerlessRuntime } from '~~/server/utils/serverless-runtime'
 import { detectImageFormat, imageFormatToMimeType } from '~~/server/utils/imageSecurity'
+import { isHostnameAllowed, isPortAllowed, parseAllowedHosts } from '~~/server/utils/imageProxyPolicy'
 import { getClientIP } from '~~/server/utils/ip-utils'
 import { checkDistributedRateLimit } from '~~/server/utils/rateLimiter'
 
@@ -31,6 +32,9 @@ class ImageFetchTimeoutError extends Error {
   }
 }
 
+// 目标域名白名单：未配置时不限制域名，配置后重定向的每一跳都必须命中
+const ALLOWED_IMAGE_HOSTS = parseAllowedHosts(process.env.IMAGE_PROXY_ALLOWED_HOSTS)
+
 // 内网/保留地址判定复用插件网络层的 ipaddr.js unicast 实现（同一份 IP 名单）
 const isBlockedAddress = (address: string) => !publicAddress(address)
 
@@ -40,6 +44,14 @@ const validateUrl = async (url: URL) => {
   }
 
   const hostname = url.hostname.toLowerCase().replace(/^\[|\]$/g, '')
+
+  if (!isPortAllowed(url.port)) {
+    throw createError({ statusCode: 403, message: '不允许代理非标准端口' })
+  }
+
+  if (!isHostnameAllowed(hostname, ALLOWED_IMAGE_HOSTS)) {
+    throw createError({ statusCode: 403, message: '目标域名不在图片代理白名单内' })
+  }
 
   if (hostname === 'localhost' || hostname.endsWith('.localhost')) {
     throw createError({ statusCode: 403, message: '不允许代理本机地址' })
