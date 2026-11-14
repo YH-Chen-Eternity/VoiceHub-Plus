@@ -124,6 +124,46 @@ export function formatDate(v) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
+// 短時刻（峰值出現時間用）：當天只顯示時分，跨天補上「月-日」。
+// now 可注入，便於測試跨天分支。
+export function formatMomentShort(ms, now = Date.now()) {
+  const d = new Date(ms)
+  if (Number.isNaN(d.getTime())) return ''
+  const current = new Date(now)
+  const hh = String(d.getHours()).padStart(2, '0')
+  const mm = String(d.getMinutes()).padStart(2, '0')
+  const sameDay =
+    d.getFullYear() === current.getFullYear() &&
+    d.getMonth() === current.getMonth() &&
+    d.getDate() === current.getDate()
+  if (sameDay) return `${hh}:${mm}`
+  return `${d.getMonth() + 1}-${String(d.getDate()).padStart(2, '0')} ${hh}:${mm}`
+}
+
+// 時段峰值在線：把後端 peak 物件翻成「數值 + 副標題」，
+// 區間內無取樣時退化成「統計自 …」或「採樣啟動中」，避免顯示成 0 誤導。
+export function describePeakOnline(peak, now = Date.now()) {
+  const online = typeof peak?.online === 'number' ? peak.online : null
+  if (online !== null && peak?.at) {
+    return {
+      value: online,
+      text: formatCount(online),
+      unit: '人',
+      sub: `${formatMomentShort(peak.at, now)} 出现`,
+      hasData: true
+    }
+  }
+  const since = typeof peak?.since === 'number' ? peak.since : null
+  return {
+    value: null,
+    text: '—',
+    unit: '',
+    sub: since ? `统计自 ${formatMomentShort(since, now)}` : '采样启动中',
+    hasData: false
+  }
+}
+
+
 // 時間軸標籤：epoch / ISO / 既有字串
 function axisLabel(t) {
   if (typeof t === 'number') {

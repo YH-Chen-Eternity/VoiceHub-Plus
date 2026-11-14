@@ -1370,6 +1370,13 @@ export const opsBoardSettings = pgTable('OpsBoardSettings', {
   updatedAt: timestamp('updatedAt').defaultNow().notNull(),
 });
 
+// 运维看板：在线人数分钟级采样，用于「时段峰值在线人数」。
+// bucketAt 存分钟桶起点的 epoch 毫秒（bigint），避免无时区 timestamp 在容器 TZ 下产生偏移。
+export const opsBoardOnlineSamples = pgTable('OpsBoardOnlineSample', {
+  bucketAt: bigint('bucketAt', { mode: 'number' }).primaryKey(),
+  online: integer('online').notNull(),
+});
+
 export type CommunityBoard = typeof communityBoards.$inferSelect;
 export type CommunityPost = typeof communityPosts.$inferSelect;
 export type CommunityComment = typeof communityComments.$inferSelect;
@@ -1378,3 +1385,5 @@ export type CommunityProfile = typeof communityProfiles.$inferSelect;
 export type CommunitySettings = typeof communitySettings.$inferSelect;
 export type CommunityPostImage = typeof communityPostImages.$inferSelect;
 export type CommunityResonance = typeof communityResonance.$inferSelect;
+export type OpsBoardOnlineSample = typeof opsBoardOnlineSamples.$inferSelect;
+export type NewOpsBoardOnlineSample = typeof opsBoardOnlineSamples.$inferInsert;
