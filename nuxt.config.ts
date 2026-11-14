@@ -942,7 +942,15 @@ export default defineNuxtConfig({
     },
     workbox: {
       navigateFallback: null,
-      globPatterns: ['**/*.{js,css,html,png,svg,ico,woff2}']
+      // 只预缓存与版本无关的静态资源（图标、字体、图片）。
+      // 业务代码（js/css/html）一律不预缓存：每次部署 chunk hash 全量变化，
+      // 旧 Service Worker 缓存下来的 HTML 会去引用已被删除的旧 chunk，
+      // 在 PWA 独立窗口里表现为「加载失败 / 500 白屏」。
+      globPatterns: ['**/*.{png,svg,ico,woff2,webp,jpg,jpeg}'],
+      // 新 SW 安装后立即接管，并清掉上一版遗留的预缓存条目
+      skipWaiting: true,
+      clientsClaim: true,
+      cleanupOutdatedCaches: true
     },
     devOptions: {
       enabled: true,
