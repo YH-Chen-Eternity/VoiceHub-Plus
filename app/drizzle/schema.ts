@@ -1385,3 +1385,5 @@ export type CommunityProfile = typeof communityProfiles.$inferSelect;
 export type CommunitySettings = typeof communitySettings.$inferSelect;
 export type CommunityPostImage = typeof communityPostImages.$inferSelect;
 export type CommunityResonance = typeof communityResonance.$inferSelect;
+export type OpsBoardOnlineSample = typeof opsBoardOnlineSamples.$inferSelect;
+export type NewOpsBoardOnlineSample = typeof opsBoardOnlineSamples.$inferInsert;

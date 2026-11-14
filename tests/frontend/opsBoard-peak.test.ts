@@ -85,11 +85,13 @@ test('采样任务每分钟把窗口内去重 IP 数落库，并限制保留期'
   const sampler = src('server/plugins/online-peak-sampler.ts')
   assert.match(sampler, /SAMPLE_INTERVAL_MS = 60 \* 1000/)
   assert.match(sampler, /PRESENCE_WINDOW_MS = 5 \* 60 \* 1000/)
+  assert.match(sampler, /RETENTION_DAYS = 365/)
   assert.match(sampler, /zCount\(/)
   assert.match(sampler, /onConflictDoUpdate/)
-  assert.match(sampler, /RETENTION_DAYS/)
   // 定时器必须 unref，避免阻断进程退出
   assert.match(sampler, /\.unref\?\.\(\)/)
+  // 热重载/关闭时要清掉定时器，否则旧实例仍在采样
+  assert.match(sampler, /hooks\.hook\('close'/)
 })
 
 test('迁移文件创建采样表且主键为分钟桶', () => {

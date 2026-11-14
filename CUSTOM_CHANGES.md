@@ -827,8 +827,8 @@ AST 普查器枚举危险调用点与请求源，按风险类别分诊，并与�
 **实现**
 
 - 新增表 `OpsBoardOnlineSample`（`bucketAt` bigint 主键 = 分钟桶起点的 epoch 毫秒，`online` int）。用 epoch 毫秒而不是 timestamp 是有意的：无时区 timestamp 在容器 `TZ` 变化时读回会有整体偏移，bigint 没有这个问题。
-- 新增插件 `server/plugins/online-peak-sampler.ts`：每 60 秒读一次 `ZCARD online:presence`（窗口内去重 IP 数），按分钟桶 upsert（`ON CONFLICT DO UPDATE`，多实例或重启后补写都幂等）；保留 400 天，每天清一次更早的采样。Redis 不可用时该分钟直接跳过、不写 0——写 0 会在曲线上造成假低谷，也无法与「确实没人」区分。
-- `server/api/ops-board/realtime.get.ts` 增加 `peak: { online, at, since, range, sampleMinutes }`：按 `?range=` 过滤后取 `online` 最大的那条（并列取最早），另查一次全表最早采样时间作为 `since`。峰值查询单独包 `safeQuery`，表未迁移或查询失败只让峰值降级为 `null`，不影响实时人数与 QPS。
+- 新增插件 `server/plugins/online-peak-sampler.ts`：每 60 秒读一次 `ZCARD online:presence`（窗口内去重 IP 数），按分钟桶 upsert（`ON CONFLICT DO UPDATE`，多实例或重启后补写都幂等）；保留 365 天（正好覆盖「一年」区间），每天清一次更早的采样。Redis 不可用时该分钟直接跳过、不写 0——写 0 会在曲线上造成假低谷，也无法与「确实没人」区分。
+- `server/api/ops-board/realtime.get.ts` 增加 `peak: { online, at, since, range, sampleMinutes }`：按 `?range=` 过滤后取 `online` 最大的那条（并列取最早），另查一次全表最早采样时间作为 `since`。两次查询互不依赖，并行发出，各自包 `safeQuery`——表未迁移或任一查询失败只让峰值降级为 `null`，不影响实时人数与 QPS。
 - 前端 `OnlineNow.vue`：在线人数下方新增「{时段}峰值 47 人 / 09:31 出现」。区间内无采样时显示「统计自 09:58」而不是 0，采样尚未产生数据时显示「采样启动中」。格式化逻辑抽到 `format.js` 的 `formatMomentShort` / `describePeakOnline`，便于单测跨天与时区。
 
 **口径**
@@ -841,9 +841,12 @@ AST 普查器枚举危险调用点与请求源，按风险类别分诊，并与�
 
 - 采样从本次部署开始积累，此前的历史无法补（Redis 里本就没有留存）。`since` 字段会告诉使用者统计从什么时候开始，避免把「没有数据」误读成「当时没人」。
 - 一年约 52.5 万行、约 20MB，量很小；保留期到了由插件自动清理。横向扩容多实例会重复采样同一分钟，但 upsert 幂等，不影响结果。
+- Redis 中断期间缺失的分钟桶会永久留空，不会事后补采（ZSET 里本来就没有那段时间的数据）。`since` 只代表最早一条采样，不代表中间没有空档。
+- 不加 `(bucketAt, online)` 复合索引：实测 57.6 万行下，24 小时区间查询 0.3ms（主键范围扫描 1439 行），全部区间 16ms（并行顺序扫描），远低于看板 10 秒轮询的容忍度；每分钟一行的写入不值得为它多维护一个索引。
 
 **验证**
 
 - 临时 PostgreSQL 实测：迁移 SQL 可直接执行；同分钟重复 upsert 覆盖不新增行；`order by online desc, bucketAt asc limit 1` 返回的峰值与时刻符合预期；空区间返回 `null`（不返回 0）；清理条件按保留期删除。
+- 性能实测（临时库造 57.6 万行）：24 小时区间峰值查询 0.3ms，全部区间 16ms，`since` 查询 0.04ms。
 - 新增单测 10 项（`tests/frontend/opsBoard-peak.test.ts`）：当天/跨天/跨月的时刻格式、非法时间戳、有峰值/无采样/接口降级三种文案，以及接口按区间取峰值、采样周期与 unref、迁移建表三处静态守卫。全量 499/499 通过。
 - eslint 改动文件 0 error；`nuxt build` 通过，产物中确认采样插件、峰值查询与新文案均已打包。

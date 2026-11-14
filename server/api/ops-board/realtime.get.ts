@@ -27,38 +27,40 @@ interface PeakOnline {
 }
 
 async function readPeak(info: ReturnType<typeof parseOpsRange>): Promise<PeakOnline> {
-  const since = await safeQuery<number | null>(
-    'realtime:peak-since',
-    async () => {
-      const [row] = await db
-        .select({ bucketAt: opsBoardOnlineSamples.bucketAt })
-        .from(opsBoardOnlineSamples)
-        .orderBy(asc(opsBoardOnlineSamples.bucketAt))
-        .limit(1)
-      return row ? Number(row.bucketAt) : null
-    },
-    null
-  )
-
-  const top = await safeQuery<{ bucketAt: number; online: number } | null>(
-    'realtime:peak',
-    async () => {
-      const where = info.startTime
-        ? gte(opsBoardOnlineSamples.bucketAt, info.startTime.getTime())
-        : undefined
-      const [row] = await db
-        .select({
-          bucketAt: opsBoardOnlineSamples.bucketAt,
-          online: opsBoardOnlineSamples.online
-        })
-        .from(opsBoardOnlineSamples)
-        .where(where)
-        .orderBy(desc(opsBoardOnlineSamples.online), asc(opsBoardOnlineSamples.bucketAt))
-        .limit(1)
-      return row ? { bucketAt: Number(row.bucketAt), online: Number(row.online) } : null
-    },
-    null
-  )
+  // 兩次查詢互不依賴，並行發出；各自包 safeQuery，任一失敗只影響自己那一項。
+  const [since, top] = await Promise.all([
+    safeQuery<number | null>(
+      'realtime:peak-since',
+      async () => {
+        const [row] = await db
+          .select({ bucketAt: opsBoardOnlineSamples.bucketAt })
+          .from(opsBoardOnlineSamples)
+          .orderBy(asc(opsBoardOnlineSamples.bucketAt))
+          .limit(1)
+        return row ? Number(row.bucketAt) : null
+      },
+      null
+    ),
+    safeQuery<{ bucketAt: number; online: number } | null>(
+      'realtime:peak',
+      async () => {
+        const where = info.startTime
+          ? gte(opsBoardOnlineSamples.bucketAt, info.startTime.getTime())
+          : undefined
+        const [row] = await db
+          .select({
+            bucketAt: opsBoardOnlineSamples.bucketAt,
+            online: opsBoardOnlineSamples.online
+          })
+          .from(opsBoardOnlineSamples)
+          .where(where)
+          .orderBy(desc(opsBoardOnlineSamples.online), asc(opsBoardOnlineSamples.bucketAt))
+          .limit(1)
+        return row ? { bucketAt: Number(row.bucketAt), online: Number(row.online) } : null
+      },
+      null
+    )
+  ])
 
   return {
     online: top ? top.online : null,

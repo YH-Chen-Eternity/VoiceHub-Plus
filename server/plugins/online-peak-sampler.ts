@@ -23,7 +23,8 @@ import { buildRedisKey, getRedisClient } from '~~/server/utils/redis'
 
 const SAMPLE_INTERVAL_MS = 60 * 1000
 const PRESENCE_WINDOW_MS = 5 * 60 * 1000
-const RETENTION_DAYS = 400
+// 365 天正好覆盖看板「一年」区间；每分钟一条约 52.5 万行、20MB 上下。
+const RETENTION_DAYS = 365
 const CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000
 const STARTUP_DELAY_MS = 20 * 1000
 
@@ -57,7 +58,7 @@ function errText(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-export default defineNitroPlugin(() => {
+export default defineNitroPlugin((nitroApp) => {
   let sampling = false
   const tick = async () => {
     if (sampling) return
@@ -87,4 +88,12 @@ export default defineNitroPlugin(() => {
   firstCleanup.unref?.()
   const cleaner = setInterval(cleanup, CLEANUP_INTERVAL_MS)
   cleaner.unref?.()
+
+  // dev 热重载与优雅关闭时清掉定时器，避免旧实例的采样任务与新实例并行
+  nitroApp.hooks.hook('close', () => {
+    clearTimeout(first)
+    clearInterval(sampler)
+    clearTimeout(firstCleanup)
+    clearInterval(cleaner)
+  })
 })
