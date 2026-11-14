@@ -172,3 +172,35 @@ test('803 响应丢失后，重复查询可补发登录结果', async () => {
   assert.equal(other.code, 800)
   delete g.__ncmQrCheck
 })
+
+test('并发重试不会因为首次补发而丢失结果', async () => {
+  const g = globalThis as any
+  g.__ncmQrCheck = { body: { code: 803, cookie: 'MUSIC_U=concurrent' } }
+  await respond('login/qr/check', { key: 'concurrent-key' })
+
+  // unikey 已被网易云消费，并发到达的几次查询都要拿到同一份 cookie
+  g.__ncmQrCheck = { body: { code: 800 } }
+  const results = await Promise.all([
+    respond('login/qr/check', { key: 'concurrent-key' }),
+    respond('login/qr/check', { key: 'concurrent-key' }),
+    respond('login/qr/check', { key: 'concurrent-key' })
+  ])
+  for (const item of results) {
+    assert.equal(item.code, 803)
+    assert.equal(item.cookie, 'MUSIC_U=concurrent')
+  }
+  delete g.__ncmQrCheck
+})
+
+test('IPv6 访客按自身地址取种子，三步仍一致', async () => {
+  const ip = '240e:3b0:1234::1'
+  const keyed = await call('login/qr/key', {}, ip)
+  const created = await call('login/qr/create', { key: 'k-ipv6' }, ip)
+  assert.equal(keyed.realIP, created.realIP)
+  assert.ok(isGuangdongIp(String(keyed.realIP)))
+})
+
+test('畸形 IP 头退回默认种子，不进入哈希', async () => {
+  const params = await call('login/qr/key', {}, 'not-an-ip<script>')
+  assert.ok(isGuangdongIp(String(params.realIP)))
+})

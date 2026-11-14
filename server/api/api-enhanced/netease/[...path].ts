@@ -77,21 +77,20 @@ const QR_LOGIN_TTL_MS = 5 * 60 * 1000
 const qrLoginCache = new Map<string, { cookie: string; at: number }>()
 
 const rememberQrLogin = (key: string, cookie: string) => {
+  // 过期条目交给分钟级定时任务处理，写入路径不再做 O(n) 扫描
+  if (qrLoginCache.size >= 500) qrLoginCache.clear()
   qrLoginCache.set(key, { cookie, at: Date.now() })
-  if (qrLoginCache.size > 200) {
-    const cutoff = Date.now() - QR_LOGIN_TTL_MS
-    for (const [k, v] of qrLoginCache) {
-      if (v.at < cutoff) qrLoginCache.delete(k)
-    }
-  }
 }
 
 const replayQrLogin = (key: string): string | undefined => {
   const hit = qrLoginCache.get(key)
   if (!hit) return undefined
-  // 一次性回放：同一 unikey 拿到结果后立刻移除，避免长期驻留与重复登录
-  qrLoginCache.delete(key)
-  if (Date.now() - hit.at > QR_LOGIN_TTL_MS) return undefined
+  if (Date.now() - hit.at > QR_LOGIN_TTL_MS) {
+    qrLoginCache.delete(key)
+    return undefined
+  }
+  // 不在命中时删除：前端重试与轮询可能并发，先到的 803 删掉缓存后，
+  // 后到的 800 会把成功状态覆盖成「已过期」。缓存由 TTL 统一回收。
   return hit.cookie
 }
 
@@ -233,15 +232,20 @@ export default defineEventHandler(async (event) => {
   const cookieText = Array.from(
     new Set([collectCookieText(rawQuery), collectCookieText(rawBody)].filter(Boolean))
   ).join('; ')
-  // 取访客真实 IP 作为扫码链路种子（不使用 h3 自动导入，便于单测直接加载本模块）
-  // 生产链路由 Nginx 覆盖写 X-Forwarded-For/X-Real-IP、rewriter 再覆写一次，
-  // 应用端口不对公网暴露，客户端伪造无效；这里再加一层格式校验，畸形值退回默认种子。
+  // 扫码链路的出口种子取访客 IP。直接读请求头而不走 h3 自动导入，便于单测加载本模块。
+  // 生产由 Nginx 覆盖写、rewriter 再覆写一次，且应用端口不对公网暴露，客户端伪造无效。
   const reqHeaders = event.node?.req?.headers
   const rawClientIp = reqHeaders?.['x-real-ip'] ?? reqHeaders?.['x-forwarded-for'] ?? ''
   const candidateIp = String(Array.isArray(rawClientIp) ? rawClientIp[0] : rawClientIp)
     .split(',')[0]!
     .trim()
-  const clientIp = /^\d{1,3}(\.\d{1,3}){3}$/.test(candidateIp) ? candidateIp : ''
+  // 只接受「像 IP 的字符串」（IPv4 点分或 IPv6），限制字符集与长度，避免任意头值进入种子。
+  // IPv6 访客同样按自身地址取种子，三步仍然一致，不会退化成全员共用 qr:default。
+  const isIpLike =
+    candidateIp.length >= 3 &&
+    candidateIp.length <= 45 &&
+    /^[0-9a-fA-F:.]+$/.test(candidateIp)
+  const clientIp = isIpLike ? candidateIp.toLowerCase() : ''
 
   // 境外出口会被网易云判为海外，登录与账号接口直接失败；统一改写 X-Real-IP。
   // 客户端传入的 realIP 一律忽略，避免该代理变成任意 IP 伪造入口。

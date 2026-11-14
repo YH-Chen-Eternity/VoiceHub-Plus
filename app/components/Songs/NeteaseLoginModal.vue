@@ -147,8 +147,8 @@ const qrImg = ref('')
 const loading = ref(false)
 const status = ref(0) // 800已过期、801待扫码、802已扫码、803登录成功
 const isExpired = ref(false)
-let timer: any = null
-let retryTimer: any = null
+let timer: ReturnType<typeof setInterval> | null = null
+let retryTimer: ReturnType<typeof setTimeout> | null = null
 let unikey = ''
 
 const handleClose = () => {
@@ -191,6 +191,7 @@ const initLogin = async () => {
     timer = setInterval(checkStatus, 3000)
   } catch (err) {
     console.error('初始化登录失败:', err)
+    stopPolling()
     status.value = 0
   } finally {
     loading.value = false
