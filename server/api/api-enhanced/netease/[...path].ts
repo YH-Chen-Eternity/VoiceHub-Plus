@@ -89,12 +89,19 @@ const rememberQrLogin = (key: string, cookie: string) => {
 const replayQrLogin = (key: string): string | undefined => {
   const hit = qrLoginCache.get(key)
   if (!hit) return undefined
-  if (Date.now() - hit.at > QR_LOGIN_TTL_MS) {
-    qrLoginCache.delete(key)
-    return undefined
-  }
+  // 一次性回放：同一 unikey 拿到结果后立刻移除，避免长期驻留与重复登录
+  qrLoginCache.delete(key)
+  if (Date.now() - hit.at > QR_LOGIN_TTL_MS) return undefined
   return hit.cookie
 }
+
+// 低流量下 size 阈值兜不住过期条目，按分钟兜底清理；unref 避免阻止进程退出
+setInterval(() => {
+  const cutoff = Date.now() - QR_LOGIN_TTL_MS
+  for (const [k, v] of qrLoginCache) {
+    if (v.at < cutoff) qrLoginCache.delete(k)
+  }
+}, 60 * 1000).unref()
 
 let ncmConfigReady = false
 let ncmConfigPromise: Promise<void> | null = null
@@ -227,11 +234,14 @@ export default defineEventHandler(async (event) => {
     new Set([collectCookieText(rawQuery), collectCookieText(rawBody)].filter(Boolean))
   ).join('; ')
   // 取访客真实 IP 作为扫码链路种子（不使用 h3 自动导入，便于单测直接加载本模块）
+  // 生产链路由 Nginx 覆盖写 X-Forwarded-For/X-Real-IP、rewriter 再覆写一次，
+  // 应用端口不对公网暴露，客户端伪造无效；这里再加一层格式校验，畸形值退回默认种子。
   const reqHeaders = event.node?.req?.headers
   const rawClientIp = reqHeaders?.['x-real-ip'] ?? reqHeaders?.['x-forwarded-for'] ?? ''
-  const clientIp = String(Array.isArray(rawClientIp) ? rawClientIp[0] : rawClientIp)
+  const candidateIp = String(Array.isArray(rawClientIp) ? rawClientIp[0] : rawClientIp)
     .split(',')[0]!
     .trim()
+  const clientIp = /^\d{1,3}(\.\d{1,3}){3}$/.test(candidateIp) ? candidateIp : ''
 
   // 境外出口会被网易云判为海外，登录与账号接口直接失败；统一改写 X-Real-IP。
   // 客户端传入的 realIP 一律忽略，避免该代理变成任意 IP 伪造入口。
@@ -268,7 +278,8 @@ export default defineEventHandler(async (event) => {
       } else if (qrKey && code !== 803) {
         const replayed = replayQrLogin(qrKey)
         if (replayed) {
-          return { ...(body || {}), code: 803, message: '登录成功', cookie: replayed }
+          // 只回干净结构，避免把上游的「二维码已过期」等文案一起带给前端
+          return { code: 803, message: '登录成功', cookie: replayed }
         }
       }
     }

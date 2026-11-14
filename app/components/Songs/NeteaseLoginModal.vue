@@ -148,6 +148,7 @@ const loading = ref(false)
 const status = ref(0) // 800已过期、801待扫码、802已扫码、803登录成功
 const isExpired = ref(false)
 let timer: any = null
+let retryTimer: any = null
 let unikey = ''
 
 const handleClose = () => {
@@ -159,6 +160,10 @@ const stopPolling = () => {
   if (timer) {
     clearInterval(timer)
     timer = null
+  }
+  if (retryTimer) {
+    clearTimeout(retryTimer)
+    retryTimer = null
   }
 }
 
@@ -220,7 +225,8 @@ const checkStatus = async (retry = 0) => {
     // 803 的响应一旦丢失，二维码就被消费掉了，用户会看到「手机确认成功但没登上」。
     // 失败后立即补查两次（间隔 1.2s），比等下一轮 3s 轮询更容易抢在失效前拿到 cookie。
     if (retry < 2) {
-      setTimeout(() => {
+      retryTimer = setTimeout(() => {
+        retryTimer = null
         if (unikey) checkStatus(retry + 1)
       }, 1200)
     } else {
