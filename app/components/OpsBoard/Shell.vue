@@ -207,6 +207,7 @@ const errors = reactive({
 const estimated = computed(() => Boolean(data.overview?.estimated))
 const hasAnyError = computed(() => Object.values(errors).some(Boolean))
 const lastUpdatedText = computed(() => (lastUpdated.value ? formatClock(lastUpdated.value) : '—'))
+const rangeLabel = computed(() => ranges.find((r) => r.value === range.value)?.label ?? '')
 
 // ---- 統一 $fetch 封裝：GET 自動帶 ?range=，失敗回傳 null 不拋到全局 ----
 async function request(path, opts = {}) {
@@ -329,7 +330,7 @@ onUnmounted(() => {
 
 // 供子元件 inject 的共享狀態
 provide('opsBoardContext', {
-  range, data, errors, estimated, loading, refreshing, lastUpdated,
+  range, rangeLabel, data, errors, estimated, loading, refreshing, lastUpdated,
   pollMs, isHidden, request, post, refresh
 })
 
