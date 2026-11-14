@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   COMMUNITY_IMAGE_MAX_BYTES,
+  COMMUNITY_IMAGE_MAX_UPLOAD_BYTES,
   MAX_PIXELS,
   DOWNSCALE_STEPS,
   FULL_SIZE_QUALITIES,
@@ -58,4 +59,13 @@ test('本地压缩阶梯与服务端有损阶梯口径一致：先保尺寸降�
   // 与服务端一致的 3MB 目标体积与 40MP 像素上限
   assert.equal(COMMUNITY_IMAGE_MAX_BYTES, 3 * 1024 * 1024)
   assert.equal(MAX_PIXELS, 40 * 1000 * 1000)
+})
+
+test('原始文件放行 30MB，入库目标仍为 3MB', () => {
+  assert.equal(COMMUNITY_IMAGE_MAX_UPLOAD_BYTES, 30 * 1024 * 1024)
+  assert.equal(COMMUNITY_IMAGE_MAX_BYTES, 3 * 1024 * 1024)
+  assert.ok(
+    COMMUNITY_IMAGE_MAX_UPLOAD_BYTES > COMMUNITY_IMAGE_MAX_BYTES,
+    '上传上限必须大于入库上限，否则本地预压缩没有意义'
+  )
 })

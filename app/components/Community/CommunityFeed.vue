@@ -1717,7 +1717,7 @@ async function handleImageSelect(event: Event) {
       continue
     }
     if (file.size > COMMUNITY_IMAGE_MAX_UPLOAD_BYTES) {
-      showToast(t.value.imageTooLarge || '图片原始文件不能超过 15MB', 'error')
+      showToast(t.value.imageTooLarge || '图片原始文件不能超过 30MB', 'error')
       continue
     }
     uploading.value += 1
