@@ -72,6 +72,30 @@ const allowedEndpoints = new Map<string, Set<string>>([
 // xeapi 公钥缓存文件路径（由 generateConfig 写入系统临时目录）
 const xeapiPublicKeyPath = join(tmpdir(), 'xeapi_public_key')
 
+// 扫码登录结果暂存（unikey → cookie），用于 803 响应丢失后的补发
+const QR_LOGIN_TTL_MS = 5 * 60 * 1000
+const qrLoginCache = new Map<string, { cookie: string; at: number }>()
+
+const rememberQrLogin = (key: string, cookie: string) => {
+  qrLoginCache.set(key, { cookie, at: Date.now() })
+  if (qrLoginCache.size > 200) {
+    const cutoff = Date.now() - QR_LOGIN_TTL_MS
+    for (const [k, v] of qrLoginCache) {
+      if (v.at < cutoff) qrLoginCache.delete(k)
+    }
+  }
+}
+
+const replayQrLogin = (key: string): string | undefined => {
+  const hit = qrLoginCache.get(key)
+  if (!hit) return undefined
+  if (Date.now() - hit.at > QR_LOGIN_TTL_MS) {
+    qrLoginCache.delete(key)
+    return undefined
+  }
+  return hit.cookie
+}
+
 let ncmConfigReady = false
 let ncmConfigPromise: Promise<void> | null = null
 
@@ -114,17 +138,21 @@ const normalizeParams = (input: Record<string, any>) => {
 
 /**
  * 出口 IP 的稳定种子：
- * - 扫码流程用 unikey，保证 key/create/check 三步落在同一地区；
+ * - 扫码流程用访客 IP（不能用 unikey：key 阶段还没有 unikey，会与 create/check 落到不同出口 IP）；
  * - 账号相关请求用 MUSIC_U，保证同一账号的地区不来回跳；
  * - 其余请求（搜索、歌曲地址等）每次随机，不携带任何账号特征。
  */
 const buildRealIpSeed = (
   endpointPath: string,
-  qrKey: string,
+  clientIp: string,
   cookieText: string
 ): string | undefined => {
   if (endpointPath.startsWith('login/qr/')) {
-    return qrKey ? `qr:${qrKey}` : 'qr:default'
+    // 关键：qr/key 生成 unikey 时还不知道 unikey 本身。若按 unikey 取种子，
+    // key 走 qr:default、create/check 走 qr:<unikey>，三步落在不同出口 IP，
+    // 网易云会判定该二维码异地校验，扫码确认后直接返回 800（失效）而不是 803。
+    // 改用访客 IP 做种子：同一人三步必然同 IP，不同人天然隔离。
+    return clientIp ? `qr:${clientIp}` : 'qr:default'
   }
 
   const matched = cookieText.match(/(?:^|;\s*)MUSIC_U=([^;]+)/)
@@ -141,21 +169,6 @@ const collectCookieText = (input: unknown): string => {
   }
   return ''
 }
-
-/** 直接从原始入参取单个字符串（数组取最后一项，与 normalizeParams 口径一致），避免种子被数组传参绕过 */
-const pickRawValue = (input: unknown, name: string): string => {
-  if (!input || typeof input !== 'object') return ''
-  const raw = (input as Record<string, unknown>)[name]
-  if (typeof raw === 'string') return raw.trim()
-  if (Array.isArray(raw)) {
-    for (let i = raw.length - 1; i >= 0; i -= 1) {
-      const item = raw[i]
-      if (typeof item === 'string' && item.trim()) return item.trim()
-    }
-  }
-  return ''
-}
-
 
 export default defineEventHandler(async (event) => {
   const rawPath = getRouterParam(event, 'path')
@@ -213,15 +226,17 @@ export default defineEventHandler(async (event) => {
   const cookieText = Array.from(
     new Set([collectCookieText(rawQuery), collectCookieText(rawBody)].filter(Boolean))
   ).join('; ')
-  const qrKey =
-    pickRawValue(rawQuery, 'key') ||
-    pickRawValue(rawBody, 'key') ||
-    (typeof params.key === 'string' ? params.key : '')
+  // 取访客真实 IP 作为扫码链路种子（不使用 h3 自动导入，便于单测直接加载本模块）
+  const reqHeaders = event.node?.req?.headers
+  const rawClientIp = reqHeaders?.['x-real-ip'] ?? reqHeaders?.['x-forwarded-for'] ?? ''
+  const clientIp = String(Array.isArray(rawClientIp) ? rawClientIp[0] : rawClientIp)
+    .split(',')[0]!
+    .trim()
 
   // 境外出口会被网易云判为海外，登录与账号接口直接失败；统一改写 X-Real-IP。
   // 客户端传入的 realIP 一律忽略，避免该代理变成任意 IP 伪造入口。
   if (isNeteaseRealIpEnabled()) {
-    params.realIP = resolveNeteaseRealIp(buildRealIpSeed(endpointPath, qrKey, cookieText))
+    params.realIP = resolveNeteaseRealIp(buildRealIpSeed(endpointPath, clientIp, cookieText))
     if (process.env.NETEASE_REAL_IP_DEBUG === 'true') {
       console.log(`[Netease] ${endpointPath} 出口 IP: ${params.realIP}`)
     }
@@ -241,7 +256,23 @@ export default defineEventHandler(async (event) => {
     if (typeof result?.status === 'number') {
       setResponseStatus(event, result.status)
     }
-    return result?.body ?? result
+    const body = result?.body ?? result
+    // 扫码结果补发：803 只在网易云侧出现一次，前端那次响应若被网关打断（502/504），
+    // cookie 就永久丢失，用户看到的是「手机确认成功却没登上」。按 unikey 暂存后回放。
+    if (endpointPath === 'login/qr/check') {
+      const qrKey = typeof params.key === 'string' ? params.key : ''
+      const code = Number(body?.code)
+      const cookieText = typeof body?.cookie === 'string' ? body.cookie : ''
+      if (qrKey && code === 803 && cookieText) {
+        rememberQrLogin(qrKey, cookieText)
+      } else if (qrKey && code !== 803) {
+        const replayed = replayQrLogin(qrKey)
+        if (replayed) {
+          return { ...(body || {}), code: 803, message: '登录成功', cookie: replayed }
+        }
+      }
+    }
+    return body
   } catch (error: any) {
     // 上游模块以 { status, body: { code, msg } } 形态抛出失败，真实原因在 body.msg
     const upstream = error?.body ?? null

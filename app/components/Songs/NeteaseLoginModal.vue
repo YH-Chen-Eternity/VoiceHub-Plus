@@ -192,14 +192,18 @@ const initLogin = async () => {
   }
 }
 
-const checkStatus = async () => {
+const checkStatus = async (retry = 0) => {
   if (!unikey) return
 
   try {
     const res = await fetch(
       `${BASE_URL}/login/qr/check?key=${unikey}&timestamp=${Date.now()}&ua=pc`
     )
+    // 网关抖动时会返回 502/504 或 HTML 错误页，此时不能当成二维码状态处理
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const data = await res.json()
+    if (typeof data.code !== 'number') throw new Error('unexpected response')
+
     status.value = data.code
 
     if (data.code === 800) {
@@ -207,13 +211,21 @@ const checkStatus = async () => {
       isExpired.value = true
       stopPolling()
     } else if (data.code === 803) {
-      // 登录成功
+      // 登录成功。cookie 只在这条响应里出现一次，必须拿到并落库
       stopPolling()
       const cookie = data.cookie
       await handleLoginSuccess(cookie)
     }
   } catch (err) {
-    console.error('检查二维码状态失败:', err)
+    // 803 的响应一旦丢失，二维码就被消费掉了，用户会看到「手机确认成功但没登上」。
+    // 失败后立即补查两次（间隔 1.2s），比等下一轮 3s 轮询更容易抢在失效前拿到 cookie。
+    if (retry < 2) {
+      setTimeout(() => {
+        if (unikey) checkStatus(retry + 1)
+      }, 1200)
+    } else {
+      console.warn('检查二维码状态失败:', err)
+    }
   }
 }
 
