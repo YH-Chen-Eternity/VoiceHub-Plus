@@ -69,7 +69,7 @@ jobs:
 
       - name: 审查改动并发布评论
         if: steps.config.outputs.ready == 'true'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           AI_REVIEW_NVAPI_KEY: ${{ secrets.AI_REVIEW_NVAPI_KEY }}
