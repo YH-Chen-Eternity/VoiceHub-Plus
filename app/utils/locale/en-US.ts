@@ -1393,7 +1393,20 @@ export const pages = {
       restoreCommentMsg: 'The comment will reappear under its post. Continue?',
       restoreSuccess: 'Restored',
       restoreFailed: 'Restore failed. Please try again later',
-      restoreCommentBlocked: 'The parent post is still archived. Restore the post first'
+      restoreCommentBlocked: 'The parent post is still archived. Restore the post first',
+      purge: 'Delete permanently',
+      purgeRange: 'Purge current scope',
+      purgeRangeTitle: 'Purge archived records',
+      purgeRangeMsg: (count: number, scope: string) => `This permanently deletes ${count} archived record(s) in ${scope}. This cannot be undone.\nPurging an archived post also deletes all its comments (including non-archived ones) and images.\nType DELETE to confirm.`,
+      purgeConfirmWord: 'DELETE',
+      purgeWrongWord: (word: string) => `Incorrect confirmation. Please type ${word}`,
+      purgePostTitle: 'Delete archived post permanently',
+      purgePostMsg: 'This post, all its comments (including non-archived ones) and images will be permanently removed. This cannot be undone. Continue?',
+      purgeCommentTitle: 'Delete archived comment permanently',
+      purgeCommentMsg: 'This comment will be permanently removed. This cannot be undone. Continue?',
+      purgeSuccess: (count: number, remaining: number) => remaining > 0 ? `Permanently deleted ${count} record(s); ${remaining} remaining, click purge again to continue` : `Permanently deleted ${count} archived record(s)`,
+      purgeFailed: 'Failed to purge archived records',
+      purgeEmpty: 'No archived records in the current scope'
     }
   },
   yearReview: {
@@ -6339,6 +6352,7 @@ export const serverErrors = {
   COMMUNITY_ARCHIVE_NOT_ARCHIVED: 'This record is not archived and does not need restoring',
   COMMUNITY_ARCHIVE_EXPIRED: 'The archive retention period has passed; it can no longer be restored',
   COMMUNITY_ARCHIVE_POST_ARCHIVED: 'The parent post is still archived. Restore the post first',
+  COMMUNITY_ARCHIVE_PURGE_INVALID: 'Invalid request for purging archived records',
   COMMUNITY_REVIEW_BOARD_FORBIDDEN: 'You are not assigned to this board',
   SYSTEM_BOARD_FAILED: 'System board data is unavailable. Please retry later.'
 } as const

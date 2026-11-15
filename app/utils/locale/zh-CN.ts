@@ -1371,7 +1371,20 @@ export const pages = {
       restoreCommentMsg: '恢复后评论会重新出现在所属帖子下。确定恢复吗？',
       restoreSuccess: '已恢复',
       restoreFailed: '恢复失败，请稍后重试',
-      restoreCommentBlocked: '所属帖子仍在归档中，请先恢复帖子'
+      restoreCommentBlocked: '所属帖子仍在归档中，请先恢复帖子',
+      purge: '彻底删除',
+      purgeRange: '清空当前范围',
+      purgeRangeTitle: '清空归档记录',
+      purgeRangeMsg: (count: number, scope: string) => `将永久删除${scope}内共 ${count} 条归档记录，删除后不可恢复。\n删除归档帖子会一并删除其下所有评论（含未归档评论）与图片。\n请输入「删除」以确认。`,
+      purgeConfirmWord: '删除',
+      purgeWrongWord: (word: string) => `确认文字不正确，请输入「${word}」`,
+      purgePostTitle: '彻底删除归档帖子',
+      purgePostMsg: '该帖子及其下所有评论（含未归档评论）与图片将被永久删除，无法恢复。确定删除吗？',
+      purgeCommentTitle: '彻底删除归档评论',
+      purgeCommentMsg: '该评论将被永久删除，无法恢复。确定删除吗？',
+      purgeSuccess: (count: number, remaining: number) => remaining > 0 ? `已彻底删除 ${count} 条，还有 ${remaining} 条未清理，可继续点击清空` : `已彻底删除 ${count} 条归档记录`,
+      purgeFailed: '删除归档记录失败',
+      purgeEmpty: '当前范围内没有可删除的归档记录'
     }
   },
   yearReview: {
@@ -6148,6 +6161,7 @@ export const serverErrors = {
   COMMUNITY_ARCHIVE_NOT_ARCHIVED: '该记录不在归档中，无需恢复',
   COMMUNITY_ARCHIVE_EXPIRED: '该记录的归档保留期已过，无法恢复',
   COMMUNITY_ARCHIVE_POST_ARCHIVED: '所属帖子仍在归档中，请先恢复帖子',
+  COMMUNITY_ARCHIVE_PURGE_INVALID: '删除归档记录的请求不正确',
   COMMUNITY_REVIEW_BOARD_FORBIDDEN: '你没有被分配到该板块',
   SYSTEM_BOARD_FAILED: '系统看板数据异常，请稍后重试'
 } as const
