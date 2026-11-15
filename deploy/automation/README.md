@@ -16,7 +16,7 @@
 | `scripts/04-attack-watch.sh` | 攻击监控与邮件告警（带冷却） | 每 10 分钟 |
 | `scripts/05-slow-query.sh` | 数据库慢查询周报 | 每周一 09:00 |
 | `scripts/06-geo-allow-update.sh` | 放行 IP 库更新（配合地域访问限制使用，见第 8 节） | 建议每月 1 日 04:00 |
-| `scripts/08-watchdog.sh` | 主机看门狗：应用健康检查 + 容器自动重启恢复 + 磁盘保护（systemd timer，见第 10 节） | 每 2 分钟 |
+| `scripts/08-watchdog.sh` | 主机看门狗：应用健康检查 + WAF 入口探测 + 全容器自动拉起 + 内存/磁盘告警（systemd timer，见第 10 节） | 每 2 分钟 |
 
 ---
 
@@ -249,10 +249,15 @@ unset TENCENTCLOUD_SECRET_ID TENCENTCLOUD_SECRET_KEY     # 用完清除
 
 | 检查项 | 判据 | 动作 |
 | --- | --- | --- |
-| 应用存活 | `GET /api/health` 连续失败 ≥ `VH_MAX_FAILS`（默认 2 次） | `docker restart voicehub`；容器不存在则 `compose up -d voicehub`；重启后 120s 内复检并告警 |
+| 应用存活 | 直连 `GET 127.0.0.1:3000/api/health` 连续失败 ≥ `VH_MAX_FAILS`（默认 2 次） | `docker restart voicehub`；容器不存在则 `compose up -d voicehub`；重启后 120s 内复检并告警 |
 | 重启风暴保护 | 距上次自动重启 < `VH_RESTART_COOLDOWN`（默认 300s） | 跳过重启，仅记录 |
-| 依赖容器 | `voicehub-postgres` / `voicehub-redis` / `voicehub-rewriter` 非 running | `compose up -d <服务>`，失败再 `docker start` |
+| **WAF 入口可达** | 经 tengine 访问 `https://$VH_SITE_HOST/api/health`（`--resolve` 固定回源 `127.0.0.1`，证书仍按域名校验）连续失败 ≥ `VH_WAF_MAX_FAILS`（默认 3 次）且**应用直连健康** | `docker restart safeline-tengine`，恢复后复检并告警；若应用直连同时异常，则交由应用恢复逻辑处理，不重复动作 |
+| **WAF 重启风暴保护** | 距上次重启 tengine < `VH_WAF_RESTART_COOLDOWN`（默认 600s） | 跳过重启，仅记录 |
+| 容器存活 | `voicehub-postgres` / `voicehub-redis` / `voicehub-rewriter` / `safeline-{tengine,detector,mgt,chaos,pg,luigi,fvm}` 非 running；容器不存在（未安装）则跳过不告警 | `docker start`，失败再走对应 compose（`VH_HOME` 或 `VH_SAFELINE_HOME`） |
+| **内存占用** | 物理内存使用率 ≥ `VH_MEM_MAX_PERCENT`（默认 85%），同一告警在 `VH_MEM_ALERT_COOLDOWN`（默认 1800s）内只发一次 | 记录占用前五容器并告警，**不重启**（高水位常为持续状态，置 RC=1 会掩盖真正的故障信号） |
 | 磁盘占用 | 根分区 ≥ `VH_DISK_MAX_PERCENT`（默认 90%） | 清理悬空镜像与构建缓存并告警 |
+
+> **为什么需要单独探测 WAF 入口**：应用健康检查直连 `127.0.0.1:3000`，绕过了 tengine。若 tengine 进程存活但内部转发异常，应用探针仍返回 200，而用户已无法访问站点。故额外增加「经 WAF 回源」的探测，两条探针互补：应用探针管应用本体，WAF 探针管入口链路。
 
 日志写入 `$VH_HOME/backups/watchdog.log`；状态与计数在 `/var/lib/voicehub-watchdog`（可用 `VH_STATE_DIR` 改）。告警复用 `VH_MAIL_BIN`，未配置则只记日志。
 
@@ -276,6 +281,7 @@ systemctl start voicehub-watchdog.service && tail -5 "$VH_HOME/backups/watchdog.
 
 | 日期 | 内容 |
 | --- | --- |
+| 2026-11-15 | 看门狗扩展：新增「WAF 入口可达」探测（经 tengine 回源，补上应用探针直连 3000 端口导致的入口盲区，失败且应用健康时自动重启 tengine）；容器兜底范围从 3 个扩至 10 个（新增 safeline 全家桶，按前缀走对应 compose）；新增内存占用阈值告警（默认 85%，仅告警不重启）；均带阈值/冷却可配项 |
 | 2026-11-12 | 新增主机看门狗 `08-watchdog.sh` 与 systemd timer（应用健康检查 + 自动重启 + 依赖容器兜底 + 磁盘保护）；应用新增公开存活探针 `/api/health`，compose 增加 healthcheck；删除已废弃的看板独立域名 nginx 模板（看板已并入管理后台） |
 | 2026-11-12 | 运维告警收件人改为后台「运维通知」可配、复用站内 SMTP 代发；新增 `voicehub-mailer.py` 投递模板（去掉自带 SMTP 凭据、改 POST 应用内部接口）；统一腾讯云自动化助手（TAT）职责表述与凭据边界说明（仅文案与措辞，调度方式不变） |
 | 2026-11-08 | 运维脚本统一配置外置与占位符化；更新放行 IP 库脚本；巡检补充公网监听端口检查；整理脚本集与配置说明、同步工具 |
