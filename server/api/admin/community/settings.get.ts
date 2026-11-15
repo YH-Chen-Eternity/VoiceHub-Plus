@@ -17,6 +17,7 @@ export default defineEventHandler(async (event) => {
       enabled: settings.enabled,
       allowImages: settings.allowImages,
       maxImages: settings.maxImages,
+      allowMultiImageBatch: settings.allowMultiImageBatch,
       maxContentLength: settings.maxContentLength,
       maxCommentLength: settings.maxCommentLength,
       moderationEnabled: settings.moderationEnabled,

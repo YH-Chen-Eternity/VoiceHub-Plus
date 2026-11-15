@@ -311,7 +311,7 @@
           <section class="rules-card">
             <h3>{{ t.rulesTitle }}</h3>
             <p>{{ t.pendingHint }}</p>
-            <p v-if="settings.allowImages">{{ t.imageHint(maxImages) }}</p>
+            <p v-if="settings.allowImages">{{ imageHintText }}</p>
           </section>
         </aside>
       </div>
@@ -451,32 +451,61 @@
                 <div class="field-title">
                   <ImagePlus :size="15" />
                   <span>{{ t.addImages }}</span>
-                  <span class="field-title-extra">{{ publishForm.images.length }}/{{ maxImages }}</span>
+                  <span class="field-title-extra">
+                    {{ publishForm.images.length }}<template v-if="!batchEnabled">/{{ maxImages }}</template>
+                  </span>
                 </div>
                 <div class="image-uploader">
                   <div
                     v-for="(image, index) in publishForm.images"
-                    :key="image.id"
+                    :key="image.key"
                     class="upload-thumb"
+                    :class="{ 'is-pending': !image.id }"
                   >
-                    <img :alt="`已选图片 ${Number(index) + 1}`" :src="image.thumbUrl ?? image.url">
-                    <button class="thumb-remove" type="button" @click="removeImage(image.id)">
+                    <img :alt="`已选图片 ${Number(index) + 1}`" :src="image.previewUrl ?? image.thumbUrl ?? image.url">
+                    <span v-if="!image.id" class="thumb-pending">{{ t.uploading }}</span>
+                    <button class="thumb-remove" type="button" @click="removeImage(image.key)">
                       <X :size="12" />
                     </button>
                   </div>
                   <button
-                    v-if="publishForm.images.length < maxImages"
+                    v-if="publishForm.images.length < imageSelectionLimit"
                     class="upload-add"
-                    :disabled="uploading > 0"
+                    :disabled="isUploading"
                     type="button"
                     @click="imageInput?.click()"
                   >
-                    <Loader2 v-if="uploading > 0" class="animate-spin" :size="18" />
+                    <Loader2 v-if="isUploading" class="animate-spin" :size="18" />
                     <ImagePlus v-else :size="18" />
-                    <span>{{ uploading > 0 ? t.uploading : t.addImages }}</span>
+                    <span>{{ isUploading ? uploadingLabel : t.addImages }}</span>
                   </button>
                 </div>
-                <p class="field-hint">{{ t.imageHint(maxImages) }}</p>
+                <div v-if="uploadProgress" class="upload-progress">
+                  <div class="upload-progress-track">
+                    <div
+                      class="upload-progress-bar"
+                      :style="{ width: `${uploadProgress.total ? Math.round((uploadProgress.done / uploadProgress.total) * 100) : 0}%` }"
+                    />
+                  </div>
+                  <span>{{ uploadingLabel }}</span>
+                  <button v-if="isUploading" class="link-button" type="button" @click="stopUpload">
+                    {{ t.imageUploadAborted }}
+                  </button>
+                </div>
+                <button
+                  v-if="!isUploading && uploadFailedCount > 0"
+                  class="link-button upload-retry"
+                  type="button"
+                  @click="retryFailedImages"
+                >
+                  {{ t.imageUploadRetry }}
+                </button>
+                <p v-if="batchEnabled && batchPostCount > 1" class="field-hint">
+                  {{ t.batchPostCount(batchPostCount) }}
+                </p>
+                <p class="field-hint">{{ imageHintText }}</p>
+                <p v-if="!publishForm.content.trim()" class="field-hint">{{ t.imageOnlyHint }}</p>
+                <div v-if="draftSaveFailed" class="field-hint">{{ t.draftSaveFailed }}</div>
                 <input
                   ref="imageInput"
                   accept="image/png,image/jpeg,image/webp,image/gif"
@@ -489,15 +518,35 @@
               <p v-else class="field-hint">{{ t.imagesDisabled }}</p>
             </div>
 
-            <footer class="modal-foot">
-              <span class="foot-hint">{{ t.pendingHint }}</span>
+            <footer v-if="discardConfirming" class="modal-foot discard-confirm">
+              <span class="foot-hint">{{ t.draftDiscardConfirm }}</span>
               <div class="foot-actions">
+                <button class="ghost-button" :disabled="discarding" type="button" @click="discardConfirming = false">
+                  {{ t.cancel || '取消' }}
+                </button>
+                <button class="primary-button" :disabled="discarding" type="button" @click="confirmDiscardDraft">
+                  {{ t.draftDiscard }}
+                </button>
+              </div>
+            </footer>
+            <footer v-else class="modal-foot">
+              <span class="foot-hint">{{ draftRestored ? t.draftRestored : t.pendingHint }}</span>
+              <div class="foot-actions">
+                <button
+                  v-if="hasDraftContent"
+                  class="ghost-button"
+                  :disabled="submitting || isUploading || discarding"
+                  type="button"
+                  @click="discardConfirming = true"
+                >
+                  {{ t.draftDiscard }}
+                </button>
                 <button class="ghost-button" type="button" @click="closePublish">
                   {{ t.cancel || '取消' }}
                 </button>
                 <button
                   class="primary-button"
-                  :disabled="submitting || !canSubmit"
+                  :disabled="!canSubmit"
                   type="button"
                   @click="submitPost"
                 >
@@ -904,10 +953,26 @@ import { useNewUi } from '~/composables/useNewUi'
 import { useToast } from '~/composables/useToast'
 import { useSongPlayback } from '~/composables/useSongPlayback'
 import {
-  COMMUNITY_IMAGE_MAX_UPLOAD_BYTES,
-  compressCommunityImageFile,
-  isCommunityImageType
-} from '~/utils/communityImage'
+  COMMUNITY_DRAFT_MAX_IMAGES,
+  collectUploadedImageIds,
+  makeDraftImageKey,
+  markDraftUploaded,
+  mergeDraftImages,
+  type DraftImage,
+  type PublishDraft
+} from '~/utils/communityPublishDraft'
+import {
+  prepareImageFile,
+  uploadDraftImages,
+  type UploadProgress
+} from '~/utils/communityImageUpload'
+import {
+  clearDraftBlobs,
+  clearDraftMeta,
+  restoreDraft,
+  saveDraftBlobs,
+  saveDraftMeta
+} from '~/utils/communityDraftStore'
 import CommunityImageViewer from '~/components/Community/CommunityImageViewer.vue'
 import { formatDateOnly } from '~/utils/timeUtils'
 
@@ -939,6 +1004,7 @@ const settings = computed<AnyRecord>(
     status.value?.settings || {
       enabled: false,
       allowImages: false,
+      allowMultiImageBatch: false,
       maxImages: 9,
       maxContentLength: 1000,
       maxCommentLength: 300
@@ -952,6 +1018,15 @@ const ban = computed<AnyRecord>(
 const violationCount = computed(() => Number(status.value?.viewer?.violationCount || 0))
 const activeBoards = computed(() => boards.value.filter((board) => board.isActive))
 const maxImages = computed(() => Math.min(Number(settings.value.maxImages || 9), 9))
+// 开关只控制「是否允许超过单帖上限并自动拆帖」；其余上传优化始终启用
+const batchEnabled = computed(() => settings.value.allowMultiImageBatch === true)
+const imageSelectionLimit = computed(() =>
+  batchEnabled.value ? COMMUNITY_DRAFT_MAX_IMAGES : maxImages.value
+)
+const imageHintText = computed(() => {
+  const hint = batchEnabled.value ? t.value.imageHintBatch : t.value.imageHint
+  return typeof hint === 'function' ? hint(maxImages.value) : ''
+})
 const myUserId = computed(() => Number(me.value?.user?.id || 0))
 // 未登录游客：可浏览内容与图片、查看原图与下载，但发帖/评论/点赞等写操作一律拦截（服务端同步强校验）
 const isGuest = computed(() => myUserId.value <= 0)
@@ -1005,12 +1080,22 @@ function canRemoveComment(comment: AnyRecord | null) {
 const publishOpen = ref(false)
 const submitting = ref(false)
 const imageInput = ref<HTMLInputElement | null>(null)
-const uploading = ref(0)
+const uploadProgress = ref<UploadProgress | null>(null)
+const isUploading = ref(false)
+const uploadFailedCount = ref(0)
+const draftRestored = ref(false)
+const draftSaveFailed = ref(false)
+const discardConfirming = ref(false)
+// 放弃草稿是异步流程（先清服务端孤儿图，再清本地草稿）：期间保持确认态并禁用按钮，
+// 避免用户在清理完成前刷新页面恢复出已被删除的图片，或重复触发清理
+const discarding = ref(false)
+let abortUpload = false
+let uploadToken = 0
 const publishForm = reactive<AnyRecord>({
   boardId: 0,
   content: '',
   song: null as AnyRecord | null,
-  images: [] as AnyRecord[],
+  images: [] as DraftImage[],
   nameMode: 'semi'
 })
 // 发帖显示模式：受后台三个开关约束，semi 为默认；开关缺省（后端尚未下发）时按允许处理
@@ -1022,12 +1107,26 @@ const nameModeOptions = computed(() => {
   if (settings.value.allowAnonymous !== false) options.push({ value: 'anon', label: nm.anon })
   return options
 })
+// 纯图帖允许发布；上传进行中禁止提交，避免只发出半批图
 const canSubmit = computed(
   () =>
     !!publishForm.boardId &&
-    !!publishForm.content.trim() &&
-    publishForm.content.length <= settings.value.maxContentLength
+    publishForm.content.length <= settings.value.maxContentLength &&
+    (!!publishForm.content.trim() || collectUploadedImageIds(publishForm.images as DraftImage[]).length > 0) &&
+    !isUploading.value &&
+    !submitting.value
 )
+// 批量开关开启且图片超过单帖上限时，提示将拆成几个帖子
+const batchPostCount = computed(() => {
+  if (!batchEnabled.value) return 1
+  return Math.max(1, Math.ceil(collectUploadedImageIds(publishForm.images as DraftImage[]).length / maxImages.value))
+})
+const uploadingLabel = computed(() => {
+  const progress = uploadProgress.value
+  if (!progress) return t.value.uploading
+  if (progress.phase === 'compressing') return t.value.imageUploadProgress?.(progress.done, progress.total) || t.value.uploading
+  return t.value.imageUploadProgress?.(progress.done, progress.total) || t.value.uploading
+})
 
 const songQuery = ref('')
 const songResults = ref<AnyRecord[]>([])
@@ -1642,13 +1741,48 @@ async function toggleLike(post: AnyRecord) {
   pendingLikePost.value = post
 }
 
-function openPublish() {
-  if (requireLogin()) return
-  if (!settings.value.enabled) return
-  if (ban.value.muted) {
-    showToast(t.value.muted, 'warning')
-    return
+function currentDraft(): PublishDraft {
+  return {
+    version: 1,
+    boardId: Number(publishForm.boardId) || 0,
+    content: String(publishForm.content || ''),
+    nameMode: String(publishForm.nameMode || 'semi'),
+    song: publishForm.song
+      ? {
+          id: publishForm.song.id,
+          title: publishForm.song.title,
+          artist: publishForm.song.artist,
+          cover: publishForm.song.cover || ''
+        }
+      : null,
+    images: publishForm.images as DraftImage[],
+    updatedAt: Date.now()
   }
+}
+
+/** 每处变更都落草稿：已上传 id 即时持久化，刷新后可跳过重传 */
+function persistDraft() {
+  const draft = currentDraft()
+  draftSaveFailed.value = !saveDraftMeta(draft)
+  void saveDraftBlobs(draft.images)
+}
+
+const hasDraftContent = computed(
+  () => !!publishForm.content.trim() || (publishForm.images as DraftImage[]).length > 0
+)
+
+function releasePreviewUrls(images: DraftImage[]) {
+  for (const image of images) {
+    if (image.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(image.previewUrl)
+  }
+}
+
+function resetPublishForm() {
+  // 作废进行中的上传：重开弹窗 / 放弃草稿 / 提交成功后，旧上传的回调不得写入新一轮表单
+  uploadToken += 1
+  abortUpload = true
+  isUploading.value = false
+  releasePreviewUrls(publishForm.images as DraftImage[])
   publishForm.boardId = activeBoardId.value || activeBoards.value[0]?.id || 0
   publishForm.content = ''
   publishForm.song = null
@@ -1657,12 +1791,90 @@ function openPublish() {
   songQuery.value = ''
   songResults.value = []
   songSearched.value = false
+  draftRestored.value = false
+  discardConfirming.value = false
+  uploadProgress.value = null
+  uploadFailedCount.value = 0
+}
+
+async function applyDraft(draft: PublishDraft) {
+  publishForm.boardId = draft.boardId || activeBoardId.value || activeBoards.value[0]?.id || 0
+  publishForm.content = draft.content || ''
+  publishForm.song = draft.song || null
+  publishForm.nameMode = draft.nameMode || 'semi'
+  // 已上传的走缩略图；未上传的用本地 Blob 预览
+  publishForm.images = draft.images.map((image) => {
+    if (image.id) {
+      return { ...image, previewUrl: image.url ? `${image.url}?variant=preview` : undefined }
+    }
+    return {
+      ...image,
+      previewUrl: image.blob ? URL.createObjectURL(image.blob) : undefined
+    }
+  })
+  draftRestored.value = draft.images.length > 0 || !!draft.content
+}
+
+async function openPublish() {
+  if (requireLogin()) return
+  if (!settings.value.enabled) return
+  if (ban.value.muted) {
+    showToast(t.value.muted, 'warning')
+    return
+  }
+  resetPublishForm()
   publishOpen.value = true
+  // 刷新恢复：优先还原未发布的草稿，已传成功的图直接跳过上传
+  try {
+    const draft = await restoreDraft()
+    if (draft) {
+      await applyDraft(draft)
+      if (draftRestored.value) showToast(t.value.draftRestored, 'info', 3000)
+      // 草稿里仍待上传的图片自动续传
+      if ((publishForm.images as DraftImage[]).some((image) => !image.id && image.blob)) {
+        void startUpload()
+      }
+    }
+  } catch {
+    // 草稿不可用不阻断发帖
+  }
 }
 
 function closePublish() {
   if (submitting.value) return
+  // 关闭不等于放弃：内容保留为草稿，下次打开继续
+  if (hasDraftContent.value) persistDraft()
   publishOpen.value = false
+}
+
+/** 放弃草稿：停止上传 + 清理服务端孤儿图片 + 清本地草稿 */
+async function confirmDiscardDraft() {
+  if (discarding.value || isUploading.value || submitting.value) return
+  discarding.value = true
+  try {
+    abortUpload = true
+    const images = publishForm.images as DraftImage[]
+    const ids = collectUploadedImageIds(images)
+    if (ids.length) {
+      try {
+        await $fetch('/api/community/media/discard', { method: 'POST', body: { ids } })
+      } catch {
+        // 清理失败不阻断放弃；残留孤儿图片由后续卷级清理兜底
+      }
+    }
+    await clearDraftBlobs()
+    clearDraftMeta()
+    resetPublishForm()
+    uploadFailedCount.value = 0
+    publishOpen.value = false
+  } finally {
+    discardConfirming.value = false
+    discarding.value = false
+  }
+}
+
+function stopUpload() {
+  abortUpload = true
 }
 
 function handleSongInput() {
@@ -1710,50 +1922,115 @@ async function handleImageSelect(event: Event) {
   const files = Array.from(input.files || [])
   input.value = ''
   if (!files.length) return
-  const remaining = maxImages.value - publishForm.images.length
-  for (const file of files.slice(0, Math.max(remaining, 0))) {
-    if (!isCommunityImageType(file.type)) {
-      showToast(t.value.imageTypeUnsupported || '仅支持 PNG / JPEG / WebP / GIF', 'error')
+  const remaining = imageSelectionLimit.value - (publishForm.images as DraftImage[]).length
+  const picked = files.slice(0, Math.max(remaining, 0))
+
+  // 前置校验：MIME 白名单 + 文件头魔数（拦截改扩展名的伪装文件）+ 30MB 上限
+  const prepared = await Promise.all(
+    picked.map((file) => prepareImageFile(file, makeDraftImageKey(file)))
+  )
+  const accepted: DraftImage[] = []
+  for (const item of prepared) {
+    if (!item.valid) {
+      const message =
+        item.reason === 'type'
+          ? t.value.imageTypeUnsupported
+          : item.reason === 'too-large'
+            ? t.value.imageTooLarge
+            : t.value.imageContentMismatch
+      showToast(message || '图片不合法', 'error')
       continue
     }
-    if (file.size > COMMUNITY_IMAGE_MAX_UPLOAD_BYTES) {
-      showToast(t.value.imageTooLarge || '图片原始文件不能超过 30MB', 'error')
-      continue
+    accepted.push({
+      key: item.key,
+      name: item.file.name,
+      size: item.file.size,
+      type: item.file.type,
+      blob: item.file,
+      previewUrl: URL.createObjectURL(item.file)
+    })
+  }
+  if (!accepted.length) return
+
+  publishForm.images = mergeDraftImages(
+    publishForm.images as DraftImage[],
+    accepted,
+    imageSelectionLimit.value
+  )
+  persistDraft()
+  void startUpload()
+}
+
+/** 并行压缩 + 并行上传；每张成功即落草稿，实现图片级断点续传 */
+async function startUpload() {
+  if (isUploading.value) return
+  isUploading.value = true
+  abortUpload = false
+  uploadFailedCount.value = 0
+  const token = ++uploadToken
+  uploadProgress.value = { phase: 'compressing', done: 0, total: 0, uploaded: 0, failed: 0 }
+  try {
+    const outcome = await uploadDraftImages({
+      images: publishForm.images as DraftImage[],
+      onProgress: (progress) => {
+        if (token === uploadToken) uploadProgress.value = progress
+      },
+      onUploaded: (key, id, url, reused) => {
+        if (token !== uploadToken) return
+        const previous = publishForm.images as DraftImage[]
+        publishForm.images = markDraftUploaded(previous, key, id, url).map((image) =>
+          image.key === key
+            ? { ...image, previewUrl: `${url}?variant=preview` }
+            : image
+        )
+        // 释放本地 blob 预览，改用服务端缩略图
+        const target = previous.find((image) => image.key === key)
+        if (target?.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(target.previewUrl)
+        if (reused) {
+          // 服务端 sha256 秒传：复用已有图片，不新增记录、不消耗额度
+        }
+        persistDraft()
+      },
+      shouldAbort: () => abortUpload || token !== uploadToken
+    })
+    if (token !== uploadToken) return
+    uploadFailedCount.value = outcome.failedKeys.length
+    if (outcome.failedKeys.length) {
+      const failedMessage = t.value.imageUploadPartialFailed
+      showToast(
+        typeof failedMessage === 'function'
+          ? failedMessage(outcome.failedKeys.length)
+          : t.value.imageUploadFailed,
+        'warning'
+      )
     }
-    uploading.value += 1
-    try {
-      // 浏览器本地预压缩：超过 3MB 的静态图先在本机压到 3MB 内再上传（省流量提速）；
-      // 预压缩失败/不支持时自动回退原图，服务端仍统一做校验与「先无损、压不到才降」重编码兜底
-      let uploadFile: File = file
-      let localCompressed = false
-      try {
-        const pre = await compressCommunityImageFile(file)
-        uploadFile = pre.file
-        localCompressed = pre.compressed
-      } catch {
-        uploadFile = file
-      }
-      const form = new FormData()
-      form.append('file', uploadFile)
-      const res = await $fetch<AnyRecord>('/api/community/media', { method: 'POST', body: form })
-      if (localCompressed) showToast(t.value.imagePreCompressed || t.value.imageCompressed, 'info', 2500)
-      else if (res.compressed) showToast(t.value.imageCompressed, 'info', 2500)
-      publishForm.images.push({ id: res.id, url: res.url })
-    } catch (error: any) {
-      showToast(apiMessage(error, t.value.imageUploadFailed), 'error')
-    } finally {
-      uploading.value -= 1
+  } finally {
+    if (token === uploadToken) {
+      isUploading.value = false
+      uploadProgress.value = null
+      persistDraft()
     }
   }
 }
 
-function removeImage(imageId: number) {
-  publishForm.images = publishForm.images.filter((image: AnyRecord) => image.id !== imageId)
+async function retryFailedImages() {
+  if (isUploading.value) return
+  void startUpload()
+}
+
+function removeImage(key: string) {
+  const images = publishForm.images as DraftImage[]
+  const target = images.find((image) => image.key === key)
+  if (target?.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(target.previewUrl)
+  publishForm.images = images.filter((image) => image.key !== key)
+  persistDraft()
 }
 
 async function submitPost() {
   if (requireLogin()) return
   if (!canSubmit.value || submitting.value) return
+  const imageIds = collectUploadedImageIds(publishForm.images as DraftImage[])
+  if (!publishForm.content.trim() && !imageIds.length) return
   submitting.value = true
   try {
     const res = await $fetch<AnyRecord>('/api/community/posts', {
@@ -1763,15 +2040,20 @@ async function submitPost() {
         content: publishForm.content,
         nameMode: publishForm.nameMode,
         songId: publishForm.song?.id ?? null,
-        imageIds: publishForm.images.map((image: AnyRecord) => image.id)
+        imageIds
       }
     })
     publishOpen.value = false
     if (res.status === 'BLOCKED') {
       showToast(t.value.publishBlocked, 'error')
+    } else if (Number(res.count) > 1 && typeof t.value.batchPublished === 'function') {
+      showToast(t.value.batchPublished(Number(res.count)), 'success')
     } else {
-      showToast(t.value.publishSuccess, 'success')
+      showToast(res.message || t.value.publishSuccess, 'success')
     }
+    clearDraftMeta()
+    await clearDraftBlobs()
+    resetPublishForm()
     filterMine.value = true
     await loadFeed(true)
     me.value = await $fetch<AnyRecord>('/api/community/me').catch(() => me.value)
@@ -2011,6 +2293,10 @@ onUnmounted(() => {
   if (songTimer) clearTimeout(songTimer)
   window.removeEventListener('keydown', handleKeydown)
   stopImpressions()
+  uploadToken += 1
+  abortUpload = true
+  isUploading.value = false
+  releasePreviewUrls(publishForm.images as DraftImage[])
 })
 </script>
 
@@ -3186,6 +3472,54 @@ onUnmounted(() => {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+.upload-thumb.is-pending img {
+  opacity: 0.6;
+}
+
+.thumb-pending {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 0.1rem 0;
+  text-align: center;
+  font-size: 0.55rem;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.6);
+}
+
+.upload-progress {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 0.55rem;
+  font-size: 0.64rem;
+  color: var(--text-tertiary);
+}
+
+.upload-progress-track {
+  flex: 1;
+  height: 0.3rem;
+  border-radius: 999px;
+  background: var(--overlay-8);
+  overflow: hidden;
+}
+
+.upload-progress-bar {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--primary, #6366f1);
+  transition: width 0.2s ease;
+}
+
+.upload-retry {
+  margin-top: 0.45rem;
+}
+
+.discard-confirm .foot-hint {
+  color: var(--warning, #d97706);
 }
 
 .thumb-remove {

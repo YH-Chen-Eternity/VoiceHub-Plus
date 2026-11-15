@@ -1342,6 +1342,8 @@ export const communitySettings = pgTable('CommunitySettings', {
   // 发帖是否允许附加图片
   allowImages: boolean('allowImages').default(false).notNull(),
   maxImages: integer('maxImages').default(9).notNull(),
+  // 多图批量发帖：开启后单次发布不再限制图片总数，按 maxImages 自动拆成多个帖子（文案相同）
+  allowMultiImageBatch: boolean('allowMultiImageBatch').default(false).notNull(),
   maxContentLength: integer('maxContentLength').default(1000).notNull(),
   maxCommentLength: integer('maxCommentLength').default(300).notNull(),
   // 阿里云内容安全（Green）：未填写密钥时只走人工审核

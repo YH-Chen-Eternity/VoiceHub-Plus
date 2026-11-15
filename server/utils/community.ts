@@ -173,6 +173,7 @@ export function toPublicCommunitySettings(row: CommunitySettingsRow) {
     enabled: row.enabled,
     allowImages: row.allowImages,
     maxImages: row.maxImages,
+    allowMultiImageBatch: row.allowMultiImageBatch,
     maxContentLength: row.maxContentLength,
     maxCommentLength: row.maxCommentLength,
     moderationEnabled: row.moderationEnabled,

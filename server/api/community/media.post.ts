@@ -16,7 +16,10 @@ import {
 import { findReusableMediaAsset, hashMediaData } from '~~/server/utils/mediaDedup'
 import { deleteMediaFiles, saveMediaFiles } from '~~/server/utils/mediaStorage'
 
-const DAILY_LIMIT = 30
+// 每日累计上传张数上限：并行上传 / 断点续传重试 / 多图发帖的通用防滥用兜底。
+// 与「是否开启多图批量拆帖」无关，所有用户统一口径；
+// 秒传复用（同一用户相同图片）不新增记录、不消耗额度。
+const DAILY_LIMIT = 300
 
 export default defineEventHandler(async (event) => {
   const user = requireCommunityUser(event)

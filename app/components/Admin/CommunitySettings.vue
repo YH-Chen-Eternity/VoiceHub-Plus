@@ -70,11 +70,31 @@
               :aria-checked="form.allowImages"
               class="relative h-5 w-10 shrink-0 rounded-full transition-colors"
               :class="form.allowImages ? 'bg-primary-hover' : 'bg-bg-tertiary'"
-              @click="form.allowImages = !form.allowImages"
+              @click="toggleAllowImages"
             >
               <span
                 class="absolute top-1 h-3 w-3 rounded-full bg-bg-secondary transition-all"
                 :class="form.allowImages ? 'left-6' : 'left-1'"
+              />
+            </button>
+          </label>
+          <label class="flex items-center justify-between gap-3 rounded-xl border border-border-secondary bg-bg-primary-40 p-3">
+            <span class="min-w-0">
+              <span class="block text-xs font-bold text-text-primary">{{ t.allowMultiImageBatchLabel }}</span>
+              <span class="mt-0.5 block text-[10px] leading-relaxed text-text-tertiary">{{ t.allowMultiImageBatchHint }}</span>
+            </span>
+            <button
+              type="button"
+              role="switch"
+              :aria-checked="form.allowMultiImageBatch"
+              :disabled="!form.allowImages"
+              class="relative h-5 w-10 shrink-0 rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-40"
+              :class="form.allowMultiImageBatch ? 'bg-primary-hover' : 'bg-bg-tertiary'"
+              @click="form.allowMultiImageBatch = !form.allowMultiImageBatch"
+            >
+              <span
+                class="absolute top-1 h-3 w-3 rounded-full bg-bg-secondary transition-all"
+                :class="form.allowMultiImageBatch ? 'left-6' : 'left-1'"
               />
             </button>
           </label>
@@ -356,6 +376,7 @@ const { showToast } = useToast()
 const form = reactive({
   enabled: false,
   allowImages: false,
+  allowMultiImageBatch: false,
   maxImages: 9,
   maxContentLength: 1000,
   maxCommentLength: 300,
@@ -417,6 +438,12 @@ const load = async () => {
   } finally {
     loading.value = false
   }
+}
+
+// 批量发帖依赖「允许图片」：关闭图片时同步关闭批量开关，避免出现互相矛盾的配置组合
+const toggleAllowImages = () => {
+  form.allowImages = !form.allowImages
+  if (!form.allowImages) form.allowMultiImageBatch = false
 }
 
 const toggleEnabled = async () => {

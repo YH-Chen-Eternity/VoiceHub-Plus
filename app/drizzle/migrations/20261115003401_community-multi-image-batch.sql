@@ -1,0 +1,1 @@
+ALTER TABLE "CommunitySettings" ADD COLUMN "allowMultiImageBatch" boolean DEFAULT false NOT NULL;
