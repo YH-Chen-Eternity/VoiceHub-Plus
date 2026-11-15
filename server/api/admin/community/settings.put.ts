@@ -23,6 +23,7 @@ export default defineEventHandler(async (event) => {
 
   if (typeof body?.enabled === 'boolean') patch.enabled = body.enabled
   if (typeof body?.allowImages === 'boolean') patch.allowImages = body.allowImages
+  if (typeof body?.allowMultiImageBatch === 'boolean') patch.allowMultiImageBatch = body.allowMultiImageBatch
   if (typeof body?.moderationEnabled === 'boolean') patch.moderationEnabled = body.moderationEnabled
   if (typeof body?.allowSemi === 'boolean') patch.allowSemi = body.allowSemi
   if (typeof body?.allowRealname === 'boolean') patch.allowRealname = body.allowRealname
@@ -112,6 +113,7 @@ export default defineEventHandler(async (event) => {
       enabled: updated?.enabled,
       allowImages: updated?.allowImages,
       maxImages: updated?.maxImages,
+      allowMultiImageBatch: updated?.allowMultiImageBatch,
       maxContentLength: updated?.maxContentLength,
       maxCommentLength: updated?.maxCommentLength,
       moderationEnabled: updated?.moderationEnabled,
