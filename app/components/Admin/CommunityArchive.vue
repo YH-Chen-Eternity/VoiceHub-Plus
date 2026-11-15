@@ -51,6 +51,15 @@
       <span class="rounded-full border border-warning-20 bg-warning-10 px-2.5 py-1 text-[10px] font-bold text-warning">
         {{ t.archiveRetention }}
       </span>
+      <button
+        v-if="isCommunityAdmin"
+        type="button"
+        class="ml-auto inline-flex items-center gap-1.5 rounded-xl border border-error-30 bg-error-10 px-3 py-2 text-[11px] font-bold text-error hover:bg-error-15 disabled:cursor-not-allowed disabled:opacity-40"
+        :disabled="loading || purgeRangeConfirm.loading || purgeSingleConfirm.loading || !(stats[type] > 0)"
+        @click="askPurgeRange"
+      >
+        <Trash2 :size="13" /> {{ t.purgeRange }}
+      </button>
     </div>
 
     <div v-if="loading" class="flex items-center justify-center gap-2 py-16 text-xs text-text-tertiary">
@@ -104,6 +113,15 @@
             >
               <RotateCcw :size="12" :class="{ 'animate-spin': restoringId === `post-${post.id}` }" />
               {{ t.restore }}
+            </button>
+            <button
+              v-if="isCommunityAdmin"
+              type="button"
+              class="inline-flex items-center gap-1 rounded-lg border border-error-30 bg-error-10 px-2.5 py-1 text-[10px] font-bold text-error hover:bg-error-15 disabled:cursor-not-allowed disabled:opacity-50"
+              :disabled="purgingId === `post-${post.id}` || purgeSingleConfirm.loading"
+              @click="askPurgeSingle('post', post)"
+            >
+              <Trash2 :size="12" /> {{ t.purge }}
             </button>
           </div>
         </div>
@@ -206,6 +224,15 @@
               />
               {{ t.restore }}
             </button>
+            <button
+              v-if="isCommunityAdmin"
+              type="button"
+              class="inline-flex items-center gap-1 rounded-lg border border-error-30 bg-error-10 px-2.5 py-1 text-[10px] font-bold text-error hover:bg-error-15 disabled:cursor-not-allowed disabled:opacity-50"
+              :disabled="purgingId === `comment-${comment.id}` || purgeSingleConfirm.loading"
+              @click="askPurgeSingle('comment', comment)"
+            >
+              <Trash2 :size="12" /> {{ t.purge }}
+            </button>
           </div>
         </div>
 
@@ -255,6 +282,33 @@
       @cancel="restoreConfirm.show = false"
     />
 
+    <ConfirmDialog
+      :show="purgeRangeConfirm.show"
+      :title="t.purgeRangeTitle"
+      :message="purgeRangeConfirm.message"
+      type="danger"
+      :loading="purgeRangeConfirm.loading"
+      :confirm-text="t.purgeRange"
+      :cancel-text="t.cancel"
+      :show-input="true"
+      :input-placeholder="t.purgeConfirmWord"
+      :input-required="true"
+      @confirm="runPurgeRange"
+      @cancel="purgeRangeConfirm.show = false"
+    />
+
+    <ConfirmDialog
+      :show="purgeSingleConfirm.show"
+      :title="purgeSingleConfirm.title"
+      :message="purgeSingleConfirm.message"
+      type="danger"
+      :loading="purgeSingleConfirm.loading"
+      :confirm-text="t.purge"
+      :cancel-text="t.cancel"
+      @confirm="runPurgeSingle"
+      @cancel="purgeSingleConfirm.show = false"
+    />
+
     <Teleport to="body">
       <div
         v-if="lightbox"
@@ -269,7 +323,7 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { RefreshCw, RotateCcw } from '@lucide/vue'
+import { RefreshCw, RotateCcw, Trash2 } from '@lucide/vue'
 import CustomSelect from '~/components/UI/Common/CustomSelect.vue'
 import ConfirmDialog from '~/components/UI/ConfirmDialog.vue'
 import { useLocale } from '~/utils/locale'
@@ -280,7 +334,7 @@ import { usePermissions } from '~/composables/usePermissions'
 const { community: communityLocale } = useLocale()
 const t = computed(() => communityLocale.value?.admin || {})
 const { showToast } = useToast()
-const { canReviewCommunity } = usePermissions()
+const { canReviewCommunity, isCommunityAdmin } = usePermissions()
 const { localize: localizeServerError } = useServerErrors()
 
 const type = ref('posts')
@@ -302,6 +356,31 @@ const restoreConfirm = reactive({
   target: null,
   title: '',
   message: ''
+})
+
+// 彻底删除：范围清空需输入「删除」二次确认，单条删除用普通确认弹窗
+const purgeRangeConfirm = reactive({
+  show: false,
+  loading: false,
+  message: ''
+})
+const purgeSingleConfirm = reactive({
+  show: false,
+  loading: false,
+  type: 'post',
+  target: null,
+  title: '',
+  message: ''
+})
+const purgingId = ref('')
+
+// 当前清空范围的可读描述：板块 + 归档类型，写进确认文案避免误删
+const scopeLabel = computed(() => {
+  const board = boardId.value
+    ? boards.value.find((item) => item.id === boardId.value)?.name || `#${boardId.value}`
+    : (t.value.allBoards || '全部板块')
+  const kind = type.value === 'posts' ? t.value.archivedPostsTab : t.value.archivedCommentsTab
+  return `${board} · ${kind}`
 })
 
 const typeCards = computed(() => [
@@ -391,6 +470,86 @@ const runRestore = async () => {
   } finally {
     restoreConfirm.loading = false
     restoringId.value = ''
+  }
+}
+
+// 清空当前范围：数量取自与列表同源的 stats（已按板块筛选），输入确认文字后才提交
+const askPurgeRange = () => {
+  const count = Number(stats[type.value] || 0)
+  if (!count) {
+    showToast(t.value.purgeEmpty, 'info')
+    return
+  }
+  const message = t.value.purgeRangeMsg
+  Object.assign(purgeRangeConfirm, {
+    show: true,
+    loading: false,
+    message: typeof message === 'function' ? message(count, scopeLabel.value) : ''
+  })
+}
+
+const runPurgeRange = async (word) => {
+  const expected = String(t.value.purgeConfirmWord || '删除')
+  if (String(word ?? '').trim().toUpperCase() !== expected.toUpperCase()) {
+    const wrong = t.value.purgeWrongWord
+    showToast(typeof wrong === 'function' ? wrong(expected) : t.value.purgeFailed, 'error')
+    return
+  }
+  purgeRangeConfirm.loading = true
+  try {
+    const res = await $fetch('/api/admin/community/archive/purge', {
+      method: 'POST',
+      body: { type: type.value, all: true, boardId: boardId.value || undefined }
+    })
+    const count = Number(type.value === 'posts' ? res?.posts : res?.comments) || 0
+    const remaining = Number(res?.remaining) || 0
+    const success = t.value.purgeSuccess
+    showToast(typeof success === 'function' ? success(count, remaining) : t.value.purge, 'success')
+    purgeRangeConfirm.show = false
+    await load()
+  } catch (e) {
+    showToast(localizeServerError(e, t.value.purgeFailed), 'error')
+  } finally {
+    purgeRangeConfirm.loading = false
+  }
+}
+
+// 单条彻底删除：只提交该记录的 id，后端仍只命中 deletedAt 非空的归档记录
+const askPurgeSingle = (targetType, target) => {
+  Object.assign(purgeSingleConfirm, {
+    show: true,
+    loading: false,
+    type: targetType,
+    target,
+    title: targetType === 'post' ? t.value.purgePostTitle : t.value.purgeCommentTitle,
+    message: targetType === 'post' ? t.value.purgePostMsg : t.value.purgeCommentMsg
+  })
+}
+
+const runPurgeSingle = async () => {
+  const target = purgeSingleConfirm.target
+  if (!target) return
+  const targetType = purgeSingleConfirm.type
+  purgeSingleConfirm.loading = true
+  purgingId.value = `${targetType}-${target.id}`
+  try {
+    const res = await $fetch('/api/admin/community/archive/purge', {
+      method: 'POST',
+      body: { type: targetType === 'post' ? 'posts' : 'comments', ids: [target.id] }
+    })
+    const count = Number(targetType === 'post' ? res?.posts : res?.comments) || 0
+    const success = t.value.purgeSuccess
+    showToast(
+      typeof success === 'function' ? success(count, Number(res?.remaining) || 0) : t.value.purge,
+      'success'
+    )
+    purgeSingleConfirm.show = false
+    await load()
+  } catch (e) {
+    showToast(localizeServerError(e, t.value.purgeFailed), 'error')
+  } finally {
+    purgeSingleConfirm.loading = false
+    purgingId.value = ''
   }
 }
 

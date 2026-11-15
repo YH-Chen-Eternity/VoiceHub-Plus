@@ -1,4 +1,5 @@
-import { and, eq, gt, inArray, isNotNull, lte } from 'drizzle-orm'
+import { and, count, eq, gt, inArray, isNotNull, lte } from 'drizzle-orm'
+import { PURGE_BATCH_SIZE, PURGE_MAX_TOTAL, type ArchivePurgeScope } from './communityArchivePurge'
 import { db } from '~/drizzle/db'
 import {
   announcements,
@@ -425,4 +426,109 @@ export async function purgeExpiredCommunityContent(): Promise<{
     .returning({ id: communityComments.id })
 
   return { posts, comments: expiredComments.length }
+}
+
+/** 归档帖子的删除范围：只命中软删记录，可按板块与 id 白名单收窄 */
+function postPurgeCondition(scope: ArchivePurgeScope) {
+  return and(
+    isNotNull(communityPosts.deletedAt),
+    scope.boardId ? eq(communityPosts.boardId, scope.boardId) : undefined,
+    scope.ids?.length ? inArray(communityPosts.id, scope.ids) : undefined
+  )
+}
+
+/** 归档评论的删除范围：板块条件通过所属帖子的子查询表达 */
+function commentPurgeCondition(scope: ArchivePurgeScope) {
+  const boardScope = scope.boardId
+    ? inArray(
+        communityComments.postId,
+        db
+          .select({ id: communityPosts.id })
+          .from(communityPosts)
+          .where(eq(communityPosts.boardId, scope.boardId))
+      )
+    : undefined
+  return and(
+    isNotNull(communityComments.deletedAt),
+    boardScope,
+    scope.ids?.length ? inArray(communityComments.id, scope.ids) : undefined
+  )
+}
+
+async function countArchived(scope: ArchivePurgeScope): Promise<number> {
+  const [row] =
+    scope.type === 'post'
+      ? await db.select({ value: count() }).from(communityPosts).where(postPurgeCondition(scope))
+      : await db.select({ value: count() }).from(communityComments).where(commentPurgeCondition(scope))
+  return Number(row?.value || 0)
+}
+
+/**
+ * 管理后台主动彻底删除归档记录（物理删除，不可恢复）。
+ *
+ * 安全口径与到期自动清理保持一致：
+ * - 只处理 deletedAt 非空的归档记录，正常帖子/评论一律不动；
+ * - 删除条件重新校验 deletedAt，与「恢复归档」并发时刚恢复的记录不会被在途删除误删；
+ * - 删除帖子前先收集图片 mediaId，删除后复用 purgePostMedia 按引用情况回收媒体文件；
+ *   帖子物理删除会级联删除其下评论（含未归档评论），与既有自动清理口径一致；
+ * - 分页循环，单批 PURGE_BATCH_SIZE、累计上限 PURGE_MAX_TOTAL，避免一次清空拖垮数据库；
+ *   若仍有剩余，返回 remaining 由前端提示继续清理，不会无限执行。
+ */
+export async function purgeArchivedCommunityContent(
+  scope: ArchivePurgeScope
+): Promise<{ posts: number; comments: number; remaining: number }> {
+  let deletedPosts = 0
+  let deletedComments = 0
+  let processed = 0
+
+  while (processed < PURGE_MAX_TOTAL) {
+    const batch = Math.min(PURGE_BATCH_SIZE, PURGE_MAX_TOTAL - processed)
+
+    if (scope.type === 'post') {
+      const candidates = await db
+        .select({ id: communityPosts.id })
+        .from(communityPosts)
+        .where(postPurgeCondition(scope))
+        .limit(batch)
+      if (!candidates.length) break
+
+      const ids = candidates.map((row) => row.id)
+      const imageRows = await db
+        .select({ mediaId: communityPostImages.mediaId })
+        .from(communityPostImages)
+        .where(inArray(communityPostImages.postId, ids))
+      const mediaIds = Array.from(new Set(imageRows.map((row) => Number(row.mediaId))))
+
+      const deleted = await db
+        .delete(communityPosts)
+        .where(and(inArray(communityPosts.id, ids), isNotNull(communityPosts.deletedAt)))
+        .returning({ id: communityPosts.id })
+      deletedPosts += deleted.length
+      processed += ids.length
+      if (mediaIds.length) await purgePostMedia(mediaIds)
+      if (deleted.length < ids.length || !scope.all) break
+    } else {
+      const candidates = await db
+        .select({ id: communityComments.id })
+        .from(communityComments)
+        .where(commentPurgeCondition(scope))
+        .limit(batch)
+      if (!candidates.length) break
+
+      const ids = candidates.map((row) => row.id)
+      const deleted = await db
+        .delete(communityComments)
+        .where(and(inArray(communityComments.id, ids), isNotNull(communityComments.deletedAt)))
+        .returning({ id: communityComments.id })
+      deletedComments += deleted.length
+      processed += ids.length
+      if (deleted.length < ids.length || !scope.all) break
+    }
+  }
+
+  return {
+    posts: deletedPosts,
+    comments: deletedComments,
+    remaining: await countArchived(scope)
+  }
 }

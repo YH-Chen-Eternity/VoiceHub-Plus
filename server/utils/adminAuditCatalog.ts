@@ -37,7 +37,8 @@ const LEGACY_ACTIONS: Record<string, string> = {
   COMMUNITY_REPORT_REJECT: '驳回社区举报',
   COMMUNITY_APPEAL_ACCEPT: '通过社区申诉',
   COMMUNITY_APPEAL_REJECT: '驳回社区申诉',
-  COMMUNITY_ARCHIVE_RESTORE: '恢复归档内容'
+  COMMUNITY_ARCHIVE_RESTORE: '恢复归档内容',
+  COMMUNITY_ARCHIVE_PURGE: '彻底删除归档内容'
 }
 
 const AUDITED_GET_PATHS = new Set([
@@ -164,6 +165,7 @@ function actionLabelForPath(method: string, pathname: string): string | null {
   if (/^\/api\/admin\/community\/posts\/\d+\/pin$/.test(p) && m === 'POST') return '置顶/取消置顶社区帖子'
   if (/^\/api\/admin\/community\/posts\/\d+$/.test(p) && m === 'DELETE') return '删除社区帖子'
   if (/^\/api\/admin\/community\/archive\/\w+\/\d+\/restore$/.test(p) && m === 'POST') return '恢复归档内容'
+  if (p === '/api/admin/community/archive/purge' && m === 'POST') return '彻底删除归档内容'
   if (p === '/api/admin/community/review/batch' && m === 'POST') return '批量审核社区内容'
   if (p === '/api/admin/community/boards' && m === 'POST') return '新建社区板块'
   if (/^\/api\/admin\/community\/boards\/\d+$/.test(p) && m === 'PUT') return '修改社区板块'
