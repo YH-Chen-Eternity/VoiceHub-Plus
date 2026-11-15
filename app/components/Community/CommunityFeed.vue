@@ -1761,10 +1761,14 @@ function currentDraft(): PublishDraft {
 }
 
 /** 每处变更都落草稿：已上传 id 即时持久化，刷新后可跳过重传 */
-function persistDraft() {
+// 多次快速编辑会并发落草稿，只采用最后一次写入结果，避免旧结果覆盖提示
+let draftPersistToken = 0
+async function persistDraft() {
+  const token = ++draftPersistToken
   const draft = currentDraft()
-  draftSaveFailed.value = !saveDraftMeta(draft)
-  void saveDraftBlobs(draft.images)
+  const metaOk = saveDraftMeta(draft)
+  const blobsOk = await saveDraftBlobs(draft.images)
+  if (token === draftPersistToken) draftSaveFailed.value = !metaOk || !blobsOk
 }
 
 const hasDraftContent = computed(

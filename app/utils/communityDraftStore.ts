@@ -45,23 +45,36 @@ function openDb(): Promise<IDBDatabase | null> {
   })
 }
 
-/** 保存未完成图片的 Blob；失败静默降级 */
-export async function saveDraftBlobs(images: DraftImage[]): Promise<void> {
+/**
+ * 保存未完成图片的 Blob。
+ * 返回是否写入成功：IndexedDB 不可用、事务失败或配额超限（QuotaExceededError）
+ * 都会返回 false，由调用方提示用户，避免「草稿看似保存、刷新后丢失」的静默失败。
+ */
+export async function saveDraftBlobs(images: DraftImage[]): Promise<boolean> {
   const blobs = images.filter((image) => !image.id && image.blob)
-  if (!blobs.length) return
-  const db = await openDb()
-  if (!db) return
+  if (!blobs.length) return true
+  let db: IDBDatabase | null = null
   try {
-    await new Promise<void>((resolve) => {
-      const tx = db.transaction(STORE, 'readwrite')
+    db = await openDb()
+    if (!db) return false
+    return await new Promise<boolean>((resolve) => {
+      let tx: IDBTransaction
+      try {
+        tx = db!.transaction(STORE, 'readwrite')
+      } catch {
+        resolve(false)
+        return
+      }
       const store = tx.objectStore(STORE)
       for (const image of blobs) store.put(image.blob, image.key)
-      tx.oncomplete = () => resolve()
-      tx.onerror = () => resolve()
-      tx.onabort = () => resolve()
+      tx.oncomplete = () => resolve(true)
+      tx.onerror = () => resolve(false)
+      tx.onabort = () => resolve(false)
     })
+  } catch {
+    return false
   } finally {
-    db.close()
+    db?.close()
   }
 }
 

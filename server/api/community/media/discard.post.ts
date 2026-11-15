@@ -14,7 +14,10 @@ const MAX_DISCARD = 500
  * 安全口径（与归档清理 purgePostMedia 一致）：
  * - 只接受正整数 id，且必须是当前登录用户上传的；
  * - 已被帖子图片或公告引用的图片一律保留，避免删除已发布内容；
- * - 先删库记录再删私有目录文件，文件删除失败仅记录、不阻断；
+ * - 先删库记录再删私有目录文件；deleteMediaFiles 内部对每个文件独立容错，
+ *   单文件失败只记日志、不抛出，与归档清理 purgePostMedia 口径一致。
+ *   极端情况下可能残留无库记录的孤儿文件，可按日志中的路径回收；
+ *   不采用「先删文件再删库」，以免产生「文件已删、记录仍在」的坏数据；
  * - 发稿员豁免的是频率限流，不是归属校验，这里同样按 uploadedBy 严格校验。
  */
 export default defineEventHandler(async (event) => {
@@ -71,7 +74,8 @@ export default defineEventHandler(async (event) => {
   await deleteMediaFiles(
     removable.flatMap((row) => [row.storagePath, row.previewPath])
   ).catch((error) => {
-    // 文件删除失败不阻断数据清理；残留文件由后续卷级清理兜底
+    // deleteMediaFiles 目前逐项容错、不会抛出；此处仅在它未来改为抛出时兜底记日志，
+    // 不回滚已完成的数据库删除，避免留下「文件已删、记录仍在」的不可用记录
     console.warn('[community-media] 孤儿图片文件清理失败:', error)
   })
 
