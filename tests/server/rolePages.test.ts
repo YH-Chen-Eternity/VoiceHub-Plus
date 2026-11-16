@@ -78,8 +78,29 @@ describe('types/rolePages.ts 共享定义', () => {
     assert.match(src, /normalizeRolePagesConfig/, 'GET 应返回规范化视图')
   })
 
-  test('内置默认不含超管专属页面（database / role-permissions）', async () => {
+  test('管理员级页面（社区归档）：旧快照补齐，且不可授予其他角色', async () => {
     const mod = await import('../../types/rolePages.ts')
+    assert.ok(
+      mod.resolveEffectivePages('ADMIN', { ADMIN: ['overview'] })?.includes('community-archive'),
+      '上线归档前保存的 ADMIN 快照应补齐 community-archive'
+    )
+    assert.deepEqual(
+      mod.sanitizeRolePages({ REVIEWER: ['community-review', 'community-archive'] }),
+      { REVIEWER: ['community-review'] },
+      '保存时剔除审帖员的管理员级页面'
+    )
+    assert.ok(
+      !mod
+        .resolveEffectivePages('REVIEWER', {
+          __version: mod.ROLE_PAGES_SCHEMA_VERSION,
+          REVIEWER: ['community-review', 'community-archive']
+        })
+        ?.includes('community-archive'),
+      '直改库塞入的归档权限也不生效（接口只认管理员）'
+    )
+  })
+
+  test('内置默认不含超管专属页面（database / role-permissions）', async () => {    const mod = await import('../../types/rolePages.ts')
     for (const [role, pages] of Object.entries(mod.DEFAULT_ROLE_PAGES)) {
       assert.ok(!pages.includes('database'), `${role} 默认不应含 database`)
       assert.ok(!pages.includes('role-permissions'), `${role} 默认不应含 role-permissions`)

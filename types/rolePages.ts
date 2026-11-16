@@ -54,6 +54,19 @@ export const CONFIGURABLE_PAGE_IDS = [
 ] as const
 export type ConfigurablePageId = (typeof CONFIGURABLE_PAGE_IDS)[number]
 
+/**
+ * 仅管理员可用的可配置页面：可出现在 ADMIN 快照里，但不能授予其他角色。
+ * 这些页面对应的接口内部只认管理员（如社区归档记录 requireCommunityAdmin），
+ * 若允许勾给审帖员，会出现「菜单能开、接口 403」的空权限。
+ */
+export const ADMIN_LEVEL_PAGES = ['community-archive'] as const
+
+/** 某角色可勾选的页面 id：管理员为全量，其他角色剔除管理员级页面 */
+export const configurablePagesFor = (role: ConfigurableRole): readonly string[] =>
+  role === 'ADMIN'
+    ? CONFIGURABLE_PAGE_IDS
+    : CONFIGURABLE_PAGE_IDS.filter((p) => !(ADMIN_LEVEL_PAGES as readonly string[]).includes(p))
+
 /** 各角色内置默认页面（与 usePermissions 的硬编码保持一致；配置缺省时使用） */
 export const DEFAULT_ROLE_PAGES: Record<ConfigurableRole, string[]> = {
   ADMIN: [...CONFIGURABLE_PAGE_IDS],
@@ -69,7 +82,8 @@ export const sanitizeRolePages = (input: unknown): Record<string, string[]> => {
   for (const [role, pages] of Object.entries(input as Record<string, unknown>)) {
     if (!(CONFIGURABLE_ROLES as readonly string[]).includes(role)) continue
     if (!Array.isArray(pages)) continue
-    const valid = [...new Set(pages.filter((p): p is string => typeof p === 'string' && (CONFIGURABLE_PAGE_IDS as readonly string[]).includes(p)))]
+    const allowed = configurablePagesFor(role as ConfigurableRole)
+    const valid = [...new Set(pages.filter((p): p is string => typeof p === 'string' && (allowed as readonly string[]).includes(p)))]
     out[role] = valid
   }
   return out
@@ -91,9 +105,10 @@ export const sanitizeRolePages = (input: unknown): Record<string, string[]> => {
  *   3) PAGES_ADDED_IN_VERSION 的**下一个**版本号里登记该 id，并把
  *      ROLE_PAGES_SCHEMA_VERSION 加 1（否则已保存的老快照看不到新页面）。
  */
-export const ROLE_PAGES_SCHEMA_VERSION = 2
+export const ROLE_PAGES_SCHEMA_VERSION = 3
 export const PAGES_ADDED_IN_VERSION: Record<number, readonly string[]> = {
-  2: ['ops-board']
+  2: ['ops-board'],
+  3: ['community-archive']
 }
 
 /**
@@ -135,7 +150,8 @@ export const normalizeRolePagesConfig = (rolePages: RolePagesConfig | null | und
 }
 
 /** 计算某角色生效页面：配置含该角色键则用配置值，否则用内置默认。
- *  纵深防御：无论数据来源，一律过滤超管专属页面（防止绕过 API 直改库获得超管页）。 */
+ *  纵深防御：无论数据来源，一律过滤超管专属页面与管理员级页面
+ *  （防止绕过 API 直改库获得超管页/归档记录）。 */
 export const resolveEffectivePages = (role: string, rolePages: RolePagesConfig | null | undefined): string[] | null => {
   if (!(CONFIGURABLE_ROLES as readonly string[]).includes(role)) return null
   const configured = rolePages?.[role]
@@ -143,7 +159,8 @@ export const resolveEffectivePages = (role: string, rolePages: RolePagesConfig |
   const pages = Array.isArray(configured)
     ? applyVersionAdditions(role as ConfigurableRole, configured, rolePages?.__version)
     : defaults
-  return [...new Set(pages.filter((p) => !(SUPER_ADMIN_ONLY_PAGES as readonly string[]).includes(p)))]
+  const allowed = configurablePagesFor(role as ConfigurableRole)
+  return [...new Set(pages.filter((p) => allowed.includes(p) && !(SUPER_ADMIN_ONLY_PAGES as readonly string[]).includes(p)))]
 }
 
 /**

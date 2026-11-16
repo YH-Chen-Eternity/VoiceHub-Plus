@@ -19,6 +19,7 @@
 | `scripts/05-slow-query.sh` | 数据库慢查询周报 | 每周一 09:00 |
 | `scripts/06-geo-allow-update.sh` | 放行 IP 库更新（配合地域访问限制使用，见第 8 节） | 建议每月 1 日 04:00 |
 | `scripts/08-watchdog.sh` | 主机看门狗：应用健康检查 + WAF 入口探测 + 全容器自动拉起 + 内存/磁盘告警（systemd timer，见第 10 节） | 每 2 分钟 |
+| `scripts/09-backup-drill.sh` | 备份恢复演练：导出 → 恢复到临时库 → 逐表行数/内容校验 → 删除临时库 | 建议每季度或升级前手动执行 |
 
 ---
 
@@ -74,7 +75,8 @@ deploy/automation/
     ├── 04-attack-watch.sh
     ├── 05-slow-query.sh
     ├── 06-geo-allow-update.sh
-    └── 08-watchdog.sh
+    ├── 08-watchdog.sh
+    └── 09-backup-drill.sh
 ```
 
 ---

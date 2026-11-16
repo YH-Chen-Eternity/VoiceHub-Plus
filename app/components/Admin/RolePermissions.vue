@@ -76,7 +76,7 @@
           </div>
           <div class="flex items-center gap-2">
             <span class="text-[11px] font-bold text-text-tertiary">
-              {{ L('selectedLabel') }} {{ drafts[role]?.length ?? 0 }} / {{ CONFIGURABLE_PAGE_IDS.length }}
+              {{ L('selectedLabel') }} {{ drafts[role]?.length ?? 0 }} / {{ ROLE_PAGES[role].length }}
             </span>
             <button
               type="button"
@@ -91,7 +91,7 @@
 
         <div class="grid grid-cols-2 gap-2 md:grid-cols-3 lg:grid-cols-4">
           <label
-            v-for="pid in CONFIGURABLE_PAGE_IDS"
+            v-for="pid in ROLE_PAGES[role]"
             :key="pid"
             class="flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-[11px] font-bold transition-all"
             :class="drafts[role]?.includes(pid)
@@ -146,9 +146,9 @@ import AppSpinner from '~/components/UI/Common/AppSpinner.vue'
 import { useToast } from '~/composables/useToast'
 import { usePermissions } from '~/composables/usePermissions'
 import {
-  CONFIGURABLE_PAGE_IDS,
   CONFIGURABLE_ROLES,
-  DEFAULT_ROLE_PAGES
+  DEFAULT_ROLE_PAGES,
+  configurablePagesFor
 } from '~~/types/rolePages'
 
 defineOptions({ name: 'AdminRolePermissions' })
@@ -171,6 +171,9 @@ const PAGE_MENU_KEYS = {
   'community-users': 'communityUsers', 'community-settings': 'communitySettings',
   'community-reports': 'communityReports', 'community-overview': 'communityOverview'
 }
+
+// 每个角色可勾选的页面（管理员含归档等管理员级页面，其他角色不含）
+const ROLE_PAGES = Object.fromEntries(CONFIGURABLE_ROLES.map((role) => [role, configurablePagesFor(role)]))
 
 const { showToast } = useToast()
 const { isSuperAdmin } = usePermissions()
