@@ -52,7 +52,10 @@ normalize_waf_host() {
   case "$h" in
     *:*) h=${h%%:*} ;;
   esac
-  printf '%s' "$h" | tr -d '[:space:]'
+  h=$(printf '%s' "$h" | tr -d '[:space:]')
+  # 去掉末尾点：example.com. 是合法的 FQDN 绝对写法，与 example.com 等价，
+  # 留着会让白名单判为非法、探测整段被跳过
+  printf '%s' "${h%.}"
 }
 WAF_HOST=$(normalize_waf_host "${VH_SITE_HOST:-}")
 [ -z "$WAF_HOST" ] && WAF_HOST=$(normalize_waf_host "${VH_SITE_URL:-}")
@@ -76,6 +79,14 @@ if ! [[ "$WAF_PORT" =~ ^[0-9]+$ ]] || [ "$WAF_PORT" -lt 1 ] || [ "$WAF_PORT" -gt
   WAF_PORT=443
 fi
 WAF_URL=${VH_WAF_URL:-}
+# URL 里若显式写了端口，以它为准：--resolve 的端口必须与 URL 一致，否则证书/连接必然失败
+if [ -n "$WAF_URL" ]; then
+  url_port=$(printf '%s' "$WAF_URL" | sed -nE 's#^[a-zA-Z]+://[^/:]+:([0-9]+)(/|$).*#\1#p')
+  if [ -n "$url_port" ] && [ "$url_port" != "$WAF_PORT" ]; then
+    printf 'VH_WAF_URL 端口（%s）与 VH_WAF_PORT（%s）不一致，按 URL 的端口探测\n' "$url_port" "$WAF_PORT" >&2
+    WAF_PORT=$url_port
+  fi
+fi
 if [ -z "$WAF_URL" ] && [ -n "$WAF_HOST" ]; then
   if [ "$WAF_PORT" = "443" ]; then WAF_URL="https://$WAF_HOST/api/health"
   else WAF_URL="https://$WAF_HOST:$WAF_PORT/api/health"; fi
@@ -314,14 +325,14 @@ if [ -n "$DISK_MOUNT" ] && [[ "${used:-}" =~ ^[0-9]+$ ]] && [ "$used" -ge "$DISK
   log "分区 $DISK_MOUNT 占用 ${used}% ≥ ${DISK_MAX}%，清理悬空镜像与构建缓存"
   prune_rc=0
   # 保留失败时的完整错误上下文：全丢到 /dev/null 会让"清理失败"变成不可排查的黑盒。
-  # 这里只把多行压成单行以维持日志格式，不截断——截断可能正好丢掉出错的层或原因。
+  # 每行加前缀写入，既不丢结构（哪一层、什么原因各占一行），也不破坏日志的行格式。
   if ! prune_out=$(docker image prune -f 2>&1); then
     prune_rc=1
-    log "镜像清理失败：$(printf '%s' "$prune_out" | tr '\n' ' ')"
+    while IFS= read -r line; do log "镜像清理失败：$line"; done <<< "$prune_out"
   fi
   if ! prune_out=$(docker builder prune -f 2>&1); then
     prune_rc=1
-    log "构建缓存清理失败：$(printf '%s' "$prune_out" | tr '\n' ' ')"
+    while IFS= read -r line; do log "构建缓存清理失败：$line"; done <<< "$prune_out"
   fi
   after=$(disk_pct)
   [[ "${after:-}" =~ ^[0-9]+$ ]] || after=$used
