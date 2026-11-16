@@ -69,7 +69,8 @@
             <span class="error-message">{{ error }}</span>
           </div>
 
-          <TurnstileWidget v-if="showTurnstile" ref="turnstileRef" v-model="turnstileToken" />
+          <!-- 第一步验完即签发票据，第二步凭票通行，避免同一个一次性 token 被核销两次 -->
+          <TurnstileWidget v-if="showTurnstile && step === 1" ref="turnstileRef" v-model="turnstileToken" />
 
           <button :disabled="loading" class="submit-btn" type="submit">
             <svg v-if="loading" class="loading-spinner" viewBox="0 0 24 24">
@@ -114,6 +115,7 @@ const successMessage = ref('')
 const step = ref(1)
 const maskedEmail = ref('')
 const turnstileToken = ref('')
+const resetTicket = ref('')
 const turnstileRef = ref(null)
 
 const showTurnstile = computed(
@@ -121,7 +123,7 @@ const showTurnstile = computed(
 )
 
 // 服务端错误统一通过错误码本地化，成功文案直接取本地化整句
-const { localize: localizeServerError } = useServerErrors()
+const { localize: localizeServerError, extractErrorCode } = useServerErrors()
 
 useHead({
   title: () => siteTitle.value ? `${locale.value.title} | ${siteTitle.value}` : locale.value.title
@@ -132,6 +134,8 @@ onMounted(async () => {
 })
 
 const handleSubmit = async () => {
+  // Turnstile token 一次性，连点会让第二次请求拿到「已核销」而误报失败
+  if (loading.value) return
   if (step.value === 1) {
     if (!username.value) {
       error.value = locale.value.usernameRequired
@@ -151,6 +155,7 @@ const handleSubmit = async () => {
     const body = {
       username: username.value,
       ...(step.value === 2 ? { email: email.value } : {}),
+      ...(step.value === 2 && resetTicket.value ? { ticket: resetTicket.value } : {}),
       turnstileToken: turnstileToken.value
     }
 
@@ -164,6 +169,7 @@ const handleSubmit = async () => {
         // 进入补全邮箱步骤；Turnstile token 已在服务端核销，必须换新
         step.value = 2
         maskedEmail.value = response.maskedEmail || ''
+        resetTicket.value = response.ticket || ''
         turnstileToken.value = ''
         turnstileRef.value?.reset()
       } else if (response.step === 3) {
@@ -173,6 +179,13 @@ const handleSubmit = async () => {
       }
     }
   } catch (err) {
+    const code = extractErrorCode(err) || ''
+    if (step.value === 2 && (code === 'AUTH_CAPTCHA_REQUIRED' || code === 'AUTH_CAPTCHA_FAILED_OR_EXPIRED')) {
+      // 票据过期或失效：回到第一步重新走人机验证，避免卡在没有验证码控件的第二步
+      step.value = 1
+      resetTicket.value = ''
+      maskedEmail.value = ''
+    }
     error.value = localizeServerError(err, locale.value.requestFailed)
     turnstileToken.value = ''
     turnstileRef.value?.reset()
@@ -183,6 +196,8 @@ const handleSubmit = async () => {
 const goBack = () => {
   step.value = 1
   error.value = ''
+  resetTicket.value = ''
+  maskedEmail.value = ''
   turnstileToken.value = ''
   turnstileRef.value?.reset()
 }

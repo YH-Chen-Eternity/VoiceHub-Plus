@@ -893,3 +893,27 @@ AST 普查器枚举危险调用点与请求源，按风险类别分诊，并与�
 - 新增 `tests/frontend/audio-match.test.ts`（40 项）：Worklet 采样率与末尾采样、会话隔离、错误分类、词典键一致、脚本/模板可编译。
 - 全量单测 625/625 通过；`nuxt build` 通过。
 - 无头浏览器 + 伪麦克风实测：点开弹窗 → 麦克风已连接 → 开始识曲 → 录音 → 生成指纹，全程无控制台错误。
+
+### 10.28 找回密码第二步总是「人机验证失败或已过期」（2026-11-16）
+
+**现象**：找回密码走到第二步（补全邮箱、发送重置邮件），Turnstile 显示「成功!」，点发送却报「人机验证失败或已过期，请重试」。
+
+**根因**：Turnstile token 是一次性的，两步表单各验一次等于对同一个 token 二次核销：
+
+1. 第一步 `POST /api/auth/forgot-password` 已经用 token 换过一次 `siteverify`，Cloudflare 侧该 token 作废；
+2. 第二步又拿客户端手里的 token 去验，Cloudflare 直接返回 `success:false`（`timeout-or-duplicate`），页面只能报「已过期」。
+
+另外发现验证码组件存在渲染竞态：容器由 `v-if` 渲染，配置到位时 `containerRef` 还没挂上，`renderWidget()` 直接返回且之后没有触发点，部分设备上验证码永远不出现；组件卸载时未清空 `widgetId`，重新挂载后也不再渲染。
+
+**改法**
+
+- 第一步验过 Turnstile 后签发 10 分钟的 HMAC 票据（绑定账号，密钥由 `JWT_SECRET` 派生），第二步凭票放行，不再要求第二次人机验证；票据失效时接口回退到正常验码，前端收到 `AUTH_CAPTCHA_*` 自动退回第一步重验。
+- `TurnstileWidget`：改为 `flush: 'post'` 并同时监听 `containerRef`，容器挂载后再渲染；`onUnmounted` 清空 `widgetId` 与重试计数。
+- 页面提交加同步重入守卫（`if (loading.value) return`），避免连点把同一个 token 用两次。
+- 校验失败时打印 Cloudflare `error-codes`（不落 token 与密钥），便于后续定位。
+
+**验证**
+
+- 新增 `tests/server/password-reset-ticket.test.ts`（6 项）：绑定账号、大小写/空格归一、10 分钟过期、篡改载荷与签名、空值。
+- 全量单测通过；`nuxt build` 通过。
+- 线上复核：`siteverify` 用生产密钥 + 伪造 token 返回 `invalid-input-response`，确认密钥本身有效、网络可达，排除配置错误。

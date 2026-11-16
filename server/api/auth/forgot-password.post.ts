@@ -15,6 +15,7 @@ import { SERVER_ERROR_CODES } from '~~/server/config/constants'
 import { getOAuthBaseConfig } from '~~/server/services/oauthConfigService'
 import { publicAddress } from '~~/server/utils/music-source-plugins/network'
 import { assertPasswordTurnstile } from '~~/server/utils/password-turnstile'
+import { issueResetTicket, verifyResetTicket } from '~~/server/utils/password-reset-ticket'
 
 // 未配置 NUXT_PUBLIC_HOST 时可安全使用请求 Host 的部署特征：
 // 云平台按域名路由，伪造 Host 的请求到不了应用；局域网/回环地址的链接点击外部攻击者收不到
@@ -83,8 +84,12 @@ export default defineEventHandler(async (event) => {
   }
 
   const body = await readBody(event)
-  await assertPasswordTurnstile(body, clientIP)
-  const { username, email } = body
+  const { username, email } = body || {}
+
+  // 第一步已经验过人机验证并签发票据，第二步凭票放行，避免重复核销同一个一次性 token
+  if (!verifyResetTicket(body?.ticket, username)) {
+    await assertPasswordTurnstile(body, clientIP)
+  }
 
   if (!username) {
     throw createApiError(400, 'AUTH_ACCOUNT_NAME_REQUIRED', '请提供账号名')
@@ -143,6 +148,7 @@ export default defineEventHandler(async (event) => {
         success: true,
         step: 2,
         maskedEmail,
+        ticket: issueResetTicket(username),
         message: '请输入完整的邮箱地址以验证身份'
       }
     }
