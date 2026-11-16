@@ -963,3 +963,30 @@ AST 普查器枚举危险调用点与请求源，按风险类别分诊，并与�
 **遗留**
 
 - 该兜底原本是为「前端没有验证码控件」的老页面准备的，现在前端已全覆盖，建议后续整体移除 `tsInit` 相关代码，而不是长期靠提前 return 关闭。
+
+### 10.31 彻底移除反代里的兜底 Turnstile（2026-11-16）
+
+10.30 只是让 `tsInit()` 提前 `return false`，整套兜底代码（约 100 行）连同 `#vh-ts-host` / `#vh-ts-err` 的样式与轮询仍然躺在 `__vh.js` 里，既占体积也留隐患（任何人只要把 `tsReady` 复位就能把它重新激活）。
+
+**本次删除**
+
+| 删除项 | 说明 |
+|---|---|
+| `tsReady / tsToken / tsWaiters / tsErr` | 兜底验证码的全局状态 |
+| `loadTs()` | 动态插入 Cloudflare `api.js`（前端组件自己会加载） |
+| `tsFail()` / `tsField()` / `mountTs()` | 兜底错误提示与自行 `render` 的逻辑 |
+| `tsInit()` / `tsGet()` | 读取 `/api/site-config` 并等待 4 秒取 token |
+| `withToken()` | 把 token 写进请求体（就是覆盖前端 token 的元凶） |
+| `maybeMountTs()` + `setInterval(...,1200)` | 每秒轮询挂载 |
+| `var of2` 两行重复声明 + 空壳 `window.fetch` 覆盖 | 历史死代码 |
+| fetch 拦截里的 forgot/change/reset 专用分支 | 两个分支完全一样，收敛成一句 `return send(...)` |
+
+保留：`hmac` / `x-vh-*` 签名头、`__bh` 密钥交换、`__vhTextFix`（账号页文案）、`dns-prefetch` + `preconnect` + `preload`（前端组件确实用 `?render=explicit`，预加载命中）。
+
+**结果**：`__vh.js` 从 20.6KB 降到 14.3KB，`fetch` 拦截只做签名、不读写请求体。
+
+**验证**
+
+- 本地起独立实例（`PORT=3102`，指向上游 3000）：页面 200、`__vh.js` 内 `tsInit/tsGet/withToken/vh-ts-host/vh-ts-err/maybeMountTs` 全部 0 处，`hmac/x-vh-sig/__vhTextFix` 各 1 处。
+- 真实浏览器（captcha 已开、sitekey 指向生产）：`.turnstile-widget` 存在且 `cf-turnstile-response` 计数 1，`#vh-ts-host`、`#vh-ts-err` 均不存在，控制台只剩 `110200`（127.0.0.1 未在 Cloudflare 白名单，属预期）。
+- 生产：替换后 `docker restart voicehub-rewriter`，`__vh.js` 14.7KB、版本号 `1jfuu69` 自动变化（`VH_JS_VER` 是内容 hash，缓存自然失效），`/forgot-password`、`/api/site-config` 均 200。

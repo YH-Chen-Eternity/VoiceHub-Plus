@@ -1048,103 +1048,15 @@ var FP=fp();try{document.cookie='vh_fp='+FP+';path=/;max-age=2592000;samesite=la
 function hex(b){var s='';for(var i=0;i<b.length;i++){var h=b[i].toString(16);s+=h.length<2?'0'+h:h}return s}
 function hmac(key,msg){var enc=new TextEncoder();return crypto.subtle.importKey('raw',enc.encode(key),{name:'HMAC',hash:'SHA-256'},false,['sign']).then(function(k){return crypto.subtle.sign('HMAC',k,enc.encode(msg))}).then(hex)}
 ready=fetch('/__bh',{credentials:'same-origin',cache:'no-store'}).then(function(r){return r.json()}).then(function(j){id=j.id;secret=j.secret}).catch(function(){secret=null});
-var tsReady=null,tsToken='',tsWaiters=[],tsErr=0;
-function loadTs(){if(window.turnstile)return Promise.resolve(true);return new Promise(function(res){var s=document.createElement('script');s.src='https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';s.async=true;s.onload=function(){res(true)};s.onerror=function(){res(false)};document.head.appendChild(s)})}
-function tsFail(msg){
-  var e=document.getElementById('vh-ts-err');
-  if(!e){
-    e=document.createElement('div');
-    e.id='vh-ts-err';
-    e.style.cssText='margin:10px 0;padding:8px 10px;border-radius:8px;background:rgba(224,138,138,.12);color:#e08a8a;font-size:12px;line-height:1.6;text-align:center';
-    var el=tsField();
-    var form=el?el.closest('form'):null;
-    var btn=form?form.querySelector('button[type="submit"]'):null;
-    var host=document.getElementById('vh-ts-host');
-    if(host&&host.parentElement){host.insertAdjacentElement('afterend',e)}
-    else if(btn&&btn.parentElement){btn.parentElement.insertBefore(e,btn)}
-    else{document.body.appendChild(e)}
-  }
-  e.textContent=msg;
-}
-function tsField(){
-  var p=location.pathname;
-  if(p==='/account'){
-    var c=document.querySelector('#confirm-password')||document.querySelector('#new-password');
-    if(!c)return null;
-    return document.querySelector('#current-password')||c;
-  }
-  return document.querySelector('#username')||document.querySelector('#confirm-password')||document.querySelector('#confirmPassword')||document.querySelector('input[type="password"]');
-}
-function mountTs(key){
-  if(document.getElementById('vh-ts-host'))return;
-  if(document.querySelector('.cf-turnstile,[id^="cf-chl-widget"],iframe[src*="challenges.cloudflare.com"]'))return;
-  var host=document.createElement('div');
-  host.id='vh-ts-host';
-  host.style.cssText='margin:14px 0 4px;display:flex;justify-content:center;min-height:65px';
-  var el=tsField();
-  var inserted=false;
-  if(el){
-    var form=el.closest('form');
-    var btn=form?form.querySelector('button[type="submit"]'):null;
-    if(btn&&btn.parentElement){btn.parentElement.insertBefore(host,btn);inserted=true}
-    else if(form){
-      var groups=form.querySelectorAll('.form-group');
-      var last=groups.length?groups[groups.length-1]:null;
-      if(last&&last.parentElement===form){form.insertBefore(host,last.nextSibling);inserted=true}
-      else{form.appendChild(host);inserted=true}
-    }
-    else if(el.parentElement){el.parentElement.insertBefore(host,el.nextSibling);inserted=true}
-  }
-  if(!inserted)document.body.appendChild(host);
-  window.__tsWidget=turnstile.render(host,{sitekey:key,theme:'auto',language:'zh-cn',callback:function(t){tsToken=t;tsErr=0;var e=document.getElementById('vh-ts-err');if(e)e.remove();tsWaiters.splice(0).forEach(function(f){f(t)})},'expired-callback':function(){tsToken=''},'error-callback':function(){tsErr=1;tsFail('人机验证加载失败，请刷新页面后重试');tsWaiters.splice(0).forEach(function(f){f('')})}});
-}
-function tsInit(){
-  if(tsReady)return tsReady;
-  // 前端页面自带 Turnstile 组件，兜底不再初始化，避免与 Vue 控件重复 render
-  tsReady=Promise.resolve(false);return tsReady;
-  var path=location.pathname;
-  if(path!=='/forgot-password'&&path!=='/change-password'&&path!=='/reset-password'&&path!=='/account'){tsReady=Promise.resolve(false);return tsReady}
-  tsReady=fetch('/api/site-config',{credentials:'same-origin'}).then(function(r){return r.json()}).then(function(cfg){
-    var key=cfg&&cfg.turnstileSiteKey;if(!key){tsErr=1;tsFail('人机验证未配置，请联系管理员');return false}
-    window.__vhTsSiteKey=key;
-    return loadTs().then(function(ok){
-      if(!ok){tsErr=1;tsFail('人机验证组件加载失败，请检查网络后刷新页面');return false}
-      var tries=0;
-      return new Promise(function(res){
-        (function wait(){
-          var el=tsField();
-          if(el){mountTs(key);res(true);return}
-          if(tries++>40){res(false);return}
-          setTimeout(wait,250);
-        })();
-      });
-    });
-  }).catch(function(){return false});
-  return tsReady;
-}
-function tsGet(){if(window.__vhModalToken)return Promise.resolve(window.__vhModalToken);return tsInit().then(function(ok){if(!ok)return '';if(tsErr)return '';return new Promise(function(res){if(tsToken)return res(tsToken);tsWaiters.push(res);setTimeout(function(){res(tsToken||'')},4000)})})}
-function withToken(init,tk){var ni=init?Object.assign({},init):{};try{var b=ni.body;if(typeof b==='string'){var j=JSON.parse(b);j.turnstileToken=tk;ni.body=JSON.stringify(j);var h=new Headers(ni.headers||{});if(!h.has('content-type'))h.set('content-type','application/json');ni.headers=h}else if(b&&typeof b==='object'&&!(b instanceof FormData)){ni.body=Object.assign({},b,{turnstileToken:tk})}else if(b instanceof FormData){b.append('turnstileToken',tk)}}catch(e){}return ni}
 var of=window.fetch;
-var of2=window.fetch;
-var of2=window.fetch;
-window.fetch=function(input,init){
-  return of2.apply(window,arguments);
-};
 function send(input,init,u,method){return ready.then(function(){if(!secret||!window.crypto||!crypto.subtle)return of.call(window,input,init);var ts=Math.floor(Date.now()/1000),n=Math.random().toString(16).slice(2)+Date.now().toString(16);return hmac(secret,method+'\n'+u.pathname+u.search+'\n'+ts+'\n'+n).then(function(sig){var ni=init?Object.assign({},init):{};var h=new Headers(ni.headers||(input&&input.headers)||{});h.set('x-vh-id',id);h.set('x-vh-ts',''+ts);h.set('x-vh-n',n);h.set('x-vh-sig',sig);ni.headers=h;return of.call(window,input,ni)})}).catch(function(){return of.call(window,input,init)})}
 window.fetch=function(input,init){
   var u=null;
   try{var url=typeof input==='string'?input:(input&&input.url)||'';u=new URL(url,location.href)}catch(e){return of.apply(window,arguments)}
   if(!u||u.origin!==location.origin||u.pathname.indexOf('/api/')!==0)return of.apply(window,arguments);
   var method=(init&&init.method)||(input&&input.method)||'GET';
-  if((u.pathname==='/api/auth/forgot-password'||u.pathname==='/api/auth/change-password'||u.pathname==='/api/auth/reset-password')&&String(method).toUpperCase()==='POST'){
-    // 不再用兜底 token 覆盖前端已带上的 turnstileToken（被覆盖成空串会让后端报「请完成人机验证」）
-    return send(input,init,u,method);
-  }
-  return send(input,init,u,method).then(function(res){
-    try{
-    }catch(e){}
-    return res;
-  });
+  // 只做 HMAC 签名，不读写请求体：turnstileToken 由前端组件负责
+  return send(input,init,u,method);
 };
 var __vhTextFix=(function(){
   var MAP=[
@@ -1183,20 +1095,6 @@ var __vhTextFix=(function(){
 })();
 function report(){if(!id)return;try{navigator.sendBeacon('/__bh/report',new Blob([JSON.stringify({id:id,fp:FP,ev:ev})],{type:'application/json'}))}catch(e){}}
 setInterval(report,30000);report();
-var tsPath='',tsLastTry=0;
-function maybeMountTs(){
-  var p=location.pathname;
-  var target=(p==='/forgot-password'||p==='/change-password'||p==='/reset-password'||p==='/account');
-  if(p!==tsPath){tsPath=p;tsReady=null;tsToken='';tsErr=0;tsLastTry=0;}
-  if(!target){var _h=document.getElementById('vh-ts-host');if(_h){try{if(window.turnstile&&window.__tsWidget!=null)window.turnstile.remove(window.__tsWidget)}catch(e){}try{_h.remove()}catch(e){}window.__tsWidget=null;tsToken='';}return;}
-  if(document.getElementById('vh-ts-host'))return;
-  var now=Date.now();
-  if(now-tsLastTry<1500)return;
-  tsLastTry=now;
-  tsReady=null;
-  tsInit();
-}
-setInterval(maybeMountTs,1200);maybeMountTs();
 // 账号页「我的点赞」列表限高滚动：避免 30+ 首把页面拉得很长
 (function(){
   function apply(){
