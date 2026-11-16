@@ -1,4 +1,5 @@
-import { computed, ref, readonly } from 'vue'
+import { computed, readonly } from 'vue'
+import { useState } from '#imports'
 import { getAggregateOAuthLoginTypesOrDefault, getProviderDisplayName } from '~/utils/oauth'
 import { parseEsaCaptchaScenes } from '~/utils/esaCaptcha'
 import { applyThemeConfig, useTheme } from '~/composables/useTheme'
@@ -38,8 +39,10 @@ const defaultSubmissionGuidelines = `1. 投稿时无需加入书名号
 7. 本系统仅提供音乐搜索和播放管理功能，不存储任何音乐文件。所有音乐内容均来自第三方音乐平台，版权归原平台及版权方所有。用户点歌时请确保遵守相关音乐平台的服务条款，尊重音乐作品版权。我们鼓励用户支持正版音乐，在官方平台购买和收听喜爱的音乐作品。
 8. 最终解释权归广播站所有`
 
-// 站点配置状态
-const siteConfig = ref({
+// 站点配置默认值。状态本身放进 useState：SSR 期间按请求隔离，
+// 并通过 payload 带到客户端，避免「服务端读到别的请求的配置、客户端首帧用默认值」
+// 造成的水合不一致。
+const SITE_CONFIG_DEFAULTS = {
   siteTitle: '',
   siteLogoUrl: '',
   schoolLogoHomeUrl: '',
@@ -77,10 +80,11 @@ const siteConfig = ref({
   legalConsentVersion: '',
   defaultTheme: 'System',
   enabledThemes: JSON.stringify(['System', 'ClassicDark', 'ClassicLight', 'ModernLight'])
-})
+}
 
-const isLoaded = ref(false)
-const isLoading = ref(false)
+const useSiteConfigState = () => useState('site-config', () => ({ ...SITE_CONFIG_DEFAULTS }))
+const useSiteConfigLoaded = () => useState('site-config-loaded', () => false)
+const useSiteConfigLoading = () => useState('site-config-loading', () => false)
 
 const getImageDisplayUrl = (url) => {
   const normalizedUrl = typeof url === 'string' ? url.trim() : ''
@@ -94,15 +98,18 @@ const getImageDisplayUrl = (url) => {
   return normalizedUrl
 }
 
-// 供 SSR 预取灌入站点配置（主题应用受 applyThemeConfig 的 import.meta.server 守卫，须在客户端单独触发）
-export const setSiteConfigData = (data) => {
-  if (!data || typeof data !== 'object') return
-  siteConfig.value = { ...siteConfig.value, ...data }
-  isLoaded.value = true
-}
-
 export const useSiteConfig = () => {
   const { isDark } = useTheme()
+  const siteConfig = useSiteConfigState()
+  const isLoaded = useSiteConfigLoaded()
+  const isLoading = useSiteConfigLoading()
+
+  // 供 SSR 预取灌入站点配置（主题应用受 applyThemeConfig 的 import.meta.server 守卫，须在客户端单独触发）
+  const setSiteConfigData = (data) => {
+    if (!data || typeof data !== 'object') return
+    siteConfig.value = { ...siteConfig.value, ...data }
+    isLoaded.value = true
+  }
   // 获取站点配置
   const fetchSiteConfig = async () => {
     if (isLoading.value) return
@@ -343,6 +350,7 @@ export const useSiteConfig = () => {
     oauthProviders,
     fetchSiteConfig,
     initSiteConfig,
-    refreshSiteConfig
+    refreshSiteConfig,
+    setSiteConfigData
   }
 }

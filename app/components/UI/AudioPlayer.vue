@@ -130,7 +130,7 @@
           <div class="time">
             <!-- 进度条 -->
             <div
-              ref="progressBar"
+              ref="progressBarEl"
               class="progress-bar"
               @click="handleSeekToPosition"
               @mousedown="handleStartDrag"
@@ -379,7 +379,7 @@ const {
 
 // 组件引用
 const audioElementRef = ref(null)
-const playerControlsRef = ref(null)
+const progressBarEl = ref(null)
 const widgetRef = ref(null)
 
 // UI 状态
@@ -418,7 +418,6 @@ const neteaseScrobblePlayEpoch = ref(0)
 
 // 获取音频播放器引用
 const audioPlayer = computed(() => audioElementRef.value?.audioPlayer)
-const progressBar = computed(() => playerControlsRef.value?.progressBar)
 
 // 记录最近一首歌曲，避免关闭过程中props.song为空导致渲染错误
 const lastSong = ref(null)
@@ -2023,7 +2022,7 @@ onMounted(async () => {
     setTimeout(async () => {
       if (audioPlayer.value && !control.audioPlayer.value) {
         control.setAudioPlayerRef(audioPlayer.value)
-        control.setProgressBarRef(progressBar.value)
+        control.setProgressBarRef(progressBarEl.value)
       }
     }, 1000)
 
@@ -2032,7 +2031,7 @@ onMounted(async () => {
 
   // 设置音频播放器和进度条引用
   control.setAudioPlayerRef(audioPlayer.value)
-  control.setProgressBarRef(progressBar.value)
+  control.setProgressBarRef(progressBarEl.value)
 
   // 验证引用是否正确设置
   if (!control.audioPlayer.value) {

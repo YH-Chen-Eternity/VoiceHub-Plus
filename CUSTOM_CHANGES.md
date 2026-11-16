@@ -850,3 +850,26 @@ AST 普查器枚举危险调用点与请求源，按风险类别分诊，并与�
 - 性能实测（临时库造 57.6 万行）：24 小时区间峰值查询 0.3ms，全部区间 16ms，`since` 查询 0.04ms。
 - 新增单测 10 项（`tests/frontend/opsBoard-peak.test.ts`）：当天/跨天/跨月的时刻格式、非法时间戳、有峰值/无采样/接口降级三种文案，以及接口按区间取峰值、采样周期与 unref、迁移建表三处静态守卫。全量 499/499 通过。
 - eslint 改动文件 0 error；`nuxt build` 通过，产物中确认采样插件、峰值查询与新文案均已打包。
+
+### 10.26 站点配置改为按请求隔离，修水合不一致（2026-11-15）
+
+**现象**：浏览器控制台在 SSR 页面（登录页页脚、首屏标题）出现 `Hydration text content mismatch`，同一段文案服务端渲染成默认值、客户端渲染成库里的真实配置；同时 `AudioPlayer` 反复刷 `Write operation failed: computed value is readonly`。
+
+**根因**
+
+- `useSiteConfig` 把站点配置存成**模块级 `ref()`**。模块级状态在 Node 侧是所有请求共享的同一份，SSR 期间谁先写入谁生效：先到的请求把配置灌进去，后到的请求读到的可能仍是默认值；客户端又会自己 fetch 一次真实配置，于是首帧与服务端 HTML 对不上。
+- `AudioPlayer.vue` 的模板写了 `ref="progressBar"`，而 setup 里 `progressBar` 是个 `computed`（且指向一个从未绑定的 `playerControlsRef`）。Vue 3.5 的模板 ref 会尝试 `progressBar.value = el`，写只读 computed 直接告警，元素也没存下来。
+- `AnnouncementBar.vue` / `AnnouncementManager.vue` 用了 `<Icon>` 但没 import，组件解析失败（图标渲染成空）。
+- 首页给 `SongsScheduleList` 绑了 `@semester-change`，该组件既没声明 emits 也不触发（只剩无用的 CSS），事件落到 fragment 根上告警。
+
+**改法**
+
+- `useSiteConfig` 改用 `useState`：`site-config` / `site-config-loaded` / `site-config-loading` 三个键随请求隔离，并由 payload 带到客户端；`setSiteConfigData` 移进组合式内部随返回值导出，避免在 setup 外调用 `useState`。
+- `AudioPlayer`：模板 ref 改名 `progressBarEl`，删掉从未绑定的 `playerControlsRef` 与多余的 computed，直接取元素。
+- 两个公告组件补 `import Icon from '~/components/UI/Icon.vue'`；首页去掉无效的事件监听。
+
+**验证**
+
+- dev 环境 Playwright 探测 `/`、`/login`、`/forgot-password`、`/reset-password`、`/legal/privacy`：0 水合告警、0 控制台错误。
+- 受保护路由（未登录直达 `/ops-board` 等）仍会打一条 `Hydration completed but contains mismatches`：服务端按既有设计不做鉴权渲染、客户端守卫再跳登录页，属既有行为（改动前的镜像同样复现），本次未改动。
+- 全量单测 585/585 通过；`nuxt build` 通过。
