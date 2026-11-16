@@ -93,6 +93,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import Icon from '~/components/UI/Icon.vue'
 
 const emit = defineEmits(['loaded'])
 

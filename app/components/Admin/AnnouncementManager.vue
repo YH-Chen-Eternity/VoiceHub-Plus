@@ -230,6 +230,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 import { computed, onMounted, ref } from 'vue'
 import { ChevronDown, ChevronUp, Plus, RefreshCw, X } from '@lucide/vue'
 import { useNewUi } from '~/composables/useNewUi'
+import Icon from '~/components/UI/Icon.vue'
 
 const t = useNewUi()
 const { showToast } = useToast()

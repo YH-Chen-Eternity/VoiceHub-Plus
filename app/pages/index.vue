@@ -252,7 +252,6 @@ Modified by YH-Chen on 2026-10-17
                   :error="error"
                   :loading="scheduleLoading"
                   :schedules="publicSchedules"
-                  @semester-change="handleSemesterChange"
                 />
               </div>
             </div>
@@ -937,7 +936,7 @@ import ConfirmDialog from '~/components/UI/ConfirmDialog.vue'
 import AppLoadingScreen from '~/components/UI/AppLoadingScreen.vue'
 
 import { useNotifications } from '~/composables/useNotifications'
-import { useSiteConfig, setSiteConfigData } from '~/composables/useSiteConfig'
+import { useSiteConfig } from '~/composables/useSiteConfig'
 import { useToast } from '~/composables/useToast'
 import { renderMarkdown } from '~/utils/markdown'
 import CustomSelect from '~/components/UI/Common/CustomSelect.vue'
@@ -972,7 +971,8 @@ const {
   description: siteDescription,
   guidelines: submissionGuidelines,
   icp: icpNumber,
-  schoolLogoHomeDisplayUrl
+  schoolLogoHomeDisplayUrl,
+  setSiteConfigData
 } = useSiteConfig()
 
 // 将投稿须知 Markdown 渲染为安全 HTML
