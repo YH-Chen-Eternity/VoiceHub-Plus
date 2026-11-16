@@ -98,7 +98,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import TurnstileWidget from '~/components/Auth/TurnstileWidget.vue'
 import { useLocale } from '~/utils/locale'
 
@@ -116,7 +116,7 @@ const step = ref(1)
 const maskedEmail = ref('')
 const turnstileToken = ref('')
 const resetTicket = ref('')
-const turnstileRef = ref(null)
+const turnstileRef = ref<{ getToken?: () => string; reset?: () => void; isReady?: () => boolean } | null>(null)
 
 const showTurnstile = computed(
   () => captchaEnabled.value && captchaProvider.value === 'turnstile' && !!turnstileSiteKey.value
@@ -131,6 +131,38 @@ useHead({
 
 onMounted(async () => {
   await initSiteConfig()
+})
+
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+
+/**
+ * 取一个可用的人机验证 token。
+ * Cloudflare 校验完成到 callback 触发之间有几百毫秒到几秒的延迟，用户手快时
+ * v-model 还是空的，直接把空 token 发出去就会被服务端判成「未完成人机验证」。
+ * 这里先主动向控件取，取不到再短轮询等待，避免把空 token 发出去。
+ */
+async function waitTurnstileToken(maxWaitMs = 6000, intervalMs = 300): Promise<string> {
+  if (!showTurnstile.value) return ''
+
+  const read = () => turnstileToken.value || turnstileRef.value?.getToken?.() || ''
+
+  const first = read()
+  if (first) return first
+
+  const deadline = Date.now() + maxWaitMs
+  while (Date.now() < deadline) {
+    await sleep(intervalMs)
+    const token = read()
+    if (token) return token
+  }
+  return ''
+}
+
+// token 到位后清掉「验证还在进行」这类临时提示，避免控件显示成功、页面还挂着报错
+watch(turnstileToken, (token) => {
+  if (!token) return
+  const waiting = locale.value.captchaWaiting
+  if (waiting && error.value === waiting) error.value = ''
 })
 
 const handleSubmit = async () => {
@@ -152,11 +184,24 @@ const handleSubmit = async () => {
   error.value = ''
 
   try {
+    // 只有第一步需要人机验证；第二步凭第一步签发的票据放行
+    const token = step.value === 1 ? await waitTurnstileToken() : ''
+    if (step.value === 1 && showTurnstile.value && !token) {
+      // 等待超时仍未拿到 token：控件已渲染说明只是还没验完，未渲染则是脚本/网络问题
+      if (turnstileRef.value?.isReady?.()) {
+        turnstileRef.value?.reset?.()
+        error.value = locale.value.captchaWaiting || '人机验证还在进行，请稍候再试'
+      } else {
+        error.value = locale.value.captchaFailed || '人机验证加载失败，请刷新页面后重试'
+      }
+      return
+    }
+
     const body = {
       username: username.value,
       ...(step.value === 2 ? { email: email.value } : {}),
       ...(step.value === 2 && resetTicket.value ? { ticket: resetTicket.value } : {}),
-      turnstileToken: turnstileToken.value
+      turnstileToken: token
     }
 
     const response = await $fetch('/api/auth/forgot-password', {

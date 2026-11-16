@@ -79,8 +79,27 @@ const reset = () => {
   }
 }
 
+/**
+ * 主动取一次当前 token。
+ * Cloudflare 完成校验到回调触发之间有延迟，提交瞬间 v-model 可能还是空的；
+ * 直接问 Cloudflare 能拿到已经生成、但回调尚未送达的 token。
+ */
+const getToken = (): string => {
+  if (widgetId === null || !window.turnstile?.getResponse) return ''
+  try {
+    return window.turnstile.getResponse(widgetId) || ''
+  } catch {
+    return ''
+  }
+}
+
+/** 控件是否已经渲染（用于区分「还在加载」和「已就绪但未通过」） */
+const isReady = () => widgetId !== null
+
 defineExpose({
-  reset
+  reset,
+  getToken,
+  isReady
 })
 
 onMounted(() => {
