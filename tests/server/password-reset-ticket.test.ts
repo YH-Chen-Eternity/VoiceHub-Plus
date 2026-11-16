@@ -16,9 +16,10 @@ test('票据绑定账号，换成别的账号不认', () => {
   assert.equal(verifyResetTicket(ticket, 'bob'), false)
 })
 
-test('账号大小写与首尾空格不影响校验', () => {
-  const ticket = issueResetTicket(' Alice ')
-  assert.equal(verifyResetTicket(ticket, 'alice'), true)
+test('账号大小写不同即拒绝（数据库按原样比对，不做折叠）', () => {
+  const ticket = issueResetTicket('alice')
+  assert.equal(verifyResetTicket(ticket, 'Alice'), false)
+  assert.equal(verifyResetTicket(ticket, ' alice '), true)
 })
 
 test('超过 10 分钟失效', () => {
@@ -30,17 +31,23 @@ test('超过 10 分钟失效', () => {
 
 test('篡改载荷或签名一律拒绝', () => {
   const ticket = issueResetTicket('alice')
-  const [body, mac] = ticket.split('.')
-  const forgedBody = Buffer.from(`bob|${Date.now() + 60_000}`, 'utf8').toString('base64url')
+  const at = ticket.lastIndexOf('.')
+  const forged = Buffer.from(`bob|${Date.now() + 60_000}`, 'utf8').toString('base64url')
 
-  assert.equal(verifyResetTicket(`${forgedBody}.${mac}`, 'bob'), false)
-  assert.equal(verifyResetTicket(`${body}.${mac.slice(0, -2)}xx`, 'alice'), false)
-  assert.equal(verifyResetTicket(body, 'alice'), false)
+  assert.equal(verifyResetTicket(`${forged}${ticket.slice(at)}`, 'bob'), false)
+  assert.equal(verifyResetTicket(`${ticket.slice(0, at)}.AAAA`, 'alice'), false)
+  assert.equal(verifyResetTicket(ticket.slice(0, at), 'alice'), false)
 })
 
-test('空值与非字符串直接拒绝', () => {
+test('空值、非字符串与缺失密钥都安全返回 false', () => {
   assert.equal(verifyResetTicket(undefined, 'alice'), false)
   assert.equal(verifyResetTicket(null, 'alice'), false)
   assert.equal(verifyResetTicket('', 'alice'), false)
   assert.equal(verifyResetTicket(123, 'alice'), false)
+
+  const ticket = issueResetTicket('alice')
+  const saved = process.env.JWT_SECRET
+  delete process.env.JWT_SECRET
+  assert.equal(verifyResetTicket(ticket, 'alice'), false)
+  process.env.JWT_SECRET = saved
 })

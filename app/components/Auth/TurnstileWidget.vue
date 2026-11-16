@@ -42,6 +42,11 @@ watch(
 )
 
 function renderWidget() {
+  // onMounted 与 watch 都可能是触发点，同一时刻只保留一条重试链，避免重试预算被双倍消耗
+  if (retryTimer) {
+    clearTimeout(retryTimer)
+    retryTimer = null
+  }
   if (!containerRef.value || !siteConfig.value.turnstileSiteKey || widgetId !== null) return
 
   // 确保全局存在 turnstile 对象
