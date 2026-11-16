@@ -325,15 +325,26 @@ used=$(disk_pct)
 if [ -n "$DISK_MOUNT" ] && [[ "${used:-}" =~ ^[0-9]+$ ]] && [ "$used" -ge "$DISK_MAX" ]; then
   log "分区 $DISK_MOUNT 占用 ${used}% ≥ ${DISK_MAX}%，清理悬空镜像与构建缓存"
   prune_rc=0
-  # 保留失败时的完整错误上下文：全丢到 /dev/null 会让"清理失败"变成不可排查的黑盒。
-  # 每行加前缀写入，既不丢结构（哪一层、什么原因各占一行），也不破坏日志的行格式。
+  # 保留失败时的错误上下文：全丢到 /dev/null 会让"清理失败"变成不可排查的黑盒。
+  # 每行加前缀写入，保留结构（哪一层、什么原因各占一行）；超过 50 行时截断并注明，
+  # 避免大量悬空层时把日志刷满。
   if ! prune_out=$(docker image prune -f 2>&1); then
     prune_rc=1
-    while IFS= read -r line; do log "镜像清理失败：$line"; done <<< "$prune_out"
+    n=0
+    while IFS= read -r line; do
+      n=$((n+1))
+      if [ "$n" -gt 50 ]; then log "镜像清理失败：（输出超过 50 行，其余省略）"; break; fi
+      log "镜像清理失败：$line"
+    done <<< "$prune_out"
   fi
   if ! prune_out=$(docker builder prune -f 2>&1); then
     prune_rc=1
-    while IFS= read -r line; do log "构建缓存清理失败：$line"; done <<< "$prune_out"
+    n=0
+    while IFS= read -r line; do
+      n=$((n+1))
+      if [ "$n" -gt 50 ]; then log "构建缓存清理失败：（输出超过 50 行，其余省略）"; break; fi
+      log "构建缓存清理失败：$line"
+    done <<< "$prune_out"
   fi
   after=$(disk_pct)
   [[ "${after:-}" =~ ^[0-9]+$ ]] || after=$used
