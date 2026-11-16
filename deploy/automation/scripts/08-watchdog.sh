@@ -44,9 +44,13 @@ normalize_waf_host() {
   local h=${1:-}
   h=${h#https://}; h=${h#http://}
   h=${h%%/*}
+  # IPv6 字面量（[::1] 形式，或裸地址含两个以上冒号）直接放弃：
+  # --resolve 的 IPv6 写法是 [host]:port:addr，与这里的三段式不同，生产也不使用 IPv6 域名。
+  # 若不在这里拦下，2001:db8::1 会被下面的 *:* 截成 "2001"，变成一个看似合法的主机名。
   case "$h" in
-    \[*\]:*) h=${h#[}; h=${h%%]*} ;;
-    \[*\]) h=${h#[}; h=${h%]} ;;
+    \[*\]*|*:*:*) return ;;
+  esac
+  case "$h" in
     *:*) h=${h%%:*} ;;
   esac
   printf '%s' "$h" | tr -d '[:space:]'
@@ -290,7 +294,7 @@ fi
 # ---- 5) 磁盘保护：占用超阈值时清理悬空镜像与构建缓存 ----
 # df 输出异常（非纯数字）时跳过，避免 [ -ge ] 语法报错中断脚本
 # 默认检查 /，但备份与镜像通常落在数据盘，可用 VH_DISK_MOUNT_POINT 指向真实分区
-disk_pct() { df -P "$DISK_MOUNT" 2>/dev/null | awk 'NR==2 {gsub(/%/, "", $5); print $5}'; }
+disk_pct() { [ -n "$DISK_MOUNT" ] || return 0; df -P "$DISK_MOUNT" 2>/dev/null | awk 'NR==2 {gsub(/%/, "", $5); print $5}'; }
 used=$(disk_pct)
 if [ -n "$DISK_MOUNT" ] && [[ "${used:-}" =~ ^[0-9]+$ ]] && [ "$used" -ge "$DISK_MAX" ]; then
   log "分区 $DISK_MOUNT 占用 ${used}% ≥ ${DISK_MAX}%，清理悬空镜像与构建缓存"
@@ -298,11 +302,11 @@ if [ -n "$DISK_MOUNT" ] && [[ "${used:-}" =~ ^[0-9]+$ ]] && [ "$used" -ge "$DISK
   # 保留失败时的错误上下文：全丢到 /dev/null 会让"清理失败"变成不可排查的黑盒
   if ! prune_out=$(docker image prune -f 2>&1); then
     prune_rc=1
-    log "镜像清理失败：$(printf '%s' "$prune_out" | tr '\n' ' ' | cut -c1-300)"
+    log "镜像清理失败：$(printf '%s' "$prune_out" | tr '\n' ' ' | cut -c1-2000)"
   fi
   if ! prune_out=$(docker builder prune -f 2>&1); then
     prune_rc=1
-    log "构建缓存清理失败：$(printf '%s' "$prune_out" | tr '\n' ' ' | cut -c1-300)"
+    log "构建缓存清理失败：$(printf '%s' "$prune_out" | tr '\n' ' ' | cut -c1-2000)"
   fi
   after=$(disk_pct)
   [[ "${after:-}" =~ ^[0-9]+$ ]] || after=$used
