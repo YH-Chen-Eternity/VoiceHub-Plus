@@ -22,9 +22,13 @@ DISK_MAX=${VH_DISK_MAX_PERCENT:-90}
 DISK_ALERT_COOLDOWN=${VH_DISK_ALERT_COOLDOWN:-3600}
 DISK_ALERT_AT="$STATE_DIR/disk-alert-at"
 DISK_MOUNT=${VH_DISK_MOUNT_POINT:-/}
-# 必须是绝对路径、不含 .. 与空白：否则 df 可能落到意外分区，导致阈值判断失效
+# 必须是绝对路径、不含 .. 与空白，且真实存在：否则 df 可能落到意外分区或静默失败，
+# 而 systemd timer 不捕获 stderr，运维无从察觉
 if [[ "$DISK_MOUNT" != /* ]] || [[ "$DISK_MOUNT" == *..* ]] || [[ "$DISK_MOUNT" == *[[:space:]]* ]]; then
   printf 'VH_DISK_MOUNT_POINT 需为绝对路径且不含 .. 与空白（当前：%s），本轮跳过磁盘检查\n' "$DISK_MOUNT" >&2
+  DISK_MOUNT=""
+elif [ ! -d "$DISK_MOUNT" ]; then
+  printf 'VH_DISK_MOUNT_POINT 不存在或不是目录（当前：%s），本轮跳过磁盘检查\n' "$DISK_MOUNT" >&2
   DISK_MOUNT=""
 fi
 MEM_MAX=${VH_MEM_MAX_PERCENT:-85}
@@ -71,7 +75,10 @@ if [ ! -d "$VH_HOME" ]; then
   printf '%s VH_HOME 不存在：%s，跳过恢复\n' "$TS" "$VH_HOME" >&2
   exit 1
 fi
-mkdir -p "$STATE_DIR" "$(dirname "$LOG")"
+mkdir -p "$STATE_DIR" "$(dirname "$LOG")" || {
+  printf '%s 无法创建状态目录或日志目录（%s / %s），退出\n' "$TS" "$STATE_DIR" "$(dirname "$LOG")" >&2
+  exit 1
+}
 log() { printf '%s %s\n' "$TS" "$*" >> "$LOG"; }
 
 notify() {
@@ -288,12 +295,19 @@ used=$(disk_pct)
 if [ -n "$DISK_MOUNT" ] && [[ "${used:-}" =~ ^[0-9]+$ ]] && [ "$used" -ge "$DISK_MAX" ]; then
   log "分区 $DISK_MOUNT 占用 ${used}% ≥ ${DISK_MAX}%，清理悬空镜像与构建缓存"
   prune_rc=0
-  docker image prune -f >/dev/null 2>&1 || prune_rc=1
-  docker builder prune -f >/dev/null 2>&1 || prune_rc=1
+  # 保留失败时的错误上下文：全丢到 /dev/null 会让"清理失败"变成不可排查的黑盒
+  if ! prune_out=$(docker image prune -f 2>&1); then
+    prune_rc=1
+    log "镜像清理失败：$(printf '%s' "$prune_out" | tr '\n' ' ' | cut -c1-300)"
+  fi
+  if ! prune_out=$(docker builder prune -f 2>&1); then
+    prune_rc=1
+    log "构建缓存清理失败：$(printf '%s' "$prune_out" | tr '\n' ' ' | cut -c1-300)"
+  fi
   after=$(disk_pct)
   [[ "${after:-}" =~ ^[0-9]+$ ]] || after=$used
-  # 清理是预防性维护：只有清理命令失败、或清理后仍超阈值才算故障（RC=1），
-  # 否则每次清理都会让监控误报失败
+  # 清理失败、或清理后仍超阈值都置 RC=1：后者意味着清理无效、磁盘仍将见底，
+  # 属于需要人工介入的真实故障，不做降级（邮件侧已有冷却，不会刷屏）
   if [ "$prune_rc" -ne 0 ] || [ "$after" -ge "$DISK_MAX" ]; then
     RC=1
   fi
