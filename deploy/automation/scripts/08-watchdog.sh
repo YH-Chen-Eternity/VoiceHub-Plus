@@ -42,7 +42,7 @@ normalize_waf_host() {
   h=${h#https://}; h=${h#http://}
   h=${h%%/*}
   # IPv6 字面量（[::1] 形式，或裸地址含两个以上冒号）直接放弃：
-  # --resolve 的 IPv6 写法是 [host]:port:addr，与这里的三段式不同，生产也不使用 IPv6 域名。
+  # --resolve 的 IPv6 写法是 [host]:port:addr，与这里的三段式不同，本脚本只处理 IPv4/域名。
   # 若不在这里拦下，2001:db8::1 会被下面的 *:* 截成 "2001"，变成一个看似合法的主机名。
   case "$h" in
     \[*\]*|*:*:*) return ;;
