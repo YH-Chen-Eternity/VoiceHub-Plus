@@ -917,3 +917,23 @@ AST 普查器枚举危险调用点与请求源，按风险类别分诊，并与�
 - 新增 `tests/server/password-reset-ticket.test.ts`（6 项）：绑定账号、大小写/空格归一、10 分钟过期、篡改载荷与签名、空值。
 - 全量单测通过；`nuxt build` 通过。
 - 线上复核：`siteverify` 用生产密钥 + 伪造 token 返回 `invalid-input-response`，确认密钥本身有效、网络可达，排除配置错误。
+
+### 10.29 找回密码第一步报「请完成人机验证」（2026-11-16）
+
+**现象**：Cloudflare Turnstile 控件已经显示「成功!」，点「下一步」仍提示「请完成人机验证」，第一步就过不去。
+
+**根因**：Turnstile 从校验完成到 `callback` 触发之间有几百毫秒到几秒延迟。用户输入完账号名立刻点按钮时，`v-model` 里还是空字符串，请求带着空 token 发出去，被服务端判为未完成人机验证；等错误显示出来，控件那边刚好走到「成功」，于是出现「成功 + 报错」并存的画面。
+
+**改法**
+
+- `TurnstileWidget` 暴露 `getToken()`（读 `turnstile.getResponse`）与 `isReady()`，不再只依赖 `callback` 一个来源。
+- 提交前先主动取 token，取不到再短轮询最多 8 秒，空 token 不再发出去。
+- 超时按控件状态分流：控件已渲染 → 挂起本次提交并提示「稍候再试」，token 一到自动续跑，用户不用再点；控件未渲染 → 提示刷新页面并 reset 控件。
+- token 到位时清掉临时提示，避免成功状态与报错并存。
+
+**验证**
+
+- 本机对照（测试 sitekey，Cloudflare 请求注入 3 秒延迟 + 页面加载后立即点击）：
+  - 旧镜像：请求体 `turnstileToken: ""`，返回 400 `AUTH_CAPTCHA_REQUIRED`，复现线上现象；
+  - 新镜像（正常网络 + 立即点击）：请求体带真实 token，返回 200 进入第二步。
+- 全量单测 631/631 通过；eslint 0 error。
