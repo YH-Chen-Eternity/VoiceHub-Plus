@@ -19,13 +19,35 @@ RESTART_AT_FILE="$STATE_DIR/last-restart"
 MAX_FAILS=${VH_MAX_FAILS:-2}
 COOLDOWN=${VH_RESTART_COOLDOWN:-300}
 DISK_MAX=${VH_DISK_MAX_PERCENT:-90}
+DISK_ALERT_COOLDOWN=${VH_DISK_ALERT_COOLDOWN:-3600}
+DISK_ALERT_AT="$STATE_DIR/disk-alert-at"
+DISK_MOUNT=${VH_DISK_MOUNT_POINT:-/}
 MEM_MAX=${VH_MEM_MAX_PERCENT:-85}
 MEM_ALERT_COOLDOWN=${VH_MEM_ALERT_COOLDOWN:-1800}
 MEM_ALERT_AT="$STATE_DIR/mem-alert-at"
 # WAF 入口（经 tengine）探测：与应用直连互补，用于发现「应用活着但 WAF 挂了」的盲区
-WAF_HOST=${VH_SITE_HOST:-}
-if [ -z "$WAF_HOST" ] && [ -n "${VH_SITE_URL:-}" ]; then
-  WAF_HOST=${VH_SITE_URL#https://}; WAF_HOST=${WAF_HOST#http://}; WAF_HOST=${WAF_HOST%%/*}
+#
+# 主机名必须规范化后再用：waf_ok() 里拼的是 --resolve "host:443:127.0.0.1"，
+# 若 host 自带端口（VH_SITE_HOST 误写成 example.com:8443）或带路径，拼出来会变成
+# 四段式非法值，curl 直接失败，导致「WAF 探测永远不可达」→ 每轮都误重启 tengine。
+# 这里统一剥离协议、路径、端口与空白；IPv6 因 --resolve 语法差异不在此支持。
+normalize_waf_host() {
+  local h=${1:-}
+  h=${h#https://}; h=${h#http://}
+  h=${h%%/*}
+  case "$h" in
+    \[*\]:*) h=${h#[}; h=${h%%]*} ;;
+    \[*\]) h=${h#[}; h=${h%]} ;;
+    *:*) h=${h%%:*} ;;
+  esac
+  printf '%s' "$h" | tr -d '[:space:]'
+}
+WAF_HOST=$(normalize_waf_host "${VH_SITE_HOST:-}")
+[ -z "$WAF_HOST" ] && WAF_HOST=$(normalize_waf_host "${VH_SITE_URL:-}")
+# 只接受域名或 IPv4；含其它字符说明配置有问题，禁用本轮探测而不是把脏值拼进 curl
+if [ -n "$WAF_HOST" ] && ! printf '%s' "$WAF_HOST" | grep -qE '^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$'; then
+  printf 'WAF_HOST 非法（%s），本轮跳过 WAF 探测\n' "$WAF_HOST" >&2
+  WAF_HOST=""
 fi
 WAF_URL=${VH_WAF_URL:-}
 if [ -z "$WAF_URL" ] && [ -n "$WAF_HOST" ]; then WAF_URL="https://$WAF_HOST/api/health"; fi
@@ -123,7 +145,8 @@ if [ -n "$WAF_URL" ] && [ -n "$WAF_HOST" ]; then
   else
     wf=$(( $(cat "$WAF_FAIL_FILE" 2>/dev/null || echo 0) + 1 ))
     echo "$wf" > "$WAF_FAIL_FILE"
-    # 只探测一次并复用结果，避免同一轮内多次请求拖长执行时间
+    # 此处重新探测而非复用第 1 段结果：第 1 段可能刚重启过应用，
+    # 需要反映重启之后的真实状态，否则会用旧状态误判 tengine 该不该重启
     a_ok=0; app_ok && a_ok=1
     if [ "$a_ok" -eq 1 ]; then a_desc="健康"; else a_desc="异常"; fi
     log "WAF 入口不可达：$WAF_URL（连续 $wf 次；应用直连 $a_desc）"
@@ -252,10 +275,11 @@ fi
 
 # ---- 5) 磁盘保护：占用超阈值时清理悬空镜像与构建缓存 ----
 # df 输出异常（非纯数字）时跳过，避免 [ -ge ] 语法报错中断脚本
-disk_pct() { df -P / 2>/dev/null | awk 'NR==2 {gsub(/%/, "", $5); print $5}'; }
+# 默认检查 /，但备份与镜像通常落在数据盘，可用 VH_DISK_MOUNT_POINT 指向真实分区
+disk_pct() { df -P "$DISK_MOUNT" 2>/dev/null | awk 'NR==2 {gsub(/%/, "", $5); print $5}'; }
 used=$(disk_pct)
 if [[ "${used:-}" =~ ^[0-9]+$ ]] && [ "$used" -ge "$DISK_MAX" ]; then
-  log "根分区占用 ${used}% ≥ ${DISK_MAX}%，清理悬空镜像与构建缓存"
+  log "分区 $DISK_MOUNT 占用 ${used}% ≥ ${DISK_MAX}%，清理悬空镜像与构建缓存"
   prune_rc=0
   docker image prune -f >/dev/null 2>&1 || prune_rc=1
   docker builder prune -f >/dev/null 2>&1 || prune_rc=1
@@ -266,9 +290,18 @@ if [[ "${used:-}" =~ ^[0-9]+$ ]] && [ "$used" -ge "$DISK_MAX" ]; then
   if [ "$prune_rc" -ne 0 ] || [ "$after" -ge "$DISK_MAX" ]; then
     RC=1
   fi
-  notify "[VoiceHub] 磁盘占用告警" "时间：$TS
-根分区占用：${used}% → 清理后 ${after}%（阈值 ${DISK_MAX}%）
+  # 清理动作每次都做，但告警邮件按冷却发送：磁盘长期高水位时否则每 2 分钟一封
+  now=$(date +%s)
+  last=$(cat "$DISK_ALERT_AT" 2>/dev/null || echo 0)
+  if [ $((now - last)) -ge "$DISK_ALERT_COOLDOWN" ]; then
+    echo "$now" > "$DISK_ALERT_AT"
+    notify "[VoiceHub] 磁盘占用告警" "时间：$TS
+分区：$DISK_MOUNT
+占用：${used}% → 清理后 ${after}%（阈值 ${DISK_MAX}%）
 已清理悬空镜像与构建缓存，请检查大文件与备份保留策略"
+  else
+    log "磁盘占用 ${used}% ≥ ${DISK_MAX}%（距上次告警不足 ${DISK_ALERT_COOLDOWN}s，不重复发送）"
+  fi
 fi
 
 exit "$RC"
