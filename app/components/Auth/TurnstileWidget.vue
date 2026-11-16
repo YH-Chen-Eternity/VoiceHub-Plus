@@ -29,13 +29,24 @@ let retryCount = 0
 const MAX_RETRIES = 50 // 最大重试 50 次，每次 100ms，共 5 秒
 let retryTimer: ReturnType<typeof setTimeout> | null = null
 
-watch(() => siteConfig.value.turnstileSiteKey, (newKey) => {
-  if (newKey && !widgetId) {
-    renderWidget()
-  }
-}, { immediate: true })
+// 容器是 v-if 渲染出来的，配置到位时容器可能还没挂上；等 DOM 更新后再渲染，
+// 否则 renderWidget 会因为 containerRef 为空直接返回，之后再也没有触发点（表现为验证码永不出现）。
+watch(
+  [() => siteConfig.value.turnstileSiteKey, containerRef],
+  ([siteKey, el]) => {
+    if (siteKey && el && widgetId === null) {
+      renderWidget()
+    }
+  },
+  { immediate: true, flush: 'post' }
+)
 
 function renderWidget() {
+  // onMounted 与 watch 都可能是触发点，同一时刻只保留一条重试链，避免重试预算被双倍消耗
+  if (retryTimer) {
+    clearTimeout(retryTimer)
+    retryTimer = null
+  }
   if (!containerRef.value || !siteConfig.value.turnstileSiteKey || widgetId !== null) return
 
   // 确保全局存在 turnstile 对象
@@ -96,6 +107,9 @@ onUnmounted(() => {
   if (widgetId !== null && window.turnstile) {
     window.turnstile.remove(widgetId)
   }
+  // 不置空的话，组件重新挂载时 renderWidget 会以为旧控件还在，永远不再渲染
+  widgetId = null
+  retryCount = 0
 })
 </script>
 

@@ -40,6 +40,8 @@ export async function assertPasswordTurnstile(body: any, clientIP: string) {
       timeout: 5000
     })
     if (!result.success) {
+      // 只记录 Cloudflare 的错误码，不落 token 与密钥，便于定位「已核销 / 超时 / 密钥不匹配」
+      console.warn('[turnstile] 校验未通过:', result['error-codes'] || result)
       throw createApiError(400, 'AUTH_CAPTCHA_FAILED_OR_EXPIRED', '人机验证失败或已过期，请重试', {
         captchaRequired: true,
         captchaProvider: 'turnstile'
