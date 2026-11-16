@@ -22,13 +22,10 @@ DISK_MAX=${VH_DISK_MAX_PERCENT:-90}
 DISK_ALERT_COOLDOWN=${VH_DISK_ALERT_COOLDOWN:-3600}
 DISK_ALERT_AT="$STATE_DIR/disk-alert-at"
 DISK_MOUNT=${VH_DISK_MOUNT_POINT:-/}
-# 必须是绝对路径、不含 .. 与空白，且真实存在：否则 df 可能落到意外分区或静默失败，
-# 而 systemd timer 不捕获 stderr，运维无从察觉
-if [[ "$DISK_MOUNT" != /* ]] || [[ "$DISK_MOUNT" == *..* ]] || [[ "$DISK_MOUNT" == *[[:space:]]* ]]; then
-  printf 'VH_DISK_MOUNT_POINT 需为绝对路径且不含 .. 与空白（当前：%s），本轮跳过磁盘检查\n' "$DISK_MOUNT" >&2
-  DISK_MOUNT=""
-elif [ ! -d "$DISK_MOUNT" ]; then
-  printf 'VH_DISK_MOUNT_POINT 不存在或不是目录（当前：%s），本轮跳过磁盘检查\n' "$DISK_MOUNT" >&2
+# 只允许绝对路径与 [A-Za-z0-9._/-]，且不得含 ..、必须真实存在：
+# 否则 df 可能落到意外分区、被元字符干扰，或静默失败（systemd timer 不捕获 stderr）
+if [[ ! "$DISK_MOUNT" =~ ^/[A-Za-z0-9._/-]*$ ]] || [[ "$DISK_MOUNT" == *..* ]] || [ ! -d "$DISK_MOUNT" ]; then
+  printf 'VH_DISK_MOUNT_POINT 需为存在的绝对路径、仅含字母数字/._- 且不含 ..（当前：%s），本轮跳过磁盘检查\n' "$DISK_MOUNT" >&2
   DISK_MOUNT=""
 fi
 MEM_MAX=${VH_MEM_MAX_PERCENT:-85}
@@ -57,6 +54,10 @@ normalize_waf_host() {
 }
 WAF_HOST=$(normalize_waf_host "${VH_SITE_HOST:-}")
 [ -z "$WAF_HOST" ] && WAF_HOST=$(normalize_waf_host "${VH_SITE_URL:-}")
+# normalize 对 IPv6 字面量返回空；单独提示一句，避免运维以为是配置写错
+case "${VH_SITE_HOST:-${VH_SITE_URL:-}}" in
+  \[*\]*|*:*:*) printf 'WAF_HOST 为 IPv6 字面量（%s），--resolve 三段式语法不支持，本轮跳过 WAF 探测\n' "${VH_SITE_HOST:-${VH_SITE_URL:-}}" >&2 ;;
+esac
 # 只接受「字母数字 + . _ -」构成的主机名或 IPv4；允许单标签（localhost）与下划线（内网习惯），
 # 但任何其它字符（空格、分号、斜杠、冒号等）都说明配置有问题，禁用本轮探测而不是把脏值拼进 curl
 # 注：下划线不符合 RFC 1123，仅为兼容内网命名；公网域名/证书场景请使用标准域名
