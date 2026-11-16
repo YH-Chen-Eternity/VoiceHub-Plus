@@ -22,9 +22,9 @@ DISK_MAX=${VH_DISK_MAX_PERCENT:-90}
 DISK_ALERT_COOLDOWN=${VH_DISK_ALERT_COOLDOWN:-3600}
 DISK_ALERT_AT="$STATE_DIR/disk-alert-at"
 DISK_MOUNT=${VH_DISK_MOUNT_POINT:-/}
-# 必须是绝对路径且不含 ..：否则 df 可能落到意外分区，导致阈值判断失效
-if [[ "$DISK_MOUNT" != /* ]] || [[ "$DISK_MOUNT" == *..* ]]; then
-  printf 'VH_DISK_MOUNT_POINT 需为绝对路径且不含 ..（当前：%s），本轮跳过磁盘检查\n' "$DISK_MOUNT" >&2
+# 必须是绝对路径、不含 .. 与空白：否则 df 可能落到意外分区，导致阈值判断失效
+if [[ "$DISK_MOUNT" != /* ]] || [[ "$DISK_MOUNT" == *..* ]] || [[ "$DISK_MOUNT" == *[[:space:]]* ]]; then
+  printf 'VH_DISK_MOUNT_POINT 需为绝对路径且不含 .. 与空白（当前：%s），本轮跳过磁盘检查\n' "$DISK_MOUNT" >&2
   DISK_MOUNT=""
 fi
 MEM_MAX=${VH_MEM_MAX_PERCENT:-85}
@@ -51,6 +51,7 @@ WAF_HOST=$(normalize_waf_host "${VH_SITE_HOST:-}")
 [ -z "$WAF_HOST" ] && WAF_HOST=$(normalize_waf_host "${VH_SITE_URL:-}")
 # 只接受「字母数字 + . _ -」构成的主机名或 IPv4；允许单标签（localhost）与下划线（内网习惯），
 # 但任何其它字符（空格、分号、斜杠、冒号等）都说明配置有问题，禁用本轮探测而不是把脏值拼进 curl
+# 注：下划线不符合 RFC 1123，仅为兼容内网命名；公网域名/证书场景请使用标准域名
 if [ -n "$WAF_HOST" ] && ! printf '%s' "$WAF_HOST" | grep -qE '^[A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9])?$'; then
   printf 'WAF_HOST 非法（%s），本轮跳过 WAF 探测\n' "$WAF_HOST" >&2
   WAF_HOST=""
