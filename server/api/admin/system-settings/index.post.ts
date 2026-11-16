@@ -2,6 +2,7 @@ import { db } from '~/drizzle/db'
 import { systemSettings } from '~/drizzle/schema'
 import { eq } from 'drizzle-orm'
 import { SMTP_PASSWORD_MASK, SECRET_FIELD_MASK, maskSystemSettingsSecrets } from './secretMask'
+import { findSuperAdminOnlySettingFields } from '~/utils/settingsPermissions'
 import { isValidAstrbotWeeklyConfigInput, normalizeAstrbotWeeklyConfig } from '~~/server/utils/astrbot-weekly-config'
 import { SYSTEM_SETTINGS_DEFAULTS } from '~~/server/utils/system-settings-defaults'
 import { isAstrbotPullMode } from '~~/server/utils/astrbot-pull'
@@ -193,6 +194,18 @@ export default defineEventHandler(async (event) => {
 
   try {
     const body = await readBody(event)
+
+    // 凭据与账号安全策略类配置仅超级管理员可改：普通管理员整表单提交时由前端先剔除
+    if (user.role !== 'SUPER_ADMIN') {
+      const rejectedFields = findSuperAdminOnlySettingFields(body)
+      if (rejectedFields.length > 0) {
+        console.warn('[SystemSettings] 普通管理员提交超管专属配置已拒绝:', rejectedFields.join(', '))
+        throw createError({
+          statusCode: 403,
+          message: '只有超级管理员可以修改用户数据与凭据相关的配置'
+        })
+      }
+    }
 
     // 验证请求体
     const updateData: any = {}
