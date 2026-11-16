@@ -522,6 +522,8 @@ export const pages = {
     emailRequired: 'Please complete the email address',
     mailSent: 'Reset email sent',
     requestFailed: 'Request failed. Please try again later.',
+    captchaWaiting: 'Human verification is still in progress, please try again in a moment.',
+    captchaFailed: 'Human verification failed to load. Please refresh the page and try again.',
     serverMessages: {
       raw: {
         rateLimitedPattern: '操作过于频繁，请等待\\s*(\\d+)\\s*分钟后再试',

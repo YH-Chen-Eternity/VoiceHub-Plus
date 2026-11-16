@@ -508,6 +508,8 @@ export const pages = {
     emailRequired: '请补全邮箱地址',
     mailSent: '重置邮件已发送',
     requestFailed: '请求失败，请稍后重试',
+    captchaWaiting: '人机验证还在进行，请稍候再试',
+    captchaFailed: '人机验证加载失败，请刷新页面后重试',
     serverMessages: {
       raw: {
         rateLimitedPattern: '操作过于频繁，请等待\\s*(\\d+)\\s*分钟后再试',
