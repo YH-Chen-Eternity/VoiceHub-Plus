@@ -116,6 +116,7 @@ const step = ref(1)
 const maskedEmail = ref('')
 const turnstileToken = ref('')
 const resetTicket = ref('')
+const waitingCaptcha = ref(false)
 const turnstileRef = ref<{ getToken?: () => string; reset?: () => void; isReady?: () => boolean } | null>(null)
 
 const showTurnstile = computed(
@@ -141,7 +142,7 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
  * v-model 还是空的，直接把空 token 发出去就会被服务端判成「未完成人机验证」。
  * 这里先主动向控件取，取不到再短轮询等待，避免把空 token 发出去。
  */
-async function waitTurnstileToken(maxWaitMs = 6000, intervalMs = 300): Promise<string> {
+async function waitTurnstileToken(maxWaitMs = 8000, intervalMs = 300): Promise<string> {
   if (!showTurnstile.value) return ''
 
   const read = () => turnstileToken.value || turnstileRef.value?.getToken?.() || ''
@@ -158,16 +159,22 @@ async function waitTurnstileToken(maxWaitMs = 6000, intervalMs = 300): Promise<s
   return ''
 }
 
-// token 到位后清掉「验证还在进行」这类临时提示，避免控件显示成功、页面还挂着报错
+// token 到位后清掉「验证还在进行」这类临时提示，避免控件显示成功、页面还挂着报错；
+// 若这次点击因为等超时被挂起，token 一到就自动续跑，用户不用再点一次
 watch(turnstileToken, (token) => {
   if (!token) return
   const waiting = locale.value.captchaWaiting
   if (waiting && error.value === waiting) error.value = ''
+  if (waitingCaptcha.value && !loading.value && step.value === 1) {
+    waitingCaptcha.value = false
+    handleSubmit()
+  }
 })
 
 const handleSubmit = async () => {
   // Turnstile token 一次性，连点会让第二次请求拿到「已核销」而误报失败
   if (loading.value) return
+  waitingCaptcha.value = false
   if (step.value === 1) {
     if (!username.value) {
       error.value = locale.value.usernameRequired
@@ -187,11 +194,13 @@ const handleSubmit = async () => {
     // 只有第一步需要人机验证；第二步凭第一步签发的票据放行
     const token = step.value === 1 ? await waitTurnstileToken() : ''
     if (step.value === 1 && showTurnstile.value && !token) {
-      // 等待超时仍未拿到 token：控件已渲染说明只是还没验完，未渲染则是脚本/网络问题
+      // 等待超时仍未拿到 token：控件已渲染说明只是还没验完，挂起等 token 到了自动续跑；
+      // 未渲染则是脚本/网络问题，重置控件并提示刷新
       if (turnstileRef.value?.isReady?.()) {
-        turnstileRef.value?.reset?.()
+        waitingCaptcha.value = true
         error.value = locale.value.captchaWaiting || '人机验证还在进行，请稍候再试'
       } else {
+        turnstileRef.value?.reset?.()
         error.value = locale.value.captchaFailed || '人机验证加载失败，请刷新页面后重试'
       }
       return
@@ -215,6 +224,7 @@ const handleSubmit = async () => {
         step.value = 2
         maskedEmail.value = response.maskedEmail || ''
         resetTicket.value = response.ticket || ''
+        waitingCaptcha.value = false
         turnstileToken.value = ''
         turnstileRef.value?.reset()
       } else if (response.step === 3) {
