@@ -63,12 +63,13 @@ WAF_HOST=$(normalize_waf_host "${VH_SITE_HOST:-}")
 case "${VH_SITE_HOST:-${VH_SITE_URL:-}}" in
   \[*\]*|*:*:*) printf 'WAF_HOST 为 IPv6 字面量（%s），--resolve 三段式语法不支持，本轮跳过 WAF 探测\n' "${VH_SITE_HOST:-${VH_SITE_URL:-}}" >&2 ;;
 esac
-# 主机名白名单：仅「字母数字 + . -」构成的域名或 IPv4，允许单标签（localhost / 内网短名）。
-# 不含下划线：TLS 证书不可能签给含下划线的主机名，探测必然校验失败，
-# 连续失败会累加到阈值并误重启 tengine——正是本段要消除的故障模式。
+# 主机名白名单按 RFC 1123 逐标签校验：字母数字开头结尾，中间可含连字符，标签间用点分隔。
+# 允许单标签（localhost / 内网短名）与 IPv4（点分数字天然满足）。
+# 不含下划线、不以连字符开头结尾、不含空标签（连续点）：这些形式都拿不到 TLS 证书，
+# 探测必然校验失败，连续失败会累加到阈值并误重启 tengine——正是本段要消除的故障模式。
 # 内网命名请改用短名或 IPv4；确需自签证书时改用 VH_WAF_URL 直接指定完整地址。
-# 连续点（example..com）能通过字符集但不可解析，单独排除。
-if [ -n "$WAF_HOST" ] && { [[ "$WAF_HOST" == *..* ]] || ! printf '%s' "$WAF_HOST" | grep -qE '^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$'; }; then
+_LABEL='[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?'
+if [ -n "$WAF_HOST" ] && ! printf '%s' "$WAF_HOST" | grep -qE "^$_LABEL(\\.$_LABEL)*$"; then
   printf 'WAF_HOST 非法（%s），本轮跳过 WAF 探测\n' "$WAF_HOST" >&2
   WAF_HOST=""
 fi
