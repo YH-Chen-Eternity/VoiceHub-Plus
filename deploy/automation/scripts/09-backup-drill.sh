@@ -20,6 +20,13 @@ DRILL_DB=${VH_DRILL_DB:-voicehub_drill}
 DUMP=/tmp/vh-drill-$$.dump
 SNAP_DIR=$(mktemp -d)
 
+# 库名/用户名会拼进 SQL 与 shell 命令，只接受常规标识符
+for v in "$DB" "$DB_USER" "$DRILL_DB"; do
+  case "$v" in
+    *[!A-Za-z0-9_]*) echo "FAIL 库名或用户名含非法字符：$v"; exit 1 ;;
+  esac
+done
+
 cleanup() {
   docker exec "$PG" rm -f "$DUMP" >/dev/null 2>&1
   docker exec "$PG" psql -U "$DB_USER" -d postgres -c "set client_min_messages=warning" \
@@ -35,7 +42,8 @@ snapshot() {
     select string_agg(format('select %L t, count(*) c, coalesce(sum(hashtext(x::text)),0) h from %I x', table_name, table_name), ' union all ' order by table_name)
     from information_schema.tables where table_schema='public' and table_type='BASE TABLE'" 2>/dev/null) || return 1
   [ -n "$sql" ] || return 1
-  docker exec "$PG" psql -U "$DB_USER" -d "$1" -tAc "$sql" 2>/dev/null | sort
+  # 逐表 SQL 走标准输入，不进 argv：表名数量多时不会撞命令行长度上限
+  printf '%s\n' "$sql" | docker exec -i "$PG" psql -U "$DB_USER" -d "$1" -tA -f - 2>/dev/null | sort
 }
 
 # 1) 导出前快照 + 导出并校验备份文件可读（与 01-db-backup.sh 相同口径）
