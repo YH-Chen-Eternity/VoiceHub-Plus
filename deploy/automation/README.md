@@ -253,7 +253,7 @@ unset TENCENTCLOUD_SECRET_ID TENCENTCLOUD_SECRET_KEY     # 用完清除
 | --- | --- | --- |
 | 应用存活 | 直连 `GET 127.0.0.1:3000/api/health` 连续失败 ≥ `VH_MAX_FAILS`（默认 2 次） | `docker restart voicehub`；容器不存在则 `compose up -d voicehub`；重启后 120s 内复检并告警 |
 | 重启风暴保护 | 距上次自动重启 < `VH_RESTART_COOLDOWN`（默认 300s） | 跳过重启，仅记录 |
-| **WAF 入口可达** | 经 tengine 访问 `https://$VH_SITE_HOST/api/health`（`--resolve` 固定回源 `127.0.0.1`，证书仍按域名校验）连续失败 ≥ `VH_WAF_MAX_FAILS`（默认 3 次）且**应用直连健康** | `docker restart safeline-tengine`，恢复后复检并告警；若应用直连同时异常，则交由应用恢复逻辑处理，不重复动作 |
+| **WAF 入口可达** | 经 tengine 访问 `https://$VH_SITE_HOST/api/health`（`--resolve` 固定回源 `127.0.0.1`，证书仍按域名校验；端口默认 443，可用 `VH_WAF_PORT` 指定）连续失败 ≥ `VH_WAF_MAX_FAILS`（默认 3 次）且**应用直连健康** | `docker restart safeline-tengine`，恢复后复检并告警；若应用直连同时异常，则交由应用恢复逻辑处理，不重复动作 |
 | **WAF 重启风暴保护** | 距上次重启 tengine < `VH_WAF_RESTART_COOLDOWN`（默认 600s） | 跳过重启，仅记录 |
 | 容器存活 | `voicehub-postgres` / `voicehub-redis` / `voicehub-rewriter` / `safeline-{tengine,detector,mgt,chaos,pg,luigi,fvm}` 非 running；容器不存在（未安装）则跳过不告警 | `docker start`，失败再走对应 compose（`VH_HOME` 或 `VH_SAFELINE_HOME`） |
 | **内存占用** | 物理内存使用率 ≥ `VH_MEM_MAX_PERCENT`（默认 85%），同一告警在 `VH_MEM_ALERT_COOLDOWN`（默认 1800s）内只发一次 | 记录占用前五容器并告警，**不重启**（高水位常为持续状态，置 RC=1 会掩盖真正的故障信号） |
