@@ -255,7 +255,7 @@ unset TENCENTCLOUD_SECRET_ID TENCENTCLOUD_SECRET_KEY     # 用完清除
 | **WAF 重启风暴保护** | 距上次重启 tengine < `VH_WAF_RESTART_COOLDOWN`（默认 600s） | 跳过重启，仅记录 |
 | 容器存活 | `voicehub-postgres` / `voicehub-redis` / `voicehub-rewriter` / `safeline-{tengine,detector,mgt,chaos,pg,luigi,fvm}` 非 running；容器不存在（未安装）则跳过不告警 | `docker start`，失败再走对应 compose（`VH_HOME` 或 `VH_SAFELINE_HOME`） |
 | **内存占用** | 物理内存使用率 ≥ `VH_MEM_MAX_PERCENT`（默认 85%），同一告警在 `VH_MEM_ALERT_COOLDOWN`（默认 1800s）内只发一次 | 记录占用前五容器并告警，**不重启**（高水位常为持续状态，置 RC=1 会掩盖真正的故障信号） |
-| 磁盘占用 | 分区 ≥ `VH_DISK_MAX_PERCENT`（默认 90%）；分区由 `VH_DISK_MOUNT_POINT` 指定，默认 `/` | 清理悬空镜像与构建缓存；清理后仍超阈值或清理失败置 RC=1；告警在 `VH_DISK_ALERT_COOLDOWN`（默认 3600s）内只发一次 |
+| 磁盘占用 | 分区 ≥ `VH_DISK_MAX_PERCENT`（默认 90%）；分区由 `VH_DISK_MOUNT_POINT` 指定，默认 `/` | 清理悬空镜像与构建缓存（**每轮都会执行**，只有告警邮件受冷却限制）；清理后仍超阈值或清理失败置 RC=1；邮件在 `VH_DISK_ALERT_COOLDOWN`（默认 3600s）内只发一次 |
 
 > **为什么需要单独探测 WAF 入口**：应用健康检查直连 `127.0.0.1:3000`，绕过了 tengine。若 tengine 进程存活但内部转发异常，应用探针仍返回 200，而用户已无法访问站点。故额外增加「经 WAF 回源」的探测，两条探针互补：应用探针管应用本体，WAF 探针管入口链路。
 
