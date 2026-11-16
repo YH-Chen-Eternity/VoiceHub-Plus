@@ -873,3 +873,23 @@ AST 普查器枚举危险调用点与请求源，按风险类别分诊，并与�
 - dev 环境 Playwright 探测 `/`、`/login`、`/forgot-password`、`/reset-password`、`/legal/privacy`：0 水合告警、0 控制台错误。
 - 受保护路由（未登录直达 `/ops-board` 等）仍会打一条 `Hydration completed but contains mismatches`：服务端按既有设计不做鉴权渲染、客户端守卫再跳登录页，属既有行为（改动前的镜像同样复现），本次未改动。
 - 全量单测 585/585 通过；`nuxt build` 通过。
+
+### 10.27 听歌识曲麦克风被安全策略阻断，识曲稳定性补齐（2026-11-16）
+
+**现象**：点歌页「听歌识曲」点开即失败，浏览器直接报权限拒绝，连授权弹窗都不出现。
+
+**根因**：`deploy/nginx/voicehub.conf` 的 `Permissions-Policy` 把 `microphone` 设成 `()`，等于对本站所有帧禁用麦克风，`getUserMedia` 必然抛 `NotAllowedError`。
+
+**改法**（移植上游 `6aeb971` / #681）
+
+- `Permissions-Policy` 改为 `microphone=(self)`：本站可用，跨源页面仍禁用。
+- `public/audio-match/rec.js`：录音缓冲区按剩余长度截断写入，避免采样数不是整块时越界丢数据；补 `stop` 指令与实际采样率换算。
+- `public/audio-match/afp.js`：指纹生成的稳定性修复。
+- `RequestForm.vue`：把 `getUserMedia` 提前到点击事件内（先授权、再加载脚本），失败按 `NotAllowedError` / `NotFoundError` / `NotReadableError` 分别提示；会话与录音都加 id 校验，关闭重开、停止重录时丢弃上一轮排队的消息；离线重采样到 8kHz 后再生成指纹；请求加 20s 超时与 `AbortController`。
+- 中英文文案补 `microphonePermissionDenied` / `microphoneNotFound` / `microphoneBusy`，`audioMatchInitFailed` 改为不误导的「请重试」；顺带补齐英文缺失的 `selfLikeDisabled`。
+
+**验证**
+
+- 新增 `tests/frontend/audio-match.test.ts`（40 项）：Worklet 采样率与末尾采样、会话隔离、错误分类、词典键一致、脚本/模板可编译。
+- 全量单测 625/625 通过；`nuxt build` 通过。
+- 无头浏览器 + 伪麦克风实测：点开弹窗 → 麦克风已连接 → 开始识曲 → 录音 → 生成指纹，全程无控制台错误。
