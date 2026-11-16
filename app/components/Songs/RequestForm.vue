@@ -2166,8 +2166,8 @@ const handleAudioMatchFingerprint = async (recording, recordingId = audioMatchRe
     if (sessionId !== audioMatchSessionId || recordingId !== audioMatchRecordingId) return
     const response = await waitForAudioMatch($fetch('/api/api-enhanced/netease/audio/match', {
       method: 'POST',
+      // 超时统一由外层 waitForAudioMatch 管控，这里只接收取消信号，避免两套定时器
       signal: request.signal,
-      timeout: 20000,
       retry: 0,
       body: {
         duration: AUDIO_MATCH_DURATION,

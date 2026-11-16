@@ -1,5 +1,6 @@
 /* AudioWorklet 处理器必须通过独立模块加载。 */
 // sampleRate 是 AudioWorkletGlobalScope 的内置只读全局（当前音频上下文的采样率），无需声明。
+// duration 由主线程传入，单位为秒。
 class TimedRecorder extends AudioWorkletProcessor {
   constructor(options) {
     super()

@@ -504,8 +504,8 @@ test('关闭弹窗取消在途识别请求', async () => {
   await api.openAudioMatchModal()
   const matching = api.handleAudioMatchFingerprint(new Float32Array(144000))
   await new Promise(setImmediate)
-  const options = calls.requests[0][1] as { signal?: AbortSignal; timeout?: number; retry?: number }
-  assert.equal(options.timeout, 20000)
+  const options = calls.requests[0][1] as { signal?: AbortSignal; retry?: number }
+  // 超时统一由 waitForAudioMatch 管控，请求本身只接取消信号
   assert.equal(options.retry, 0)
   await api.closeAudioMatchModal()
   assert.equal(options.signal?.aborted, true)
