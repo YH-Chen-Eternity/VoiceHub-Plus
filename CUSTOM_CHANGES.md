@@ -937,3 +937,29 @@ AST 普查器枚举危险调用点与请求源，按风险类别分诊，并与�
   - 旧镜像：请求体 `turnstileToken: ""`，返回 400 `AUTH_CAPTCHA_REQUIRED`，复现线上现象；
   - 新镜像（正常网络 + 立即点击）：请求体带真实 token，返回 200 进入第二步。
 - 全量单测 631/631 通过；eslint 0 error。
+
+### 10.30 找回密码第一步永远「请完成人机验证」（2026-11-16）
+
+**现象**：找回密码页人机验证要么不出现，要么显示「验证失败 / 疑难排解」，点「下一步」后端回「请完成人机验证」；登录页同样配置却一切正常。
+
+**根因**：生产链路里有一层 `voicehub-rewriter`（node 反代），会给页面注入 `/__vh.js`，其中自带一套 Turnstile 兜底实现，与 Vue 里的 `TurnstileWidget` 抢同一个 sitekey：
+
+1. `tsInit()` 只对 `/forgot-password`、`/change-password`、`/reset-password`、`/account` 生效（**不含 `/login`**，这就是登录页一直正常的原因）。它找不到页面上的验证码字段时，会自己插一个 `#vh-ts-host` 再 `turnstile.render`，于是同一页面存在两个 widget，Cloudflare 侧报 `600010` / `300010`、控制台出现 `Turnstile already has been loaded`。
+2. 更致命的是它劫持了 `window.fetch`：`POST /api/auth/forgot-password` 时用兜底 widget 的 token 调 `withToken(init, tk)` 覆盖请求体。前端组件其实已经拿到了正确 token，但兜底 widget 没被用户操作过、`tsGet()` 4 秒超时后返回空串，**请求体的 `turnstileToken` 被改写成 `""`**，后端自然判定「请完成人机验证」。
+3. 兜底的 `error-callback` 会往页面里插 `#vh-ts-err`「人机验证加载失败，请刷新页面后重试」，也就是用户截图里那句提示。
+
+**改法**
+
+- `deploy/rewriter/app-rewriter.js`：`tsInit()` 直接返回 `false`，兜底不再初始化、不再插入 `#vh-ts-host`；`fetch` 拦截分支去掉 `withToken`，不再覆盖前端已带上的 token（保留原有 HMAC 签名头）。生产已热更并重启 rewriter。
+- `forgot-password.vue`：控件改成 `v-if="showTurnstile" v-show="step === 1"`，步骤切换只隐藏不卸载，避免反复销毁让 widget 失联；进入第二步只清 token，退回第一步再 `reset()`；失败分支 `await nextTick()` 后再 reset，与登录页 `LoginForm` 写法一致。
+- `TurnstileWidget.vue`：保持原实现不动，仅在 `error-callback` 打印 Cloudflare 错误码。
+- `useSiteConfig.js`：`/api/site-config` 拉取失败时不再把 `isLoaded` 置真（之前一次 403 就会让验证码开关整个会话失效），改为记录失败时间、30 秒冷却后允许重试，错误信息带上 HTTP 状态码。
+
+**验证**
+
+- 生产复核：页面只剩一个 Vue 控件（`cf-turnstile-response` 计数 1），`#vh-ts-host` 与 `#vh-ts-err` 均已消失，`__vh.js` 不再含兜底初始化。
+- 全量单测 631/631 通过；`eslint` 0 error；`node --check` 通过。
+
+**遗留**
+
+- 该兜底原本是为「前端没有验证码控件」的老页面准备的，现在前端已全覆盖，建议后续整体移除 `tsInit` 相关代码，而不是长期靠提前 return 关闭。

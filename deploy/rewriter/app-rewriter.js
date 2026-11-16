@@ -1100,6 +1100,8 @@ function mountTs(key){
 }
 function tsInit(){
   if(tsReady)return tsReady;
+  // 前端页面自带 Turnstile 组件，兜底不再初始化，避免与 Vue 控件重复 render
+  tsReady=Promise.resolve(false);return tsReady;
   var path=location.pathname;
   if(path!=='/forgot-password'&&path!=='/change-password'&&path!=='/reset-password'&&path!=='/account'){tsReady=Promise.resolve(false);return tsReady}
   tsReady=fetch('/api/site-config',{credentials:'same-origin'}).then(function(r){return r.json()}).then(function(cfg){
@@ -1135,7 +1137,8 @@ window.fetch=function(input,init){
   if(!u||u.origin!==location.origin||u.pathname.indexOf('/api/')!==0)return of.apply(window,arguments);
   var method=(init&&init.method)||(input&&input.method)||'GET';
   if((u.pathname==='/api/auth/forgot-password'||u.pathname==='/api/auth/change-password'||u.pathname==='/api/auth/reset-password')&&String(method).toUpperCase()==='POST'){
-    return tsGet().then(function(tk){return send(input,withToken(init,tk),u,method)});
+    // 不再用兜底 token 覆盖前端已带上的 turnstileToken（被覆盖成空串会让后端报「请完成人机验证」）
+    return send(input,init,u,method);
   }
   return send(input,init,u,method).then(function(res){
     try{

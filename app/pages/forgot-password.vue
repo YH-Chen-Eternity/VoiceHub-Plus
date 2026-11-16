@@ -69,8 +69,10 @@
             <span class="error-message">{{ error }}</span>
           </div>
 
-          <!-- 第一步验完即签发票据，第二步凭票通行，避免同一个一次性 token 被核销两次 -->
-          <TurnstileWidget v-if="showTurnstile && step === 1" ref="turnstileRef" v-model="turnstileToken" />
+          <!-- 第一步验完即签发票据，第二步凭票通行，避免同一个一次性 token 被核销两次。
+               控件只在配置就绪时挂载一次，步骤切换用 v-show 隐藏而不卸载：
+               反复销毁会让 Cloudflare 侧 widget 失联（300010），重渲染也更容易失败 -->
+          <TurnstileWidget v-if="showTurnstile" v-show="step === 1" ref="turnstileRef" v-model="turnstileToken" />
 
           <button :disabled="loading" class="submit-btn" type="submit">
             <svg v-if="loading" class="loading-spinner" viewBox="0 0 24 24">
@@ -98,7 +100,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed, watch } from 'vue'
+import { ref, onMounted, computed, watch, nextTick } from 'vue'
 import TurnstileWidget from '~/components/Auth/TurnstileWidget.vue'
 import { useLocale } from '~/utils/locale'
 
@@ -220,13 +222,13 @@ const handleSubmit = async () => {
 
     if (response.success) {
       if (response.step === 2) {
-        // 进入补全邮箱步骤；Turnstile token 已在服务端核销，必须换新
+        // 进入补全邮箱步骤：token 已在服务端核销，清掉引用；控件保持挂载不重建，
+        // 等退回第一步时再 reset 换新，避免反复销毁/渲染验证码控件
         step.value = 2
         maskedEmail.value = response.maskedEmail || ''
         resetTicket.value = response.ticket || ''
         waitingCaptcha.value = false
         turnstileToken.value = ''
-        turnstileRef.value?.reset()
       } else if (response.step === 3) {
         // 成功发送邮件
         success.value = true
@@ -243,7 +245,9 @@ const handleSubmit = async () => {
     }
     error.value = localizeServerError(err, locale.value.requestFailed)
     turnstileToken.value = ''
-    turnstileRef.value?.reset()
+    // 与登录页一致：失败后换一张新验证，避免拿已核销的 token 再提交
+    await nextTick()
+    turnstileRef.value?.reset?.()
   } finally {
     loading.value = false
   }
@@ -254,7 +258,7 @@ const goBack = () => {
   resetTicket.value = ''
   maskedEmail.value = ''
   turnstileToken.value = ''
-  turnstileRef.value?.reset()
+  turnstileRef.value?.reset?.()
 }
 </script>
 

@@ -85,6 +85,10 @@ const SITE_CONFIG_DEFAULTS = {
 const useSiteConfigState = () => useState('site-config', () => ({ ...SITE_CONFIG_DEFAULTS }))
 const useSiteConfigLoaded = () => useState('site-config-loaded', () => false)
 const useSiteConfigLoading = () => useState('site-config-loading', () => false)
+// 上次拉取失败的时间戳：WAF 会对短时间内的重复请求返回 403，
+// 失败后进入冷却，避免每个页面挂载都重试把限流撞得更狠
+const useSiteConfigFailedAt = () => useState('site-config-failed-at', () => 0)
+const SITE_CONFIG_RETRY_COOLDOWN = 30 * 1000
 
 const getImageDisplayUrl = (url) => {
   const normalizedUrl = typeof url === 'string' ? url.trim() : ''
@@ -103,6 +107,7 @@ export const useSiteConfig = () => {
   const siteConfig = useSiteConfigState()
   const isLoaded = useSiteConfigLoaded()
   const isLoading = useSiteConfigLoading()
+  const failedAt = useSiteConfigFailedAt()
 
   // 供 SSR 预取灌入站点配置（主题应用受 applyThemeConfig 的 import.meta.server 守卫，须在客户端单独触发）
   const setSiteConfigData = (data) => {
@@ -119,7 +124,8 @@ export const useSiteConfig = () => {
 
       const response = await fetch('/api/site-config')
       if (!response.ok) {
-        throw new Error('获取站点配置失败')
+        // 403 多为 WAF 对短时间重复请求的限流，不是配置本身有问题
+        throw new Error(`获取站点配置失败（HTTP ${response.status}）`)
       }
 
       const data = await response.json()
@@ -176,7 +182,10 @@ export const useSiteConfig = () => {
         defaultTheme: 'System',
         enabledThemes: JSON.stringify(['System', 'ClassicDark', 'ClassicLight', 'ModernLight'])
       }
-      isLoaded.value = true
+      // 不置 isLoaded：本次先用默认值把页面撑起来，但允许冷却后重新拉取。
+      // 之前这里直接把 isLoaded 置真，一次 403 就会让验证码等配置在整个会话里永久失效
+      // （表现为控件不出现，提交时后端回「请完成人机验证」）。
+      failedAt.value = Date.now()
     } finally {
       isLoading.value = false
     }
@@ -295,14 +304,16 @@ export const useSiteConfig = () => {
 
   // 初始化配置（仅在客户端执行）
   const initSiteConfig = async () => {
-    if (typeof window !== 'undefined' && !isLoaded.value) {
-      await fetchSiteConfig()
-    }
+    if (typeof window === 'undefined' || isLoaded.value) return
+    // 刚失败过就等冷却，避免多个页面挂载时的并发重试把 WAF 限流撞得更狠
+    if (failedAt.value && Date.now() - failedAt.value < SITE_CONFIG_RETRY_COOLDOWN) return
+    await fetchSiteConfig()
   }
 
   // 刷新配置
   const refreshSiteConfig = async () => {
     isLoaded.value = false
+    failedAt.value = 0
     await fetchSiteConfig()
   }
 

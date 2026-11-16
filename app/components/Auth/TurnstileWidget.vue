@@ -56,7 +56,9 @@ function renderWidget() {
       callback: (token: string) => {
         emit('update:modelValue', token)
       },
-      'error-callback': () => {
+      'error-callback': (code: string) => {
+        // 控件文案只有「验证失败」，把 Cloudflare 的错误码落到控制台便于定位
+        console.warn('[turnstile] error code:', code)
         emit('update:modelValue', '')
       },
       'expired-callback': () => {
