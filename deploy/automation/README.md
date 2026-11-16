@@ -4,6 +4,8 @@
 
 **核心约定：仓库里没有任何凭据。** 密钥、口令、令牌、私钥、站点标识全部通过外部配置文件或环境变量注入，脚本内只有占位符和默认值。配置方法见第 2、5 节。**凭据边界**：站内 SMTP 账号/授权码由管理员在 VoiceHub 后台「SMTP 设置」维护、存于应用数据库；自动化侧仅 `ATTACK_LOG_TOKEN`（与应用 env 同值）放在 `/etc/voicehub/automation.env`（`chmod 600`）或以环境变量传入。这些凭据只存在于受控载体（应用数据库 / env 600 文件），**都不写入仓库、不进版本控制、不写进任何脚本或模板、不出现在日志**，本目录下只有占位符与路径引用。
 
+**同类约定：本目录只描述通用部署方式。** 域名、IP、主机名、镜像 tag、账号、资源规格等具体环境信息一律以占位符（`<your-domain>`、`example.com`）表示；文档示例与提交说明也不记录任何一次真实部署的实况数据。需要与环境相关的行为，一律做成配置项由部署方注入。
+
 ---
 
 ## 1. 任务一览
@@ -251,11 +253,11 @@ unset TENCENTCLOUD_SECRET_ID TENCENTCLOUD_SECRET_KEY     # 用完清除
 | --- | --- | --- |
 | 应用存活 | 直连 `GET 127.0.0.1:3000/api/health` 连续失败 ≥ `VH_MAX_FAILS`（默认 2 次） | `docker restart voicehub`；容器不存在则 `compose up -d voicehub`；重启后 120s 内复检并告警 |
 | 重启风暴保护 | 距上次自动重启 < `VH_RESTART_COOLDOWN`（默认 300s） | 跳过重启，仅记录 |
-| **WAF 入口可达** | 经 tengine 访问 `https://$VH_SITE_HOST/api/health`（`--resolve` 固定回源 `127.0.0.1`，证书仍按域名校验）连续失败 ≥ `VH_WAF_MAX_FAILS`（默认 3 次）且**应用直连健康** | `docker restart safeline-tengine`，恢复后复检并告警；若应用直连同时异常，则交由应用恢复逻辑处理，不重复动作 |
+| **WAF 入口可达** | 经 tengine 访问 `https://$VH_SITE_HOST/api/health`（`--resolve` 固定回源 `127.0.0.1`，证书仍按域名校验；端口默认 443，可用 `VH_WAF_PORT` 指定）连续失败 ≥ `VH_WAF_MAX_FAILS`（默认 3 次）且**应用直连健康** | `docker restart safeline-tengine`，恢复后复检并告警；若应用直连同时异常，则交由应用恢复逻辑处理，不重复动作 |
 | **WAF 重启风暴保护** | 距上次重启 tengine < `VH_WAF_RESTART_COOLDOWN`（默认 600s） | 跳过重启，仅记录 |
 | 容器存活 | `voicehub-postgres` / `voicehub-redis` / `voicehub-rewriter` / `safeline-{tengine,detector,mgt,chaos,pg,luigi,fvm}` 非 running；容器不存在（未安装）则跳过不告警 | `docker start`，失败再走对应 compose（`VH_HOME` 或 `VH_SAFELINE_HOME`） |
 | **内存占用** | 物理内存使用率 ≥ `VH_MEM_MAX_PERCENT`（默认 85%），同一告警在 `VH_MEM_ALERT_COOLDOWN`（默认 1800s）内只发一次 | 记录占用前五容器并告警，**不重启**（高水位常为持续状态，置 RC=1 会掩盖真正的故障信号） |
-| 磁盘占用 | 根分区 ≥ `VH_DISK_MAX_PERCENT`（默认 90%） | 清理悬空镜像与构建缓存并告警 |
+| 磁盘占用 | 分区 ≥ `VH_DISK_MAX_PERCENT`（默认 90%）；分区由 `VH_DISK_MOUNT_POINT` 指定，默认 `/` | 清理悬空镜像与构建缓存（**每轮都会执行**，只有告警邮件受冷却限制）；清理后仍超阈值或清理失败置 RC=1；邮件在 `VH_DISK_ALERT_COOLDOWN`（默认 3600s）内只发一次 |
 
 > **为什么需要单独探测 WAF 入口**：应用健康检查直连 `127.0.0.1:3000`，绕过了 tengine。若 tengine 进程存活但内部转发异常，应用探针仍返回 200，而用户已无法访问站点。故额外增加「经 WAF 回源」的探测，两条探针互补：应用探针管应用本体，WAF 探针管入口链路。
 

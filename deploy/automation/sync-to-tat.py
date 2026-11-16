@@ -36,7 +36,7 @@ COMMANDS = [
 GEO_COMMAND = ("VoiceHub-放行IP库月度更新", "06-geo-allow-update.sh", 600)
 
 # (触发器名称, 对应命令名, cron，按 Asia/Shanghai 北京时间)
-# 注意：触发器名与命令名不一定相同，以生产现有名称为准，避免同步时重复创建。
+# 注意：触发器名与命令名不一定相同，以目标账号下已存在的名称为准，避免同步时重复创建。
 INVOKERS = [
     ("VoiceHub-数据库每日备份", "VoiceHub-每日数据库备份", "15 3 * * *"),
     ("VoiceHub-COS异地备份", "VoiceHub-COS异地备份", "30 3 * * *"),
@@ -151,7 +151,7 @@ def main():
         print_invokers(args.include_geo)
         return
 
-    print("\n[apply] 即将写入生产 TAT。请确认目标主机已完成第 5 节 Step 1/2："
+    print("\n[apply] 即将写入目标 TAT 环境。请确认目标主机已完成第 5 节 Step 1/2："
           "存在 /etc/voicehub/automation.env 且已按实际环境填写，否则脚本会使用中性默认值。")
     for action, name, cid, raw, timeout in plan:
         sha = hashlib.sha256(raw).hexdigest()

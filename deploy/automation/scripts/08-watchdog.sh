@@ -19,16 +19,79 @@ RESTART_AT_FILE="$STATE_DIR/last-restart"
 MAX_FAILS=${VH_MAX_FAILS:-2}
 COOLDOWN=${VH_RESTART_COOLDOWN:-300}
 DISK_MAX=${VH_DISK_MAX_PERCENT:-90}
+DISK_ALERT_COOLDOWN=${VH_DISK_ALERT_COOLDOWN:-3600}
+DISK_ALERT_AT="$STATE_DIR/disk-alert-at"
+DISK_MOUNT=${VH_DISK_MOUNT_POINT:-/}
+# 先规范化为无尾斜杠形式（根目录除外），避免 /mnt/data/ 与 /mnt/data 被当成两个值
+while [[ "$DISK_MOUNT" == */ && "$DISK_MOUNT" != "/" ]]; do DISK_MOUNT=${DISK_MOUNT%/}; done
+# 只允许绝对路径与 [A-Za-z0-9._/-]，且不得含 ..、连续斜杠、必须真实存在：
+# 否则 df 可能落到意外分区、被元字符干扰，或静默失败
+if [[ ! "$DISK_MOUNT" =~ ^/[A-Za-z0-9._/-]*$ ]] || [[ "$DISK_MOUNT" == *..* ]] || [[ "$DISK_MOUNT" == *//* ]] || [ ! -d "$DISK_MOUNT" ]; then
+  printf 'VH_DISK_MOUNT_POINT 需为存在的绝对路径、仅含字母数字/._- 且不含 ..（当前：%s），本轮跳过磁盘检查\n' "$DISK_MOUNT" >&2
+  DISK_MOUNT=""
+fi
 MEM_MAX=${VH_MEM_MAX_PERCENT:-85}
 MEM_ALERT_COOLDOWN=${VH_MEM_ALERT_COOLDOWN:-1800}
 MEM_ALERT_AT="$STATE_DIR/mem-alert-at"
 # WAF 入口（经 tengine）探测：与应用直连互补，用于发现「应用活着但 WAF 挂了」的盲区
-WAF_HOST=${VH_SITE_HOST:-}
-if [ -z "$WAF_HOST" ] && [ -n "${VH_SITE_URL:-}" ]; then
-  WAF_HOST=${VH_SITE_URL#https://}; WAF_HOST=${WAF_HOST#http://}; WAF_HOST=${WAF_HOST%%/*}
+#
+# 主机名必须规范化后再用：waf_ok() 里拼的是 --resolve "host:443:127.0.0.1"，
+# 若 host 自带端口（VH_SITE_HOST 误写成 example.com:8443）或带路径，拼出来会变成
+# 四段式非法值，curl 直接失败，导致「WAF 探测永远不可达」→ 每轮都误重启 tengine。
+# 这里统一剥离协议、路径、端口与空白；IPv6 因 --resolve 语法差异不在此支持。
+normalize_waf_host() {
+  local h=${1:-}
+  h=${h#https://}; h=${h#http://}
+  h=${h%%/*}
+  # IPv6 字面量（[::1] 形式，或裸地址含两个以上冒号）直接放弃：
+  # --resolve 的 IPv6 写法是 [host]:port:addr，与这里的三段式不同，本脚本只处理 IPv4/域名。
+  # 若不在这里拦下，2001:db8::1 会被下面的 *:* 截成 "2001"，变成一个看似合法的主机名。
+  case "$h" in
+    \[*\]*|*:*:*) return ;;
+  esac
+  case "$h" in
+    *:*) h=${h%%:*} ;;
+  esac
+  h=$(printf '%s' "$h" | tr -d '[:space:]')
+  # 去掉末尾点：example.com. 是合法的 FQDN 绝对写法，与 example.com 等价，
+  # 留着会让白名单判为非法、探测整段被跳过
+  printf '%s' "${h%.}"
+}
+WAF_HOST=$(normalize_waf_host "${VH_SITE_HOST:-}")
+[ -z "$WAF_HOST" ] && WAF_HOST=$(normalize_waf_host "${VH_SITE_URL:-}")
+# normalize 对 IPv6 字面量返回空；单独提示一句，避免运维以为是配置写错
+case "${VH_SITE_HOST:-${VH_SITE_URL:-}}" in
+  \[*\]*|*:*:*) printf 'WAF_HOST 为 IPv6 字面量（%s），--resolve 三段式语法不支持，本轮跳过 WAF 探测\n' "${VH_SITE_HOST:-${VH_SITE_URL:-}}" >&2 ;;
+esac
+# 主机名白名单按 RFC 1123 逐标签校验：字母数字开头结尾，中间可含连字符，标签间用点分隔。
+# 允许单标签（localhost / 内网短名）与 IPv4（点分数字天然满足）。
+# 不含下划线、不以连字符开头结尾、不含空标签（连续点）：这些形式都拿不到 TLS 证书，
+# 探测必然校验失败，连续失败会累加到阈值并误重启 tengine——正是本段要消除的故障模式。
+# 内网命名请改用短名或 IPv4；确需自签证书时改用 VH_WAF_URL 直接指定完整地址。
+_LABEL='[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?'
+if [ -n "$WAF_HOST" ] && ! printf '%s' "$WAF_HOST" | grep -qE "^$_LABEL(\\.$_LABEL)*$"; then
+  printf 'WAF_HOST 非法（%s），本轮跳过 WAF 探测\n' "$WAF_HOST" >&2
+  WAF_HOST=""
+fi
+# 探测端口：--resolve 的端口必须与 URL 端口一致，非 443 部署需显式指定
+WAF_PORT=${VH_WAF_PORT:-443}
+if ! [[ "$WAF_PORT" =~ ^[0-9]+$ ]] || [ "$WAF_PORT" -lt 1 ] || [ "$WAF_PORT" -gt 65535 ]; then
+  printf 'VH_WAF_PORT 非法（%s），回退为 443\n' "$WAF_PORT" >&2
+  WAF_PORT=443
 fi
 WAF_URL=${VH_WAF_URL:-}
-if [ -z "$WAF_URL" ] && [ -n "$WAF_HOST" ]; then WAF_URL="https://$WAF_HOST/api/health"; fi
+# URL 里若显式写了端口，以它为准：--resolve 的端口必须与 URL 一致，否则证书/连接必然失败
+if [ -n "$WAF_URL" ]; then
+  url_port=$(printf '%s' "$WAF_URL" | sed -nE 's#^[a-zA-Z]+://[^/:]+:([0-9]+)(/|$).*#\1#p')
+  if [ -n "$url_port" ] && [ "$url_port" != "$WAF_PORT" ]; then
+    printf 'VH_WAF_URL 端口（%s）与 VH_WAF_PORT（%s）不一致，按 URL 的端口探测\n' "$url_port" "$WAF_PORT" >&2
+    WAF_PORT=$url_port
+  fi
+fi
+if [ -z "$WAF_URL" ] && [ -n "$WAF_HOST" ]; then
+  if [ "$WAF_PORT" = "443" ]; then WAF_URL="https://$WAF_HOST/api/health"
+  else WAF_URL="https://$WAF_HOST:$WAF_PORT/api/health"; fi
+fi
 WAF_FAIL_FILE="$STATE_DIR/waf-fail"
 WAF_RESTART_AT_FILE="$STATE_DIR/waf-last-restart"
 WAF_MAX_FAILS=${VH_WAF_MAX_FAILS:-3}
@@ -42,7 +105,10 @@ if [ ! -d "$VH_HOME" ]; then
   printf '%s VH_HOME 不存在：%s，跳过恢复\n' "$TS" "$VH_HOME" >&2
   exit 1
 fi
-mkdir -p "$STATE_DIR" "$(dirname "$LOG")"
+mkdir -p "$STATE_DIR" "$(dirname "$LOG")" || {
+  printf '%s 无法创建状态目录或日志目录（%s / %s），退出\n' "$TS" "$STATE_DIR" "$(dirname "$LOG")" >&2
+  exit 1
+}
 log() { printf '%s %s\n' "$TS" "$*" >> "$LOG"; }
 
 notify() {
@@ -53,7 +119,7 @@ notify() {
 state() { docker inspect -f '{{.State.Status}}' "$1" 2>/dev/null; }
 app_ok() { curl -fsS -m 5 -o /dev/null "$APP_URL"; }
 # 经本地 tengine 走域名访问：--resolve 固定回源到 127.0.0.1，证书仍按域名校验
-waf_ok() { curl -fsS -m 8 --resolve "$WAF_HOST:443:127.0.0.1" -o /dev/null "$WAF_URL"; }
+waf_ok() { curl -fsS -m 8 --resolve "$WAF_HOST:$WAF_PORT:127.0.0.1" -o /dev/null "$WAF_URL"; }
 
 # ---- 1) 应用存活：连续失败达阈值后重启（带冷却，防重启风暴）----
 if app_ok; then
@@ -123,7 +189,8 @@ if [ -n "$WAF_URL" ] && [ -n "$WAF_HOST" ]; then
   else
     wf=$(( $(cat "$WAF_FAIL_FILE" 2>/dev/null || echo 0) + 1 ))
     echo "$wf" > "$WAF_FAIL_FILE"
-    # 只探测一次并复用结果，避免同一轮内多次请求拖长执行时间
+    # 此处重新探测而非复用第 1 段结果：第 1 段可能刚重启过应用，
+    # 需要反映重启之后的真实状态，否则会用旧状态误判 tengine 该不该重启
     a_ok=0; app_ok && a_ok=1
     if [ "$a_ok" -eq 1 ]; then a_desc="健康"; else a_desc="异常"; fi
     log "WAF 入口不可达：$WAF_URL（连续 $wf 次；应用直连 $a_desc）"
@@ -252,23 +319,52 @@ fi
 
 # ---- 5) 磁盘保护：占用超阈值时清理悬空镜像与构建缓存 ----
 # df 输出异常（非纯数字）时跳过，避免 [ -ge ] 语法报错中断脚本
-disk_pct() { df -P / 2>/dev/null | awk 'NR==2 {gsub(/%/, "", $5); print $5}'; }
+# 默认检查 /，但备份与镜像通常落在数据盘，可用 VH_DISK_MOUNT_POINT 指向真实分区
+disk_pct() { [ -n "$DISK_MOUNT" ] || return 0; df -P "$DISK_MOUNT" 2>/dev/null | awk 'NR==2 {gsub(/%/, "", $5); print $5}'; }
 used=$(disk_pct)
-if [[ "${used:-}" =~ ^[0-9]+$ ]] && [ "$used" -ge "$DISK_MAX" ]; then
-  log "根分区占用 ${used}% ≥ ${DISK_MAX}%，清理悬空镜像与构建缓存"
+if [ -n "$DISK_MOUNT" ] && [[ "${used:-}" =~ ^[0-9]+$ ]] && [ "$used" -ge "$DISK_MAX" ]; then
+  log "分区 $DISK_MOUNT 占用 ${used}% ≥ ${DISK_MAX}%，清理悬空镜像与构建缓存"
   prune_rc=0
-  docker image prune -f >/dev/null 2>&1 || prune_rc=1
-  docker builder prune -f >/dev/null 2>&1 || prune_rc=1
+  # 保留失败时的错误上下文：全丢到 /dev/null 会让"清理失败"变成不可排查的黑盒。
+  # 每行加前缀写入，保留结构（哪一层、什么原因各占一行）；超过 50 行时截断并注明，
+  # 避免大量悬空层时把日志刷满。
+  if ! prune_out=$(docker image prune -f 2>&1); then
+    prune_rc=1
+    n=0
+    while IFS= read -r line; do
+      n=$((n+1))
+      if [ "$n" -gt 50 ]; then log "镜像清理失败：（输出超过 50 行，其余省略）"; break; fi
+      log "镜像清理失败：$line"
+    done <<< "$prune_out"
+  fi
+  if ! prune_out=$(docker builder prune -f 2>&1); then
+    prune_rc=1
+    n=0
+    while IFS= read -r line; do
+      n=$((n+1))
+      if [ "$n" -gt 50 ]; then log "构建缓存清理失败：（输出超过 50 行，其余省略）"; break; fi
+      log "构建缓存清理失败：$line"
+    done <<< "$prune_out"
+  fi
   after=$(disk_pct)
   [[ "${after:-}" =~ ^[0-9]+$ ]] || after=$used
-  # 清理是预防性维护：只有清理命令失败、或清理后仍超阈值才算故障（RC=1），
-  # 否则每次清理都会让监控误报失败
+  # 清理失败、或清理后仍超阈值都置 RC=1：后者意味着清理无效、磁盘仍将见底，
+  # 属于需要人工介入的真实故障，不做降级（邮件侧已有冷却，不会刷屏）
   if [ "$prune_rc" -ne 0 ] || [ "$after" -ge "$DISK_MAX" ]; then
     RC=1
   fi
-  notify "[VoiceHub] 磁盘占用告警" "时间：$TS
-根分区占用：${used}% → 清理后 ${after}%（阈值 ${DISK_MAX}%）
+  # 清理动作每次都做，但告警邮件按冷却发送：磁盘长期高水位时否则每 2 分钟一封
+  now=$(date +%s)
+  last=$(cat "$DISK_ALERT_AT" 2>/dev/null || echo 0)
+  if [ $((now - last)) -ge "$DISK_ALERT_COOLDOWN" ]; then
+    echo "$now" > "$DISK_ALERT_AT"
+    notify "[VoiceHub] 磁盘占用告警" "时间：$TS
+分区：$DISK_MOUNT
+占用：${used}% → 清理后 ${after}%（阈值 ${DISK_MAX}%）
 已清理悬空镜像与构建缓存，请检查大文件与备份保留策略"
+  else
+    log "磁盘占用 ${used}% ≥ ${DISK_MAX}%（距上次告警不足 ${DISK_ALERT_COOLDOWN}s，不重复发送）"
+  fi
 fi
 
 exit "$RC"
