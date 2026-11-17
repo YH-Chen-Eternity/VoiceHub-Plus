@@ -1,4 +1,5 @@
 import { parseTTML, parseYrc } from '@applemusic-like-lyrics/lyric'
+import { normalizeLyricText } from './lyricNormalize'
 import { cleanTTMLTranslations, parseQRCLyric, parseSmartLrc } from './lyricParser'
 
 const MIN_CONTENT_SCORE = 0.82
@@ -46,12 +47,8 @@ export type LyricMatchDecision = {
   metrics: LyricMatchMetrics
 }
 
-/** 归一化歌词正文，仅用于跨来源一致性比较 */
-const normalizeText = (text: string): string =>
-  text
-    .normalize('NFKC')
-    .toLowerCase()
-    .replace(/[\p{P}\p{S}\s]+/gu, '')
+/** 归一化歌词正文，仅用于跨来源一致性比较（繁→简统一见 lyricNormalize） */
+const normalizeText = normalizeLyricText
 
 /** 将不同解析器的行结构转为一致的比较结构 */
 const toComparableLines = (lines: any[]): ComparableLine[] =>

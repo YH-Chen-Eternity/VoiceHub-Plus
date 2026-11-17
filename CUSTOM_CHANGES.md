@@ -990,3 +990,23 @@ AST 普查器枚举危险调用点与请求源，按风险类别分诊，并与�
 - 本地起独立实例（`PORT=3102`，指向上游 3000）：页面 200、`__vh.js` 内 `tsInit/tsGet/withToken/vh-ts-host/vh-ts-err/maybeMountTs` 全部 0 处，`hmac/x-vh-sig/__vhTextFix` 各 1 处。
 - 真实浏览器（captcha 已开、sitekey 指向生产）：`.turnstile-widget` 存在且 `cf-turnstile-response` 计数 1，`#vh-ts-host`、`#vh-ts-err` 均不存在，控制台只剩 `110200`（127.0.0.1 未在 Cloudflare 白名单，属预期）。
 - 生产：替换后 `docker restart voicehub-rewriter`，`__vh.js` 14.7KB、版本号 `1jfuu69` 自动变化（`VH_JS_VER` 是内容 hash，缓存自然失效），`/forgot-password`、`/api/site-config` 均 200。
+
+### 11.1 发码按钮条款拦截统一 + 歌词繁简统一（2026-11-17）
+
+**发码按钮死锁（移植上游 `f712329e`）**
+
+- 现象：`legalConsentDisplayMode === 'modal'`（弹窗确认条款）且尚未勾选时，发码按钮 `:disabled="loginTermsBlocked …"` 被永久禁用，但弹窗模式本应在提交时才弹窗确认、不拦截入口，导致无法发码、无法注册/登录。
+- 修复：新增 `legalConsentEntryBlocked = loginTermsBlocked && legalConsentDisplayMode !== 'modal'`，把所有认证入口（发码、提交、OAuth 快捷登录、WebAuthn、OAuth 按钮）的禁用判断统一到该计算属性，消除 5 处内联重复与遗漏。
+- 测试：新增 `tests/frontend/auth-legal-consent-entry.test.ts`（4 项：弹窗不拦截、复选框拦截、未启用/绑定不拦截、发码按钮复用统一条件）。
+
+**歌词跨来源匹配繁简统一（移植上游 `06642eaf` 的核心改动）**
+
+- 现象：同一首歌网易云返回简体、QQ 音乐返回繁体时，`lyricMatchQuality` 的正文相似度会把两者判为内容不一致，影响高阶歌词升级判定。
+- 修复：把归一化抽成纯函数 `app/utils/lyric/lyricNormalize.ts`，在 NFKC / 小写 / 去标点前先做 `toSimplifiedChinese`（复用 `song-name-normalize` 既有实现）；`lyricMatchQuality` 改为引用它，行为不变、可单测。
+- 测试：新增 `tests/frontend/lyric-match-normalize.test.ts`（4 项：繁简一致、标点大小写归一、真实差异不掩盖、空串安全）。
+
+**验证**
+
+- 全量单测 639/639 通过；`eslint` 0 error；`nuxt build` 通过。
+
+
