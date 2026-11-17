@@ -1009,4 +1009,15 @@ AST 普查器枚举危险调用点与请求源，按风险类别分诊，并与�
 
 - 全量单测 639/639 通过；`eslint` 0 error；`nuxt build` 通过。
 
+**修复管理后台「恢复归档」一律 500（服务暂时不可用）**
+
+- 现象：管理员在「社区归档记录」点“恢复”，前端提示“服务暂时不可用，请稍后重试”；服务端日志 `TypeError: Cannot read properties of undefined (reading 'id')`（栈落在 `getReviewableBoardIds`）。
+- 根因：`requireCommunityAdmin(event)` 声明为 `void`（只鉴权、不返回用户），但 `server/api/admin/community/archive/[type]/[id]/restore.post.ts` 写成 `const user = requireCommunityAdmin(event)` 并把 `user` 当 `actor` 传入业务函数，`actor` 恒为 `undefined`，深层读 `undefined.id` 抛错。**所有管理员恢复归档都会失败**，与具体帖子无关。
+- 修复：`requireCommunityAdmin` 改为返回当前用户，与 `requireCommunityReviewer` 对齐（兼容其余 21 个不取返回值的调用点）；`getReviewableBoardIds` 对缺失操作者 fail-closed 抛 401，不再以 TypeError 形式变成 500，也绝不当作“管理员无限制”放行。
+- 测试：新增 `tests/server/community-admin-actor.test.ts`（7 项：原样返回同一 user、超管直通、非管理员 403、未登录 401、管理员无板块限制、缺操作者 401、restore 路由 actor 契约）。
+
+**验证**
+
+- 全量单测 646/646 通过；`eslint` 0 error；`nuxt build` 通过。
+
 

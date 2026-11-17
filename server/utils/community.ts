@@ -55,12 +55,20 @@ export function isCommunityRateLimitExempt(user: any): boolean {
   return !!user && String(user.role || '') === 'CONTRIBUTOR'
 }
 
-export function requireCommunityAdmin(event: H3Event): void {
+/**
+ * 管理端鉴权：校验当前会话是管理员/超管，并返回该用户。
+ *
+ * 注意：必须返回 user（与 requireCommunityReviewer 对齐）。调用方普遍写成
+ * `const user = requireCommunityAdmin(event)` 并把结果当 actor 传给业务函数，
+ * 若这里返回 void，actor 会是 undefined，深层 `user.id` 取属性直接 500。
+ */
+export function requireCommunityAdmin(event: H3Event) {
   const user = event.context.user
   if (!user) throw createApiError(401, 'AUTH_UNAUTHORIZED', '请先登录')
   if (!isCommunityAdmin(user)) {
     throw createApiError(403, 'COMMON_INSUFFICIENT_PERMISSION', '只有管理员可以执行此操作')
   }
+  return user
 }
 
 export function requireCommunityReviewer(event: H3Event) {
@@ -364,6 +372,11 @@ export async function assertCommunityNotMuted(userId: number): Promise<void> {
 
 /** 管理员返回 null（不受限）；审帖员只返回已分配板块，未分配时为空集 */
 export async function getReviewableBoardIds(user: any): Promise<number[] | null> {
+  // fail-closed：操作者缺失时直接拒绝，避免在 user.id 处抛 TypeError 变成 500，
+  // 也绝不能把它当作“管理员无限制”放行
+  if (!user || user.id == null) {
+    throw createApiError(401, 'AUTH_UNAUTHORIZED', '请先登录')
+  }
   if (isCommunityAdmin(user)) return null
   const { communityBoardReviewers } = await import('~/drizzle/schema')
   const rows = await db
