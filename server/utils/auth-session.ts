@@ -108,26 +108,17 @@ export async function createAuthSession(event: H3Event, user: SessionUser, login
   }
 }
 
-export async function ensureAuthSession(event: H3Event, payload: { userId: number; jti: string; exp?: number }) {
+export async function ensureAuthSession(_event: H3Event, payload: { userId: number; jti: string; exp?: number }) {
   const existing = await db.query.authSessions.findFirst({ where: eq(authSessions.id, payload.jti) })
-  if (existing) return existing
 
-  const now = getServerDate()
-  const userAgent = readUserAgent(event)
-  const metadata = parseUserAgent(userAgent)
-  const expiresAt = payload.exp ? getDateFromTimestamp(payload.exp * 1000) : getSessionExpiry()
-  await db.insert(authSessions).values({
-    id: payload.jti,
-    userId: payload.userId,
-    createdAt: now,
-    lastActiveAt: now,
-    expiresAt,
-    ipAddress: getClientIP(event),
-    userAgent,
-    ...metadata,
-    loginMethod: 'legacy'
-  }).onConflictDoNothing()
-  return db.query.authSessions.findFirst({ where: eq(authSessions.id, payload.jti) })
+  // 2026-11-18 安全加固（V-01）：不再为未知 jti 自动补建会话。
+  // 原实现在会话表查不到时，直接拿令牌自带的 userId/jti/exp 插一条 loginMethod='legacy'
+  // 的记录，等于让持有任意签名令牌的请求自证登录态，认证与会话表完全脱钩。
+  // 现在只认服务端签发时（createAuthSession）写入的记录，缺失或归属不符一律无效。
+  if (!existing) return null
+  if (existing.userId !== payload.userId) return null
+
+  return existing
 }
 
 export async function touchAuthSession(sessionId: string, extendExpiry = false) {

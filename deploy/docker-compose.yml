@@ -76,7 +76,7 @@ services:
       - TZ=UTC
       - NODE_ENV=production
       - DATABASE_URL=postgresql://voicehub:${DB_PASSWORD}@postgres:5432/voicehub?sslmode=disable
-      - JWT_SECRET=${JWT_SECRET}
+      - JWT_SECRET=${JWT_SECRET:?请在 .env 中设置至少 32 位的高熵随机 JWT_SECRET}
       - ADMIN_INITIAL_PASSWORD=${ADMIN_INITIAL_PASSWORD:-}
       - REDIS_URL=redis://default:${REDIS_PASSWORD}@redis:6379
       - REDIS_KEY_PREFIX="voicehub:"

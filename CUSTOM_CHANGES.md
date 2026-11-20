@@ -1020,4 +1020,154 @@ AST 普查器枚举危险调用点与请求源，按风险类别分诊，并与�
 
 - 全量单测 646/646 通过；`eslint` 0 error；`nuxt build` 通过。
 
+### 11.2 扫码补发安全加固与前端重试收口（2026-11-17）
 
+**扫码 803 补发改为绑定发起方**
+
+- 风险：`[...path].ts` 的补发原先只按 unikey 建缓存，而该路由匿名可达、unikey 就写在二维码内容里。任何拿到 unikey 的客户端都能在 5 分钟内兑换 MUSIC_U，把上游一次性的 803 变成可反复读取的窗口。
+- 修复：`login/qr/key` 下发 `vh_qr_owner`（`randomBytes(16)`，HttpOnly / SameSite=Lax / Path=/api/api-enhanced/netease / Max-Age=300，已有则不重复下发）；`login/qr/check` 用 `owner + unikey` 组键读写缓存。owner 不匹配或缺失时不缓存也不回放，退回改造前的一次性行为。
+- 跨实例：补发缓存改为「进程内 Map + 配置 `REDIS_URL` 时写 Redis」双写，内存未命中再读 Redis，解决 Vercel / Netlify 多实例下首次 803 与前端重试落在不同实例导致补发失效。Redis 读写在 300ms 内放弃，失败只影响补发，不影响登录。
+
+**入口 IP 池收敛到服务端常量**
+
+- `GUANGDONG_CIDRS` 从 `server/utils/neteaseRealIp.ts` 移到 `server/config/constants.ts` 的 `NETEASE_REAL_IP_CIDRS`（AGENTS 4.1 单一权威定义），工具改为 import 引用。
+
+**补发缓存时间戳改用服务端时间**
+
+- 缓存写入、回放判断与清理截止全部改用 `getServerTimestamp()`（AGENTS 2.3），不再直接写 `Date.now()`。
+
+**弹窗关闭后仍在补查（真实缺陷）**
+
+- 现象：`NeteaseLoginModal` 的 `checkStatus` 失败后无条件 `setTimeout` 重试。若请求在途时用户关闭弹窗，`stopPolling()` 已执行，但迟到的 reject 仍会新建定时器，隐藏组件继续轮询，还可能把状态写到重开后的新 unikey 上。
+- 修复：新增 `session` 代次，`stopPolling()` 递增；`checkStatus(retry, currentSession)` 在入口、拿到响应后、安排补查前校验代次与 `props.show`；`initLogin` 的每个 await 后同样校验，避免关闭后仍起轮询或覆盖新一轮加载态。`retryTimer` 去掉 `: any`（AGENTS 2.2，纯 JS）。
+
+**文档与测试**
+
+- README 项目树补 `server/utils/neteaseRealIp.ts`。
+- `tests/server/netease-real-ip-route.test.ts` 改为 esbuild 虚拟入口（同时导出路由与工具）加 `~~/` 别名；新增 4 项：下发 owner、已有 owner 不重复下发、异 owner 不回放、无 owner 不缓存；原有补发用例改为携带 owner。
+- `tests/server/neteaseRealIp.test.ts` 改为 esbuild 打包后加载（工具已依赖 `~~/` 别名）。
+- 新增 `tests/fixtures/qr-redis-stub.ts`：Redis 替身，测试不依赖真实 Redis。
+
+**验证**
+
+- 全量单测 649/649 通过；改动文件 `eslint` 0 error；`nuxt build` 43.9s 通过。
+- 镜像 `voicehub:qrfix-20261117a` 已部署（回滚位 `authlyric-20261117a`）：容器 healthy、站点 200。
+- 线上 `login/qr/key` 响应同时带上游 `NMTID` 与 `vh_qr_owner`，确认 append 未覆盖上游 `set-cookie`。
+- 恢复归档未做真实点按复测：管理员 JWT 已过期，线上只验证了鉴权链（无效凭证返回 401，不再是 500）；actor 契约由 `community-admin-actor.test.ts` 7 项覆盖。
+
+### 11.3 出口 IP 取消回退与补发窗口收紧（2026-11-18）
+
+**取消广东网段池回退**
+
+- 变更：`resolveNeteaseOutboundIp(clientIp)` 只做两件事——`NETEASE_REAL_IP` 显式固定值（仅排障）优先，其次透传访客真实公网 IP；其余情况返回 `undefined`，路由**不写 `params.realIP`**，由上游按服务器真实出口请求。
+- 删除：`server/config/constants.ts` 的 `NETEASE_REAL_IP_CIDRS`（10 条广东运营商段），`neteaseRealIp.ts` 的 CIDR 解析、FNV 哈希、拒绝采样、`pickGuangdongIp`、`isGuangdongIp`，以及路由里的 `buildRealIpSeed` / `collectCookieText`。
+- 理由：伪造出口会让登录地点与账号校验落在非用户实际地区，反而成为异常特征；且地址池一旦与真实访客 IP 混用，出口归属不可预期。宁可让拿不到访客 IP 的请求走服务器真实出口，也不使用第三方地址。
+- `NETEASE_REAL_IP_MODE` 默认值由 `gd` 改为 `on`（仍只认 `off` 为关闭，兼容旧值 `gd`）。
+
+**803 补发窗口 60 秒 → 10 秒**
+
+- 缓存 TTL 仍为 300 秒（按二维码有效期），但「可回放」单独用 `QR_REPLAY_WINDOW_SECONDS = 10` 判定：内存按写入时间戳，Redis 按 `pTTL` 反推写入年龄。
+- 依据：前端真实补发窗口是 `1.2s × 2 次补查 + 3s 轮询 ≈ 5.4s`，10 秒留约两倍余量；60 秒是需求的 11 倍冗余，属过度暴露。
+- 上游（`2113e322`）不在服务端暂存 803，不存在「一次性消费」，其实际可兑换窗口等于二维码有效期（分钟级）且只需 unikey 单因子；本实现为 `owner + unikey` 双因子 + 10 秒时间闸。
+
+**IPv6 归一化**
+
+- `normalizeIPCandidate` 现在把 IPv6 归一为 RFC 5952 规范形（小写、压缩零组），并把 IPv4-mapped 地址还原为点分 IPv4；`isPrivateOrLoopbackAddress` 改为按归一化后的首组做 `fc00::/7` / `fe80::/10` 位判断。
+- 修复：`0:0:0:0:0:0:0:1` 这类非规范回环写法此前漏判，会被当作公网地址注入给上游；`::ffff:7f00:1` 此前被误判为非法而返回 `null`，导致地址丢失并落入 `unknown` 共享限流桶。
+- 同一地址的不同写法现在映射到同一个规范形，换写法不再能绕过按 IP 的限流计数。
+
+**测试与文档**
+
+- `tests/server/neteaseRealIp.test.ts` 重写为 5 项：公网 IPv4/IPv6 透传、私网/回环/CGNAT/非法值不注入（含非规范 IPv6 写法）、无回退回归保护、固定值优先级、MODE 开关。
+- `tests/server/netease-real-ip-route.test.ts`：回退类用例改为断言 `realIP === undefined`；新增「9 秒内仍可回放」正向用例，原「61 秒不回放」改为「11 秒不回放」；新增非规范 IPv6 归一、IPv6 回环/链路本地/唯一本地不注入、IPv4-mapped 还原三项。
+- `deploy/.env.example` 与 README 同步新语义（README 历史章节保留原文并追加调整说明）。
+
+
+
+### 11.4 修复 V-01：默认弱 JWT 密钥 → 认证完全绕过（2026-11-18）
+
+来源：`SECURITY_REVIEW.md` V-01（Critical，已实测）。只处理该条，V-02/V-03/V-04 未动。
+
+**启动期校验密钥强度**（`server/utils/jwt-enhanced.ts`）
+
+- `loadJwtSecret()` 拒绝：未配置/空白、长度 < 32、已知示例值（`your-jwt-secret-here`、`your-very-secure-jwt-secret-key` 等）、字符种类 < 12 的低熵串。
+- `server/plugins/00.jwt-secret.ts` 在 Nitro 启动时调用一次——路由 chunk 是懒加载的，只靠 `JWTEnhanced` 静态字段会拖到首个认证请求才触发，弱密钥会被静默带进运行态。
+
+**取消自动建会话后门**（`server/utils/auth-session.ts`）
+
+- `ensureAuthSession` 不再为未知 jti 插入 `loginMethod='legacy'` 的会话记录；查不到或 `userId` 不匹配一律返回 `null`，由中间件按 `invalidToken` 拒绝。
+- 正常登录/2FA/OAuth/注册/WebAuthn 均走 `createAuthSession` 先落库再签发，不受影响；`change-password` 与 `set-initial-password` 复用 `event.context.authSessionId`，也不需要补建路径。
+
+**配置与示例**
+
+- `deploy/docker-compose.yml`：`JWT_SECRET=${JWT_SECRET:?请在 .env 中设置至少 32 位的高熵随机 JWT_SECRET}`，漏配直接拒绝启动。
+- 两份 `.env.example` 不再提供可直接运行的示例值（原 `your-very-secure-jwt-secret-key` 会被新校验拒绝）。
+
+**本地实测（`/root/vh-lab`）**
+
+| 场景 | 旧镜像 `captcha-20261116j` | 新镜像 |
+| --- | --- | --- |
+| `JWT_SECRET=your-very-secure-jwt-secret-key` 启动 | 正常监听 | 立即退出，退出码 1 |
+| 合法密钥签 + 随机 jti 伪造令牌 → `/api/auth/verify` | HTTP 200（返回 SUPER_ADMIN） | HTTP 401 `invalidToken` |
+| 真实账号登录 → `/api/auth/verify` | — | HTTP 200 |
+
+升级注意：旧版本已写入 `auth_sessions` 的 `login_method='legacy'` 记录不会自动失效，仍可用到过期（6h）。生产上若从未暴露弱密钥，这些记录不存在；否则升级后建议清理一次：
+
+```sql
+DELETE FROM auth_sessions WHERE login_method = 'legacy';
+```
+
+### 11.5 安全基线更新：Nginx / PostgreSQL / SafeLine（2026-11）
+
+按主机安全报告的 CVE 清单处置，判定原则与最低版本见 `deploy/security/README.md`。具体执行记录、备份位置不入仓库。
+
+- **Nginx** 1.30.6 → 1.30.7：命中 CVE-2026-123633（HTTP/2 UAF，CVSS 9.2）受影响区间，且启用 `http2 on` + 反代。升级后须 `systemctl restart`，reload 不替换运行中的二进制。
+- **PostgreSQL** 15.19 → 15.20：15.20 修 52 个 CVE，含 CVSS 8.1 的 CVE-2026-14661。同主版本小升级，重建容器复用数据目录，无需 `pg_upgrade`；升级前后关键表行数与表数量一致。
+- **SafeLine** 9.4.4 → 9.4.5：NGINX2Root 系列 CVE 修复版；tengine 版本号不变，需看 githash 判定。
+- **OpenSSL** 3.0 分支相关条目均为 Low，发行版走回移补丁、无 apt 升级路径，不源码编译，按 USN 跟进。
+- 内网组件（PostgreSQL）不因「不对公网」免修，仍按补丁升级。
+
+详见 `deploy/security/README.md`。
+
+
+### 11.6 AI 代码审查意见处置（2026-11-20）
+
+对自动化审查提出的条目逐条核实，只改确有行为影响的部分，其余标注判定依据。
+
+**已修**
+
+- `SongDownloadDialog`：下载重试判定从「中文文案正则 + 错误码」改为**纯错误码**。新增 `DURATION_UNREADABLE`、`MUSIC_URL_MISSING` 码，试听错误统一走 `createPreviewDurationError()`；原正则只保留与语言无关的网络/HTTP 片段。此前英文界面下「时长读取失败」「取链失败」不会被判定为可重试，兜底链直接放弃。
+- `AudioPlayer`：换源增加入口 token（`sourceRecoveryAttempt`），后发起的 fallback 使前一轮在 `await` 后退出；此前同一首歌并发触发换源时两轮会同时改写 `currentSrc` 与播放状态。切歌时 token 与 epoch 一并递增。
+- `musicUrl.getMusicUrl`：`preferPlatformResolve` 仅在**有 musicId 的授权音源**上生效。无 musicId 的纯自定义链接直接沿用，不再先走一次必然失败的平台解析。
+- `NeteaseLoginModal`：`timer` / `retryTimer` 去掉 `any`，改用 `ReturnType<typeof setInterval|setTimeout> | null`。
+- `SongDownloadDialog`：预下载读不到时长（0 / 超时）时不再写入缓存——此后下载会直接复用该 blob 并跳过完整性校验，残缺文件会绕过试听判定落盘；改为抛 `DURATION_UNREADABLE` 走兜底链换源。`probeAudioDuration` 自身抛异常也归入同一错误码。
+- 两份 `.env.example`：补充「留空 JWT_SECRET 会导致启动失败，需先填写再启动」。
+- 新增 `tests/server/jwt-startup-plugin.test.ts`：把启动插件按 Nitro 注册语义执行，断言未配置 / 示例值 / 低熵在模块加载阶段即抛错，不依赖首个认证请求。
+- `tests/server/preview-duration.test.ts` 补负值与 `undefined` 边界。
+- `.github/workflows/ai-pr-review.yml`：精简材料改为「安全 / 认证 / IP / 试听判定」优先排序，避免核心实现被 diff 预算挤掉后审查只能报「被引用但未送审」；预算与截断上限不变。
+- `jwt-enhanced`：新增 `loadJwtSecretOrFail()`，校验失败先打一行 `[security] JWT_SECRET 校验未通过…` 再抛出；静态字段与启动插件共用，实测容器日志首行即原因，不必翻堆栈。
+- `README`：三处 `JWT_SECRET=your-…` 示例替换为「粘贴 `openssl rand -base64 48` 输出」——原示例值会被启动校验拒绝，照抄即启动失败。
+- 网易云路由：`NETEASE_REAL_IP_DEBUG=true` 时，未取到访客公网 IP 的分支也记录一行，便于区分「透传成功」与「走服务器出口」。
+- `ip-utils` / `neteaseRealIp`：IPv6 作用域 ID（`fe80::1%eth0`）在校验与透传前剥离。此前 `isIP` 认可带 zone 的写法但 WHATWG 解析器拒绝，非链路本地的带 zone 地址可能被原样发给上游；同一地址带不带 zone 还会落到不同限流桶。
+- `SongDownloadDialog`：`assertCompleteAudio` 的判定由 `duration < 0` 改为 `duration <= 0`。探测超时返回 `0` 此前会直接放行，等于未校验就落盘；现在与预下载路径一致，超时与解码失败都换源。
+
+**核实为不成立（不改）**
+
+- 「`preloadSong` 与 `getAudioBlobForSong` 对同一 blob 两次探测」：两者是**不同请求、不同 blob**；预下载命中缓存时直接复用（含已探测的 duration），不重复探测。
+- 「`previewOnly` 文案键无使用处」：`AudioPlayer` 的试听提示直接引用该键，材料截断导致未展示。
+- 「`resolveNeteaseOutboundIp` 可能回退到 `x-forwarded-for`」：`getClientIP` 在未配置 `TRUSTED_CLIENT_IP_HEADERS` 时不读任何转发头，只用 TCP 地址；`resolveNeteaseOutboundIp` 只接收该结果，无其它回退分支。
+- 「换源闭包捕获 epoch 导致先发调用误判放弃」：`trySwitchPlaybackSource` 从不写 epoch，只读；真实问题是并发轮次无互斥，已按上条修。
+- 「`handleLoginSuccess` 的 `userRes.ok` 恒为 true」：`Response.ok` 是 `status` 落在 200–299，非 2xx 时为 false，现有判断有效。
+- 「`badDurationFixTask` 可能只是定时器句柄、调用 `.cancel()` 会抛错」：该任务由 `{ cancel }` 对象显式创建，取消时执行 resolve，不是 `setTimeout` 返回值。
+- 「`ScheduleList` 常驻挂载会在 `show=false` 时后台初始化二维码」：`watch` 回调首行即 `if (newVal)`，`immediate` 阶段 `show` 为 false 时不执行 `initLogin`，也不会启动轮询。
+- 「Docker Compose 不支持 `${VAR:?err}`」：Compose v2 使用 compose-go 插值，实测缺变量时 `docker compose config` 直接报 `required variable JWT_SECRET is missing a value` 并拒绝解析，不会把字面量传进容器。
+- 「`checkStatus` 遇到网关 HTML 会二次抛错、补查计时器重复触发」：`!res.ok` 在解析 JSON 之前就抛出，HTML 错误页不会进入 `res.json()`；补查最多两次且受 `session` 与 `props.show` 双重闸门，不存在无限重试。
+- 「`checkStatus` 关闭后 `retryTimer` 仍存活」：`stopPolling()` 已 `clearTimeout(retryTimer)` 并置 `null`，关闭路径（`handleClose`）首先调用它。
+- 「`touchAuthSession` 对不存在的会话延期会报错」：该函数是 `UPDATE ... WHERE id = ? AND revoked_at IS NULL`，无匹配行时影响 0 行，不抛异常。
+- 「`PRIORITY_FILE` 正则漏掉 `.ts` / `preview-duration`」：正则为前缀匹配，`server/utils/neteaseRealIp` 可命中 `neteaseRealIp.ts`；`preview-duration` 项写在 `app/utils/` 前缀上，与实际路径一致。
+
+**保留现状（有明确理由）**
+
+- `Error(msg, { cause })`：仓库内多处既有写法，现代运行时均支持；即使不支持也只丢失 `cause` 引用，外层 `Error` 仍有自身堆栈。
+- `AudioPlayer` 的模块级可变状态：播放器本身是全局单例，SSR 预渲染不触达换源路径；改为组件内 ref 会引入多实例状态分裂。
+- 送审材料缺失的 `jwt-enhanced.ts` / `00.jwt-secret.ts` / `preview-duration.ts`：实现完整，无测试环境跳过分支，边界值（`NaN`、`<=0`、`null`）均返回「不判定」。

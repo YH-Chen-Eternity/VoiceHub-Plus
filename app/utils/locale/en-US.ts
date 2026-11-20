@@ -1955,6 +1955,7 @@ export const pages = {
     popupBlocked: 'The browser blocked the new tab. Allow pop-ups and try again.',
     originalLinkOpened: 'The original link was opened',
     fallbackSource: 'The current link is invalid. Switched to a fallback source.',
+    previewOnly: 'Only a preview clip is available for this song. Tried switching sources.',
     consecutiveFailures: 'Several songs failed to play. Autoplay has stopped.',
     networkOffline: 'Network disconnected. Check your connection and try again.',
     bilibiliSkipped: 'The Bilibili video failed to play and was skipped',

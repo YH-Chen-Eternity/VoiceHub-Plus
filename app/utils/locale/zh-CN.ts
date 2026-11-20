@@ -1919,6 +1919,7 @@ export const pages = {
     popupBlocked: '浏览器拦截了新标签页，请允许弹窗后重试',
     originalLinkOpened: '已为你打开原始链接',
     fallbackSource: '当前播放链接无效，已切换备用音源',
+    previewOnly: '该歌曲当前只能获取到试听片段，已尝试切换音源',
     consecutiveFailures: '连续多首歌曲播放失败，已停止自动播放',
     networkOffline: '网络连接已断开，请检查网络后重试',
     bilibiliSkipped: '哔哩哔哩视频播放失败，自动跳过',

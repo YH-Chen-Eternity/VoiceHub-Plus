@@ -618,7 +618,6 @@
 
   <Teleport to="body">
     <NeteaseLoginModal
-      v-if="showLoginModal"
       :show="showLoginModal"
       @close="showLoginModal = false"
       @login-success="handleLoginSuccess"

@@ -14,10 +14,74 @@ export interface JWTPayload {
 }
 
 /**
+ * HS256 的唯一信任根就是这把密钥：长度不足或照抄示例值的密钥可被离线爆破，
+ * 爆破后即可伪造任意 userId/role 的令牌。因此在启动期（首次加载本模块）直接
+ * 拒绝弱密钥，宁可起不来，也不带着可伪造的认证根对外服务。
+ */
+const JWT_SECRET_MIN_LENGTH = 32
+const WEAK_JWT_SECRETS = new Set(['secret', 'changeme', 'jwt', 'password', 'test', 'dev'])
+const WEAK_JWT_SECRET_FRAGMENTS = [
+  'your-jwt-secret-here',
+  'your-very-secure-jwt-secret-key',
+  'change-me',
+  'replace-me',
+  'example-secret'
+]
+/** 去重后的字符种类下限：32 个相同字符长度达标但没有任何熵 */
+const JWT_SECRET_MIN_CHAR_KINDS = 12
+
+export function loadJwtSecret(): string {
+  const raw = process.env.JWT_SECRET
+  if (!raw) {
+    throw new Error('JWT_SECRET environment variable is not set')
+  }
+
+  const secret = raw.trim()
+  if (!secret) {
+    throw new Error('JWT_SECRET environment variable is not set')
+  }
+
+  // 先识别弱样本再判长度：示例值往往本身就短，报「用了示例口令」比报长度更有指导性
+  const lowered = secret.toLowerCase()
+  if (
+    WEAK_JWT_SECRETS.has(lowered) ||
+    WEAK_JWT_SECRET_FRAGMENTS.some((fragment) => lowered.includes(fragment))
+  ) {
+    throw new Error('JWT_SECRET 使用了已知的示例/弱口令，请重新生成随机密钥')
+  }
+
+  if (secret.length < JWT_SECRET_MIN_LENGTH) {
+    throw new Error(`JWT_SECRET 长度必须 >= ${JWT_SECRET_MIN_LENGTH}，请使用高熵随机字符串`)
+  }
+
+  if (new Set(secret).size < JWT_SECRET_MIN_CHAR_KINDS) {
+    throw new Error('JWT_SECRET 熵过低（字符种类不足），请使用高熵随机字符串')
+  }
+
+  return secret
+}
+
+/**
+ * 启动期校验入口：失败时先打一行可直接检索的摘要，再把原错误抛出去让进程退出。
+ * 静态字段与 Nitro 插件都走这里——模块加载即校验，早于路由 chunk 与端口监听。
+ */
+export function loadJwtSecretOrFail(): string {
+  try {
+    return loadJwtSecret()
+  } catch (error) {
+    console.error(
+      '[security] JWT_SECRET 校验未通过，拒绝启动：' +
+        (error instanceof Error ? error.message : String(error))
+    )
+    throw error
+  }
+}
+
+/**
  * 简化的JWT工具类 - 仅支持单一JWT token验证
  */
 export class JWTEnhanced {
-  private static readonly JWT_SECRET = process.env.JWT_SECRET as string
+  private static readonly JWT_SECRET = loadJwtSecretOrFail()
   private static readonly TOKEN_EXPIRES = '6h'
   private static readonly REFRESH_THRESHOLD = 0
 
@@ -100,15 +164,15 @@ export class JWTEnhanced {
       return decoded
     } catch (error: any) {
       if (error.name === 'TokenExpiredError') {
-        throw new Error('Token has expired')
+        throw new Error('Token has expired', { cause: error })
       }
       if (error.name === 'JsonWebTokenError') {
-        throw new Error('Invalid token signature')
+        throw new Error('Invalid token signature', { cause: error })
       }
       if (error.name === 'NotBeforeError') {
-        throw new Error('Token not active yet')
+        throw new Error('Token not active yet', { cause: error })
       }
-      throw new Error(`Token verification failed: ${error.message}`)
+      throw new Error(`Token verification failed: ${error.message}`, { cause: error })
     }
   }
 

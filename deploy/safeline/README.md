@@ -258,3 +258,37 @@ nginx -T | grep -E 'keys_zone=vh_media|zone=vh_aproxy|map \$http_cookie'
 4. 如需彻底移除：删除 `/data/safeline/` 目录即可，无残留
 
 全程中断通常在 1 分钟以内。
+
+## 十四、版本基线与安全快照（2026-11-19 更新）
+
+**宿主 Nginx 最低版本：1.30.7**（或 mainline 1.31.9+）。低于此版本受 CVE-2026-123633（HTTP/2 UAF，CVSS 9.2）等一批缺陷影响；同一版本还修 CVE-2026-123007 / 123634 / 121810 / 113425。
+
+升级要点：
+
+```bash
+sudo apt-get install -y --only-upgrade nginx=1.30.7-1~noble
+sudo nginx -t
+sudo systemctl restart nginx     # reload 不会替换运行中的二进制
+```
+
+雷池 tengine 层终结公网 80/443，宿主 nginx 只做回源。**两层分别打补丁**，改完源站不代表 WAF 层也修了。
+
+**安全快照要求**：任何 nginx / 雷池配置变更后，打包 nginx 配置、两份 compose 与 `.env`，附 `sha256`，上传 COS `snapshots/<时间戳>/`：
+
+```bash
+TS=$(date +%Y%m%d-%H%M%S)
+sudo tar -czf <备份目录>/safeline-precheck-$TS.tar.gz <nginx配置目录> <部署目录>/docker-compose.yml <部署目录>/.env <safeline目录>/docker-compose.yaml <safeline目录>/.env
+sudo sha256sum <备份目录>/safeline-precheck-$TS.tar.gz | sudo tee <备份目录>/safeline-precheck-$TS.tar.gz.sha256
+sudo coscmd -c <COS凭据配置> upload <备份目录>/safeline-precheck-$TS.tar.gz snapshots/$TS/safeline-precheck-$TS.tar.gz
+sudo coscmd -c <COS凭据配置> upload <备份目录>/safeline-precheck-$TS.tar.gz.sha256 snapshots/$TS/safeline-precheck-$TS.tar.gz.sha256
+```
+
+> 上传 `snapshots/` 必须用 master 凭据；日常备份子账号只被授权写 `daily/*`、`monthly/*`。
+
+## 十五、版本记录
+
+当前基线 **9.4.5**（NGINX2Root 系列 CVE 修复版）。升级改 `.env` 的 `IMAGE_TAG` 后 `docker compose pull && up -d`；`POSTGRES_IMAGE` 不要动，那是厂商配套版本。
+
+判版本别只看 `nginx -v`：tengine 恒报 `t1k 4.3.0`，要看 githash（9.4.4 `7f311274` → 9.4.5 `b7a02800`）或 `safeline-mgt` 的 `build-metadata.json`。
+
+回滚：`IMAGE_TAG` 改回上一版后 `up -d`；schema 已迁移的，先用升级前 dump 恢复。
