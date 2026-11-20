@@ -3,7 +3,7 @@ import { isBilibiliSong } from '~/utils/bilibiliSource'
 import { useMusicSources } from '~/composables/useMusicSources'
 import { useLyricSettings } from '~/composables/useLyricSettings'
 import { useLocale } from '~/utils/locale'
-import type { MusicTrackMeta } from '~/utils/musicUrl'
+import type { MusicUrlResolveOptions } from '~/utils/musicUrl'
 
 export interface PlayableSong {
   id: number | string
@@ -142,9 +142,10 @@ export function useAudioPlayer() {
             nextSong.sourceInfo?.type === 'voice' ||
             (nextSong.sourceInfo?.source === 'netease-backup' &&
               nextSong.sourceInfo?.type === 'voice')
-          const options: { unblock?: boolean; musicInfo?: MusicTrackMeta } = isPodcast
+          const options: MusicUrlResolveOptions = isPodcast
             ? { unblock: false }
             : {}
+          options.preferPlatformResolve = true
           options.musicInfo = {
             name: nextSong.title,
             artist: nextSong.artist,
@@ -233,9 +234,10 @@ export function useAudioPlayer() {
             prevSong.sourceInfo?.type === 'voice' ||
             (prevSong.sourceInfo?.source === 'netease-backup' &&
               prevSong.sourceInfo?.type === 'voice')
-          const options: { unblock?: boolean; musicInfo?: MusicTrackMeta } = isPodcast
+          const options: MusicUrlResolveOptions = isPodcast
             ? { unblock: false }
             : {}
+          options.preferPlatformResolve = true
           options.musicInfo = {
             name: prevSong.title,
             artist: prevSong.artist,
@@ -374,9 +376,10 @@ export function useAudioPlayer() {
         nextSong.sourceInfo?.type === 'voice' ||
         (nextSong.sourceInfo?.source === 'netease-backup' &&
           nextSong.sourceInfo?.type === 'voice')
-      const options: { unblock?: boolean; musicInfo?: MusicTrackMeta } = isPodcast
+      const options: MusicUrlResolveOptions = isPodcast
         ? { unblock: false }
         : {}
+      options.preferPlatformResolve = true
       options.musicInfo = {
         name: nextSong.title,
         artist: nextSong.artist,

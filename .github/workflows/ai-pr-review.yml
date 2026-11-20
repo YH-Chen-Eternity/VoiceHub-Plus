@@ -207,6 +207,17 @@ jobs:
             });
             const FENCE = '````'; // 四反引号：文件内容里出现三反引号也不会截断围栏
 
+            // 精简材料受预算限制，按原顺序截断会把安全/认证/IP 核心实现挤出去，
+            // 导致审查只能对「被引用但未送审」报阻断。这里把这类文件提到前面，
+            // 同一优先级内保持 GitHub 返回的原始顺序（Array#sort 稳定）。
+            const PRIORITY_FILE = new RegExp(
+              '^(server/(utils/(jwt-enhanced|auth-session|ip-utils|neteaseRealIp)|plugins/'
+              + '|api/api-enhanced/netease/|api/auth/)|app/utils/preview-duration'
+              + '|deploy/docker-compose|\\.env\\.example)'
+            );
+            files.sort((a, b) => Number(!PRIORITY_FILE.test(a.filename))
+              - Number(!PRIORITY_FILE.test(b.filename)));
+
             // head 版本完整仓库树（一次递归），建立 path -> blob sha 索引。
             // PR head 对象存于 base 仓库，fork PR 同样可读；关联文件与 UI 锚点都靠它。
             let treeIndex = new Map();

@@ -546,6 +546,7 @@
 import { computed, ref, watch, reactive, onUnmounted } from 'vue'
 import { useAudioQuality } from '~/composables/useAudioQuality'
 import { getMusicUrlResult } from '~/utils/musicUrl'
+import { isPreviewClipDuration, probeAudioDuration } from '~/utils/preview-duration'
 import { persistQqMusicCookie } from '~/utils/qqCookie'
 import { useLocale } from '~/utils/locale'
 import AppSpinner from '~/components/UI/Common/AppSpinner.vue'
@@ -764,11 +765,45 @@ const ensureQqVipFlag = async () => {
   await qqVipCheckPromise
 }
 
+// 重试判定只认错误码：界面文案随语言变化，按 message 匹配在非中文环境下必然失效
+const RETRYABLE_DOWNLOAD_ERROR_CODES = new Set([
+  'PREVIEW_DURATION',
+  'DURATION_UNREADABLE',
+  'MUSIC_URL_MISSING'
+])
+
 const isRetryableDownloadError = (error) => {
+  if (RETRYABLE_DOWNLOAD_ERROR_CODES.has(error?.code)) return true
   const message = String(error?.message || error || '')
-  return /404|not found|failed to fetch|networkerror|http( error|\s+\d+)|疑似试听时长|无法从播放链接获取时长|无法获取音乐播放链接/i.test(
-    message
-  )
+  return /404|not found|failed to fetch|networkerror|http( error|\s+\d+)/i.test(message)
+}
+
+// 带固定错误码的下载错误：重试判定与界面语言解耦
+const createDownloadError = (message, code) => Object.assign(new Error(message), { code })
+
+// 试听片段错误：附带固定码，重试判定不受界面语言影响
+const createPreviewDurationError = () =>
+  createDownloadError(locale.value.previewDurationDetected, 'PREVIEW_DURATION')
+
+// 试听片段不进预下载缓存/不落盘，命中后抛可重试错误让兜底链换源
+const assertCompleteAudio = async (blob, song) => {
+  const objectUrl = URL.createObjectURL(blob)
+  let duration = -1
+  try {
+    duration = await probeAudioDuration(objectUrl)
+  } catch (probeError) {
+    // 探测本身失败（运行环境无 Audio、解码异常）按不可读处理，交给兜底链换源
+    console.warn('[SongDownloadDialog] 音频时长探测失败:', probeError)
+    duration = -1
+  } finally {
+    URL.revokeObjectURL(objectUrl)
+  }
+  // 0 = 探测超时/无元数据，-1 = 解码失败，两者都无法确认完整性，一律换源
+  if (duration <= 0)
+    throw createDownloadError(locale.value.durationFromPlaybackUrlFailed, 'DURATION_UNREADABLE')
+  if (isPreviewClipDuration(duration, song?.durationSeconds ?? song?.duration)) {
+    throw createPreviewDurationError()
+  }
 }
 
 const requestMusicUrlCandidate = async (song, quality, excludeSources, ignoreProvidedUrl) => {
@@ -784,7 +819,7 @@ const requestMusicUrlCandidate = async (song, quality, excludeSources, ignorePro
   )
 
   if (!result?.url) {
-    throw new Error(locale.value.musicUrlMissing)
+    throw createDownloadError(locale.value.musicUrlMissing, 'MUSIC_URL_MISSING')
   }
 
   return result
@@ -863,7 +898,7 @@ const withDownloadSourceFallback = async (song, quality, executor) => {
     }
   }
 
-  throw lastError || new Error(locale.value.musicUrlMissing)
+  throw lastError || createDownloadError(locale.value.musicUrlMissing, 'MUSIC_URL_MISSING')
 }
 
 // 格式化时长
@@ -958,6 +993,17 @@ const preloadSong = async (song) => {
       const blob = new Blob(chunks, { type: contentType })
       const objectUrl = URL.createObjectURL(blob)
       const duration = await readAudioMetadataDuration(objectUrl, { revokeObjectUrl: true })
+      // 读不到时长时不能入缓存：后续下载会直接复用该 blob 并跳过完整性校验，
+      // 残缺文件会绕过试听判定落盘。按不可读处理，走兜底链换下一个音源。
+      if (!duration || duration <= 0) {
+        throw createDownloadError(
+          locale.value.durationFromPlaybackUrlFailed,
+          'DURATION_UNREADABLE'
+        )
+      }
+      if (isPreviewClipDuration(duration, song.durationSeconds ?? song.duration)) {
+        throw createPreviewDurationError()
+      }
 
       return {
         blob,
@@ -1107,7 +1153,10 @@ const estimateSelectedDurations = async () => {
               const duration = await readAudioMetadataDuration(candidate.url)
 
               if (!duration || duration <= 0) {
-                throw new Error(locale.value.durationFromPlaybackUrlFailed)
+                throw createDownloadError(
+                  locale.value.durationFromPlaybackUrlFailed,
+                  'DURATION_UNREADABLE'
+                )
               }
 
               const durationSeconds = Math.floor(duration)
@@ -1115,7 +1164,7 @@ const estimateSelectedDurations = async () => {
                 isNeteaseSong(songItem.song) &&
                 durationSeconds === NETEASE_PREVIEW_DURATION_SECONDS
               ) {
-                throw new Error(locale.value.previewDurationDetected)
+                throw createPreviewDurationError()
               }
 
               return {
@@ -1342,6 +1391,8 @@ const getAudioBlobForSong = async (song, quality) => {
   return await withDownloadSourceFallback(song, quality, async (candidate) => {
     processingStatus.value = getLocaleText('downloadingTitle', '', song.title)
     const blob = await fetchAudioWithProgress(candidate.url, song.id, song.title)
+    // 下载永不保存试听片段：实测时长命中后抛可重试错误换源
+    await assertCompleteAudio(blob, song)
     return {
       blob,
       sourceUrl: candidate.url,

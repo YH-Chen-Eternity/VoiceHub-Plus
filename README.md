@@ -91,6 +91,8 @@
 
 VoiceHub 是一个面向校园的广播站点歌系统（Nuxt 4 全栈应用），核心功能包括：歌曲搜索与投稿、点赞与热度统计、自动排期与播出时段管理、公告栏、用户注册与审核、管理后台等。完整功能清单见下方[原项目 README 的「主要功能」](#主要功能)一节。
 
+**为什么有这个分支**：原项目面向通用部署，而本仓库服务于一个真实校园广播站的日常运营，在此过程中沉淀了一批**社区运营/安全/合规方向**的定制——包括完整的管理员操作审计、边缘安全层（防暴力破解/脚本/地域闸）、面向管理员的攻击日志面板、账号合规策略（强制改密/改用户名、邮箱域名白名单）等。这些改动通用性较强，因此以社区版形式开源。
+
 ## <a id="主要修改内容changelog" name="主要修改内容changelog"></a>主要修改内容（Changelog）
 
 > 最新更新：**2026-11-14**。下方为精简速览；各轮完整记录与功能明细已折叠，点击展开查看。
@@ -182,9 +184,10 @@ VoiceHub 是一个面向校园的广播站点歌系统（Nuxt 4 全栈应用）�
 
 **网易云登录出口 IP**
 
-- 新增出口 IP 伪装工具：从中国大陆运营商公网网段池随机取值，按扫码 `unikey` 与账号 `MUSIC_U` 做确定性映射，保证同一次扫码、同一账号的出口稳定，避免登录态地区跳变触发风控。
-- 网易云代理路由统一注入 `X-Real-IP` / `X-Forwarded-For`，客户端传入值一律忽略；`NETEASE_REAL_IP_MODE=off` 可整体关停，`NETEASE_REAL_IP` 可固定单个 IP 排障。
-- 随机取样使用拒绝采样消除取模偏差，网段池剔除 IDC 段只保留住宅宽带；新增单元测试与路由级回归测试。
+- 网易云代理路由统一把访客真实 IP 写入 `X-Real-IP` / `X-Forwarded-For`，客户端自带 `realIP` 一律丢弃，避免代理成为任意 IP 的伪造入口；拿不到访客地址时（内部调用、未配置 `TRUSTED_CLIENT_IP_HEADERS`、`unknown`、私网/回环/链路本地）**不注入 realIP**，由上游按服务器真实出口请求。`NETEASE_REAL_IP_MODE=off` 可整体关停，`NETEASE_REAL_IP` 可固定单个 IPv4 排障。
+- IPv6 统一归一为 RFC 5952 规范形（小写、压缩零组），IPv4-mapped 还原为点分 IPv4，保证同一地址的不同写法不会绕过限流桶，也不会漏判 `fc00::/7` / `fe80::/10`；配套单元测试与路由级回归测试覆盖非规范写法。
+
+> **2026-11-18 调整**：取消广东网段池回退。现在只透传访客真实公网 IP，拿不到时（内部调用、未配置受信头、私网/回环）**不注入 realIP**，由上游按服务器真实出口请求。同时把 803 登录结果的补发窗口从 60 秒收紧到 10 秒（缓存仍保留 5 分钟 TTL，但超出 10 秒不再回放）。`NETEASE_REAL_IP_MODE` 默认值由 `gd` 改为 `on`。
 
 
 ### 2026-11-11 游客板块可见性开关、归档记录收权与概览状态修复
@@ -667,7 +670,7 @@ cd VoiceHub
 ```yaml
 environment:
   - DATABASE_URL=postgresql://user:password@postgres:5432/voicehub # 可能需要 ?sslmode=disable
-  - JWT_SECRET=your-jwt-secret-here # 请修改为强随机字符串
+  - JWT_SECRET=<粘贴 openssl rand -base64 48 的输出> # 至少 32 位；示例值会被启动校验拒绝
   - ADMIN_INITIAL_PASSWORD=${ADMIN_INITIAL_PASSWORD:-} # 初始管理员密码，至少 8 位；首次登录会强制改密
   - NODE_ENV=production
 ```
@@ -703,7 +706,7 @@ docker run -d \
   -p 3000:3000 \
   -e DATABASE_URL="postgresql://username:password@host:port/database?sslmode=require" \
   # 可能需要替换成 ?sslmode=disable
-  -e JWT_SECRET="your-very-secure-jwt-secret-key" \
+  -e JWT_SECRET="<粘贴 openssl rand -base64 48 的输出，需长期保存>" \
   -e ADMIN_INITIAL_PASSWORD="your-strong-initial-admin-password" \
   -e NODE_ENV=production \
   --name voicehub \
@@ -717,7 +720,7 @@ docker run -d \
   -p 3000:3000 \
   -e DATABASE_URL="postgresql://username:password@host:port/database?sslmode=require" \
   # 可能需要替换成 ?sslmode=disable
-  -e JWT_SECRET="your-very-secure-jwt-secret-key" \
+  -e JWT_SECRET="<粘贴 openssl rand -base64 48 的输出，需长期保存>" \
   -e ADMIN_INITIAL_PASSWORD="your-strong-initial-admin-password" \
   -e NODE_ENV=production \
   --name voicehub \
@@ -740,7 +743,7 @@ docker run -d \
   -p 3000:3000 \
   -e DATABASE_URL="postgresql://username:password@host:port/database?sslmode=require" \
   # 可能需要替换成 ?sslmode=disable
-  -e JWT_SECRET="your-very-secure-jwt-secret-key" \
+  -e JWT_SECRET="<粘贴 openssl rand -base64 48 的输出，需长期保存>" \
   -e ADMIN_INITIAL_PASSWORD="your-strong-initial-admin-password" \
   -e NODE_ENV=production \
   --name voicehub \
@@ -1521,6 +1524,7 @@ VoiceHub/
 │       ├── pluginResolver.ts   # 插件音源搜索、歌词与媒体解析接入
 │       ├── pluginPlatform.ts # 插件音源平台键、插件 ID 与音质映射（LX Music / MusicFree）
 │       ├── platforms.ts       # 平台元数据共享（白名单/显示名/图标）
+│       ├── preview-duration.ts # 试听片段判定与音频元数据时长探测（播放换源/下载拒收）
 │       ├── playerLayout.ts    # 播放器布局模式与自由拖拽坐标解析
 │       ├── blacklist.ts       # 歌曲类型黑名单候选值共享（语种/曲风）
 │       ├── sentryUpstreamMusicErrors.ts # Sentry 上游音源错误过滤
@@ -1983,6 +1987,7 @@ VoiceHub/
 │   │   ├── native_common.ts # 原生API通用工具
 │   │   ├── native_tx.ts    # 腾讯音乐原生API
 │   │   ├── native_wy.ts    # 网易云音乐原生API
+│   │   ├── neteaseRealIp.ts # 网易云代理的出口 IP 透传（仅访客真实地址，无回退池）
 │   │   ├── oauth-providers.ts # OAuth提供商类型与纯函数工具
 │   │   ├── oauth-strategies.ts # OAuth策略配置
 │   │   ├── oauth-token.ts  # OAuth令牌工具

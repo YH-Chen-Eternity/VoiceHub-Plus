@@ -6,6 +6,7 @@ import { getVkeysIdParam } from '~/utils/musicSources'
 import { parseBilibiliId } from '~/utils/bilibiliSource'
 import { isPluginPlatform } from '~/utils/pluginPlatform'
 import { isPlaybackUrlInvalid } from '~/utils/invalidPlaybackUrls'
+import { PLATFORM_AUTHORIZED_PLATFORMS } from '~/utils/platforms'
 import { persistQqMusicCookie, clearQqMusicLoginState, QQ_MUSIC_COOKIE_KEY } from '~/utils/qqCookie'
 import { resolvePluginUrl } from '~/utils/pluginResolver'
 import { useServerErrors } from '~/composables/useLocaleText'
@@ -24,6 +25,8 @@ export type MusicUrlResolveOptions = {
   mediaId?: string
   excludeSources?: string[]
   ignoreProvidedUrl?: boolean
+  /** 播放链路传入：受授权控制的音源忽略调用方带来的链接，按当前登录态重新取链 */
+  preferPlatformResolve?: boolean
   musicInfo?: MusicTrackMeta
   songId?: number
   selectionToken?: string
@@ -746,6 +749,28 @@ export async function getMusicUrl(
   playUrl?: string,
   options?: MusicUrlResolveOptions
 ): Promise<string | null> {
-  const result = await getMusicUrlResult(platform, musicId, playUrl, options)
-  return result.url
+  const providedUrl = String(playUrl || '').trim()
+  // 播放链路要求按当前登录态重新取链：库里的 playUrl 可能是历史试听或失效链接。
+  // 仅对「有平台 ID 的授权音源」生效；没有 musicId 的纯自定义链接直接沿用，
+  // 避免用户手填的直链被重新解析覆盖。取链失败时回退到歌曲自带链接。
+  // B 站不在授权列表内：视频直链需走专用解析（playUrl / 平台 ID），不参与此重取链。
+  const resolveFirst =
+    options?.preferPlatformResolve === true &&
+    !options?.ignoreProvidedUrl &&
+    providedUrl !== '' &&
+    String(musicId || '').trim() !== '' &&
+    PLATFORM_AUTHORIZED_PLATFORMS.includes(platform)
+  try {
+    const result = await getMusicUrlResult(
+      platform,
+      musicId,
+      resolveFirst ? undefined : playUrl,
+      options
+    )
+    if (result.url) return result.url
+  } catch (error) {
+    if (!resolveFirst) throw error
+    console.warn('[musicUrl] 平台取链失败，回退歌曲自带播放链接:', (error as Error)?.message)
+  }
+  return resolveFirst ? providedUrl : null
 }

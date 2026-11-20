@@ -87,6 +87,81 @@ export function getClientIP(event: H3Event): string {
   return 'unknown'
 }
 
+/**
+ * 把 IPv6 归一成 RFC 5952 规范形（小写、压缩零组），并把 IPv4-mapped 地址还原成点分 IPv4。
+ *
+ * 必要性：`0:0:0:0:0:0:0:1`、`FE80:0:0:0::1` 与 `::1`、`fe80::1` 是同一个地址，但按字面量
+ * 做前缀判断会漏判，导致回环/链路本地地址被当成公网地址注入给第三方接口。
+ * 幂等：已规范的地址再走一遍结果不变。
+ */
+function canonicalizeIPv6(ip: string): string {
+  // 作用域 ID（fe80::1%eth0）不属于地址本体，且 WHATWG 解析器不接受 `%`；
+  // 先剥离再归一化，带 zone 的链路本地地址才能与不带 zone 的写法落到同一判断
+  const address = ip.includes('%') ? ip.slice(0, ip.indexOf('%')) : ip
+  let normalized: string
+  try {
+    // WHATWG URL 解析器负责压缩零组并统一小写，比手写展开更不容易出错
+    normalized = new URL(`http://[${address}]/`).hostname.slice(1, -1)
+  } catch {
+    return address
+  }
+
+  // v4-mapped 会被序列化成 ::ffff:7f00:1 这种十六进制形式，还原成点分才能复用 IPv4 判断
+  const mapped = normalized.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/)
+  if (mapped) {
+    const high = Number.parseInt(String(mapped[1]), 16)
+    const low = Number.parseInt(String(mapped[2]), 16)
+    return `${high >> 8}.${high & 0xff}.${low >> 8}.${low & 0xff}`
+  }
+
+  return normalized
+}
+
+/**
+ * 判断是否为私网或回环地址（此类地址传给第三方接口无意义）
+ */
+export function isPrivateOrLoopbackAddress(ip: string): boolean {
+  if (!ip || ip === 'unknown') return true
+
+  // 先归一化，避免非规范写法（0:0:0:0:0:0:0:1 / FE80:0:0:0::1）绕过下面的判断
+  const address = isIP(ip) === 6 ? canonicalizeIPv6(ip) : ip
+  if (address === '::1') return true
+
+  if (
+    address.startsWith('127.') ||
+    address.startsWith('10.') ||
+    address.startsWith('192.168.') ||
+    address.startsWith('169.254.')
+  ) {
+    return true
+  }
+
+  const privateB = address.match(/^172\.(\d{1,3})\./)
+  if (privateB) {
+    const second = Number(privateB[1])
+    if (second >= 16 && second <= 31) return true
+  }
+
+  // 运营商级 NAT 段 100.64.0.0/10，同样不是可直接对外声明的地址
+  const cgnat = address.match(/^100\.(\d{1,3})\./)
+  if (cgnat) {
+    const second = Number(cgnat[1])
+    if (second >= 64 && second <= 127) return true
+  }
+
+  // IPv6：按归一化后的首组判断唯一本地地址 fc00::/7 与链路本地地址 fe80::/10
+  if (isIP(address) === 6) {
+    const firstGroup = address.startsWith('::')
+      ? 0
+      : Number.parseInt(address.split(':')[0] || '', 16)
+    if (Number.isNaN(firstGroup)) return false
+    if ((firstGroup & 0xfe00) === 0xfc00) return true
+    if ((firstGroup & 0xffc0) === 0xfe80) return true
+  }
+
+  return false
+}
+
 function normalizeIPCandidate(value: string): string | null {
   let candidate = value.trim().replace(/^"|"$/g, '')
   const forwardedMatch = candidate.match(/^for\s*=\s*(.+)$/i)
@@ -102,8 +177,18 @@ function normalizeIPCandidate(value: string): string | null {
     candidate = candidate.slice(0, candidate.lastIndexOf(':'))
   }
 
-  const cleanIP = candidate.replace(/^::ffff:/i, '')
-  return isValidIP(cleanIP) ? cleanIP : null
+  // IPv6 作用域 ID（fe80::1%eth0）不是地址本体：剥离后再校验与透传，
+  // 否则会带着 `%zone` 原样发给上游，或让同一地址落到不同限流桶
+  candidate = candidate.replace(/%[0-9A-Za-z_.-]+$/, '')
+
+  // 点分 v4-mapped 直接剥前缀；十六进制 v4-mapped 交给 canonicalizeIPv6 还原成 IPv4
+  const cleanIP = /^::ffff:\d{1,3}(?:\.\d{1,3}){3}$/i.test(candidate)
+    ? candidate.slice(7)
+    : candidate
+  if (!isValidIP(cleanIP)) return null
+
+  // 统一成规范形：同一地址的不同写法不应绕过限流桶，也便于下游做前缀判断
+  return isIP(cleanIP) === 6 ? canonicalizeIPv6(cleanIP) : cleanIP
 }
 
 /**

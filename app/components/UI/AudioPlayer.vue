@@ -325,7 +325,9 @@ import { getBilibiliUrl, getCoverThumbUrl } from '~/utils/url'
 import { scrobbleSong } from '~/utils/neteaseApi'
 import { useLocale } from '~/utils/locale'
 import { isBilibiliSong } from '~/utils/bilibiliSource'
+import { PLATFORM_AUTHORIZED_PLATFORMS } from '~/utils/platforms'
 import { markPlaybackUrlInvalid } from '~/utils/invalidPlaybackUrls'
+import { isPreviewClipDuration, normalizeDurationSeconds } from '~/utils/preview-duration'
 import { useTheme } from '~/composables/useTheme'
 import {
   getCachedMusicUrlSource,
@@ -550,22 +552,42 @@ const resetNeteaseScrobbleState = () => {
   neteaseScrobblePlayEpoch.value++
 }
 
-const getScrobblePlaybackIdentity = (song) => {
-  if (!song) return null
-  return [song.musicPlatform || '', song.musicId || '', song.id || ''].join(':')
+const getPreviewSongKey = (song) =>
+  song?.id ? `${song.id}:${song.musicPlatform}:${song.musicId}` : ''
+
+let sourceRecoveryEpoch = 0
+// 同一首歌可能连续触发多轮换源（error / 时长异常重入）：每轮入口取一个递增 token，
+// 只让最后一轮继续推进，避免两轮 fallback 并发改 src 相互覆盖
+let sourceRecoveryAttempt = 0
+let badDurationFixTask: { cancel: () => void } | null = null
+let previewWarnedSongKey = ''
+
+const invalidateSourceRecovery = () => {
+  sourceRecoveryEpoch++
+  sourceRecoveryAttempt++
+  const task = badDurationFixTask
+  badDurationFixTask = null
+  task?.cancel()
+  previewWarnedSongKey = ''
 }
 
+const isSourceRecoveryCurrent = (songKey, epoch) =>
+  epoch === sourceRecoveryEpoch && getPreviewSongKey(activeSong.value) === songKey &&
+  !isClosing.value && !isClosed.value
+
 watch(
-  () => getScrobblePlaybackIdentity(activeSong.value),
+  () => getPreviewSongKey(activeSong.value),
   (newIdentity, oldIdentity) => {
     if (newIdentity !== oldIdentity) {
+      invalidateSourceRecovery()
       lastOpenedFallbackSongId.value = null
       isFallbackHandling.value = false
       failedPlaybackSources.value = []
       resetNeteaseScrobbleState()
       enhanced.resetRetryState()
     }
-  }
+  },
+  { flush: 'sync' }
 )
 
 const getCurrentFailedSource = () => {
@@ -595,7 +617,7 @@ const buildFallbackResolveOptions = (song, excludeSources) => {
   }
 }
 
-const trySwitchPlaybackSource = async () => {
+const trySwitchPlaybackSource = async (options = { silent: false }) => {
   const song = activeSong.value
   if (!song?.musicPlatform || !song?.musicId || isBilibiliSong(song)) {
     return false
@@ -617,7 +639,14 @@ const trySwitchPlaybackSource = async () => {
   // buildFallbackResolveOptions 会带 ignoreProvidedUrl，解析链路同时会跳过已登记无效的地址
   isFallbackHandling.value = true
   control.isLoadingTrack.value = true
-  const playbackKey = `${song.id}:${song.musicPlatform}:${song.musicId}`
+  const playbackKey = getPreviewSongKey(song)
+  const recoveryEpoch = sourceRecoveryEpoch
+  // 入口 token 后发者胜：并发 fallback 时先发起的那轮在 await 后自行退出，
+  // 不再出现两轮同时改写 currentSrc / 播放状态
+  const recoveryAttempt = ++sourceRecoveryAttempt
+  const isCurrentRecovery = () =>
+    recoveryAttempt === sourceRecoveryAttempt &&
+    isSourceRecoveryCurrent(playbackKey, recoveryEpoch)
   const resumePosition = audioPlayer.value?.currentTime || 0
 
   try {
@@ -628,8 +657,7 @@ const trySwitchPlaybackSource = async () => {
       buildFallbackResolveOptions(song, excludeSources)
     )
 
-    const current = activeSong.value
-    if (`${current?.id}:${current?.musicPlatform}:${current?.musicId}` !== playbackKey) return false
+    if (!isCurrentRecovery()) return false
 
     if (!result.url) {
       return false
@@ -653,11 +681,12 @@ const trySwitchPlaybackSource = async () => {
     sync.globalAudioPlayer.playSong(updatedSong)
     emit('songChange', updatedSong)
 
-    if (window.$showNotification) {
+    if (!options.silent && window.$showNotification) {
       window.$showNotification(audioPlayerLocale.value.fallbackSource, 'warning')
     }
 
     await nextTick()
+    if (!isCurrentRecovery()) return false
     let started = false
     if (audioPlayer.value) {
       const element = audioPlayer.value
@@ -666,7 +695,7 @@ const trySwitchPlaybackSource = async () => {
       element.addEventListener(
         'loadedmetadata',
         () => {
-          if (Number.isFinite(element.duration) && resumePosition < element.duration)
+          if (isCurrentRecovery() && Number.isFinite(element.duration) && resumePosition < element.duration)
             element.currentTime = resumePosition
         },
         { once: true }
@@ -674,6 +703,7 @@ const trySwitchPlaybackSource = async () => {
       // 不调用 load()：song.musicUrl 变化会通过 :src 绑定自动走加载算法，
       // 额外一次 load() 会多排一轮 pause/emptied 事件，可能把刚起的播放又改回暂停
       started = await control.play()
+      if (!isCurrentRecovery()) return false
       // 以元素真实状态为准纠正播放标记，避免排队的 pause 事件把界面留在暂停态
       if (started && !element.paused) {
         control.isPlaying.value = true
@@ -689,19 +719,17 @@ const trySwitchPlaybackSource = async () => {
     return true
   } catch (sourceError) {
     console.warn('[AudioPlayer] 切换备用音源失败:', sourceError)
-    failedPlaybackSources.value = excludeSources
+    if (isCurrentRecovery()) failedPlaybackSources.value = excludeSources
     return false
   } finally {
-    isFallbackHandling.value = false
-    control.isLoadingTrack.value = false
+    if (isCurrentRecovery()) {
+      isFallbackHandling.value = false
+      control.isLoadingTrack.value = false
+    }
   }
 }
 
-const normalizeSongDurationSeconds = (value) => {
-  const duration = Number(value || 0)
-  if (!Number.isFinite(duration) || duration <= 0) return 0
-  return duration > 10000 ? duration / 1000 : duration
-}
+const normalizeSongDurationSeconds = (value) => normalizeDurationSeconds(value)
 
 const isInvalidTencentAudio = (duration, url) => {
   if (activeSong.value?.musicPlatform !== 'tencent') return false
@@ -718,6 +746,101 @@ const isInvalidTencentAudio = (duration, url) => {
   }
 
   return isKnownInvalidQqAudioUrl(url)
+}
+
+// 受授权控制的音源可能只返回试听片段；B 站与语音条目不参与判定
+const isPreviewAudio = (duration) => {
+  const song = activeSong.value
+  if (!song || !PLATFORM_AUTHORIZED_PLATFORMS.includes(song.musicPlatform)) return false
+  if (song.sourceInfo?.type === 'voice') return false
+  const expected = normalizeSongDurationSeconds(song.duration ?? song.durationSeconds)
+  return isPreviewClipDuration(duration, expected)
+}
+
+const notifyPreviewOnly = (song) => {
+  if (!song?.id) return
+  const key = getPreviewSongKey(song)
+  if (previewWarnedSongKey === key) return
+  previewWarnedSongKey = key
+  window.$showNotification?.(audioPlayerLocale.value.previewOnly, 'warning')
+}
+
+// 换源后新源可能仍是试听片段：等它加载出时长后再判一次
+const PREVIEW_RECHECK_TIMEOUT_MS = 3000
+const notifyIfStillPreview = async (element, songKey, epoch) => {
+  if (!element) return
+  if (!songKey || !isSourceRecoveryCurrent(songKey, epoch)) return
+
+  if (!(element.duration > 0)) {
+    await new Promise((resolve) => {
+      const finish = () => {
+        clearTimeout(timer)
+        element.removeEventListener('loadedmetadata', finish)
+        resolve(undefined)
+      }
+      const timer = setTimeout(finish, PREVIEW_RECHECK_TIMEOUT_MS)
+      element.addEventListener('loadedmetadata', finish, { once: true })
+    })
+  }
+
+  if (!isSourceRecoveryCurrent(songKey, epoch) || audioPlayer.value !== element) return
+  if (isPreviewAudio(element.duration)) notifyPreviewOnly(activeSong.value)
+}
+
+// 换源只允许同时进行一轮；超时仅放弃等待，换源本身继续执行到出结果
+const BAD_DURATION_FIX_TIMEOUT_MS = 15000
+// 实际时长异常（无效音频或试听片段）时切换到其它音源，超时后交给后台结果处理提示
+const maybeSwitchForBadDuration = async (duration) => {
+  if (isFallbackHandling.value || badDurationFixTask) return false
+  const needsFix =
+    isInvalidTencentAudio(duration, audioPlayer.value?.currentSrc || audioPlayer.value?.src) ||
+    isPreviewAudio(duration)
+  if (!needsFix) return false
+
+  const songKey = getPreviewSongKey(activeSong.value)
+  const epoch = sourceRecoveryEpoch
+  if (!songKey || !isSourceRecoveryCurrent(songKey, epoch)) return false
+  const task = { cancel: () => {} }
+  const cancelled = new Promise((resolve) => {
+    task.cancel = () => resolve(false)
+  })
+  badDurationFixTask = task
+
+  // 自动换源不弹"已切换备用音源"，只在最终仍为试听片段时提示
+  const fixPromise = trySwitchPlaybackSource({ silent: true })
+    .then((switched) => {
+      if (!isSourceRecoveryCurrent(songKey, epoch)) return false
+      if (switched) {
+        void notifyIfStillPreview(audioPlayer.value, songKey, epoch)
+        return true
+      }
+      if (isPreviewAudio(audioPlayer.value?.duration)) notifyPreviewOnly(activeSong.value)
+      return false
+    })
+    .finally(() => {
+      if (badDurationFixTask === task) badDurationFixTask = null
+    })
+
+  let timedOut = false
+  let timer
+  try {
+    const switched = await Promise.race([
+      fixPromise,
+      cancelled,
+      new Promise((resolve) => {
+        timer = setTimeout(() => {
+          timedOut = true
+          resolve(false)
+        }, BAD_DURATION_FIX_TIMEOUT_MS)
+      })
+    ])
+    if (!isSourceRecoveryCurrent(songKey, epoch)) return false
+    if (switched) return true
+    if (timedOut) console.warn('[AudioPlayer] 换源超时，保留当前播放并等待后台结果')
+    return false
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 const getNeteaseScrobbleSongId = (song) => {
@@ -928,32 +1051,18 @@ watch(
 
 const handleDurationChange = async () => {
   if (!audioPlayer.value || isFallbackHandling.value) return
-
-  if (
-    isInvalidTencentAudio(
-      audioPlayer.value.duration,
-      audioPlayer.value.currentSrc || audioPlayer.value.src
-    )
-  ) {
-    const switchedSource = await trySwitchPlaybackSource()
-    if (switchedSource) return
-  }
+  await maybeSwitchForBadDuration(audioPlayer.value.duration)
 }
 
 const handleLoaded = async () => {
   if (!audioPlayer.value) return
 
-  if (
-    !isFallbackHandling.value &&
-    isInvalidTencentAudio(
-      audioPlayer.value.duration,
-      audioPlayer.value.currentSrc || audioPlayer.value.src
-    )
-  ) {
-    const switchedSource = await trySwitchPlaybackSource()
-    if (switchedSource) {
-      return
-    }
+  const songKey = getPreviewSongKey(activeSong.value)
+  const epoch = sourceRecoveryEpoch
+  const switchedSource = await maybeSwitchForBadDuration(audioPlayer.value.duration)
+  if (!isSourceRecoveryCurrent(songKey, epoch)) return
+  if (switchedSource) {
+    return
   }
 
   control.onLoaded(audioPlayer.value.duration)
@@ -1510,6 +1619,7 @@ const handleLyricSeek = async (time) => {
 const stopPlaying = () => {
   if (isClosing.value) return
 
+  invalidateSourceRecovery()
   lastOpenedFallbackSongId.value = null
   isFallbackHandling.value = false
   consecutiveSkipCount.value = 0
@@ -2098,6 +2208,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  invalidateSourceRecovery()
   // 清理音频播放器
   control.cleanup()
 
