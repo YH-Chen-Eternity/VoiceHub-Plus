@@ -204,7 +204,7 @@ jobs:
           fetch-depth: 0
 
       - name: 下载全部 Artifact
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           path: assets
           merge-multiple: true
