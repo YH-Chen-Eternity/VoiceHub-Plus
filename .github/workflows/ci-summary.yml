@@ -34,7 +34,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: 汇总检查结果并评论
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
